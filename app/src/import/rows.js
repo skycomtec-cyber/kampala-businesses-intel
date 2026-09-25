@@ -82,47 +82,85 @@ export function resolveLocation(app, value) {
     .map((segment) => segment.trim())
     .filter(Boolean)
 
-  // Walk from the root of whatever suffix was given. Dropping leading segments
-  // is what lets "Kampala/Nakawa Division" work without the operator repeating
-  // the country every row.
+  // Walk the segments down the tree, allowing the chain to begin at any node
+  // rather than only at a root. That is what lets "Kampala/Nakawa Division" work
+  // without the operator repeating the country on every row, and it is also the
+  // only way a path can be honoured once the tree has two "Kampala"s in it: a
+  // bare name is ambiguous, a path is not.
   const all = app.locations.list({ limit: 10000 }).items
   const byName = groupBy(all, (row) => row.name.toLowerCase())
   const bySlug = groupBy(all, (row) => row.slug)
 
-  for (let start = 0; start < segments.length; start += 1) {
-    const chain = segments.slice(start)
-    let parentId = null
-    let node = null
-    for (const segment of chain) {
-      const key = segment.toLowerCase()
-      const candidates = (byName.get(key) ?? []).filter((row) => row.parentId === parentId)
-      const bySegmentSlug = (bySlug.get(slugify(segment)) ?? []).filter(
-        (row) => row.parentId === parentId,
-      )
-      const matches = candidates.length > 0 ? candidates : bySegmentSlug
-      if (matches.length !== 1) break
-      node = matches[0]
-      parentId = node.id
-    }
-    if (node) return node
+  const matchesIn = (index, segment, parentId) => {
+    const named = (byName.get(segment.toLowerCase()) ?? []).filter(
+      (row) => row.parentId === parentId,
+    )
+    if (named.length > 0) return named
+    return (bySlug.get(slugify(segment)) ?? []).filter((row) => row.parentId === parentId)
+  }
+  const headsFor = (segment) => {
+    const named = byName.get(segment.toLowerCase()) ?? []
+    return named.length > 0 ? named : (bySlug.get(slugify(segment)) ?? [])
   }
 
-  // A bare name that is unique anywhere in the tree is unambiguous enough.
-  const loose = byName.get(segments[segments.length - 1].toLowerCase()) ?? []
-  if (loose.length === 1) return loose[0]
+  // The attempt that got furthest, kept so a rejected row can say where the
+  // operator was trying to put the place rather than only that it is missing.
+  let best = null
+  const complete = []
 
-  if (loose.length > 1) {
+  for (let start = 0; start < segments.length; start += 1) {
+    const chain = segments.slice(start)
+    for (const head of headsFor(chain[0])) {
+      let node = head
+      let resolved = 1
+      for (let index = 1; index < chain.length; index += 1) {
+        const matches = matchesIn(index, chain[index], node.id)
+        if (matches.length !== 1) {
+          if (
+            !best ||
+            resolved > best.resolved ||
+            (resolved === best.resolved && start > best.start)
+          ) {
+            best = { resolved, start, node, missingName: chain[index] }
+          }
+          break
+        }
+        node = matches[0]
+        resolved += 1
+      }
+      if (resolved === chain.length) complete.push(node)
+    }
+  }
+
+  // The same node is reached by several of the attempts above, since every
+  // suffix of "Kampala/Nakawa Division" walks down to the same place. Deduplicated
+  // by id, that is one answer rather than five.
+  const distinct = [...new Map(complete.map((row) => [row.id, row])).values()]
+  if (distinct.length === 1) return distinct[0]
+
+  if (distinct.length > 1) {
     throw new ValidationError(
-      `"${raw}" matches ${loose.length} locations (${loose
-        .map((row) => row.name)
-        .join(', ')}). Give the path, e.g. "Kampala/Nakawa Division".`,
+      `"${raw}" matches ${distinct.length} locations (${distinct
+        .map((row) => row.pathNames)
+        .join('; ')}). Give the path, e.g. "Kampala/Nakawa Division".`,
       { field: 'location' },
     )
   }
+
   throw new ValidationError(
-    `"${raw}" is not a location in the reference data. Add it with the admin api first, ` +
-      'or check the spelling against GET /api/v1/locations.',
-    { field: 'location' },
+    `"${raw}" is not a location in the reference data. It is listed under ` +
+      '"unresolved" in the import result, which can be sent straight to ' +
+      'POST /api/v1/admin/reference/locations/bulk.',
+    {
+      field: 'location',
+      reference: {
+        type: 'location',
+        value: raw,
+        name: best?.missingName ?? segments[segments.length - 1],
+        parentId: best?.node?.id ?? null,
+        parentPath: best?.node?.pathNames ?? null,
+      },
+    },
   )
 }
 
@@ -153,18 +191,18 @@ export function resolveCategory(app, value) {
   if (segments.length > 1) {
     const path = segments.map(slugify).join('/')
     const byPath = all.find((row) => row.pathSlugs === path)
-    if (byPath) return byPath
+    if (byPath) return requireLeaf(app, byPath, raw)
   }
 
   const exactPath = all.find((row) => row.pathSlugs === slugify(raw))
-  if (exactPath) return exactPath
+  if (exactPath) return requireLeaf(app, exactPath, raw)
 
   const last = segments[segments.length - 1].toLowerCase()
   const byName = all.filter((row) => row.name.toLowerCase() === last)
-  if (byName.length === 1) return byName[0]
+  if (byName.length === 1) return requireLeaf(app, byName[0], raw)
 
   const bySlug = all.filter((row) => row.slug === slugify(segments[segments.length - 1]))
-  if (bySlug.length === 1) return bySlug[0]
+  if (bySlug.length === 1) return requireLeaf(app, bySlug[0], raw)
 
   if (byName.length > 1) {
     throw new ValidationError(
@@ -174,10 +212,58 @@ export function resolveCategory(app, value) {
       { field: 'category' },
     )
   }
+
+  // The best guess at where the operator was heading, so the rejection says
+  // which parent the new category belongs under rather than only its name.
+  const parentPath = segments.slice(0, -1).map(slugify).join('/')
+  const parent = parentPath
+    ? all.find((row) => row.pathSlugs === parentPath) ?? null
+    : null
+
   throw new ValidationError(
-    `"${raw}" is not a category in the reference data. Check it against GET /api/v1/categories, ` +
-      'or add it with the admin api first.',
-    { field: 'category' },
+    `"${raw}" is not a category in the reference data. It is listed under ` +
+      '"unresolved" in the import result, which can be sent straight to ' +
+      'POST /api/v1/admin/reference/categories/bulk.',
+    {
+      field: 'category',
+      reference: {
+        type: 'category',
+        value: raw,
+        name: segments[segments.length - 1],
+        parentId: parent?.id ?? null,
+        parentPath: parent?.pathSlugs ?? null,
+      },
+    },
+  )
+}
+
+/**
+ * A business belongs in a leaf.
+ *
+ * A listing filed against a category that still has children is counted in the
+ * supply rollup for that node and for its parent, so "barbering" and "beauty and
+ * personal care" would both gain one business from a single shop, and the gap
+ * engine would read two trades where there is one. Rejecting the row keeps the
+ * tree honest; adding the missing child is one call.
+ */
+function requireLeaf(app, category, raw) {
+  if (app.categories.children(category.id).length === 0) return category
+  const children = app.categories.children(category.id).map((row) => row.name).join(', ')
+  throw new ValidationError(
+    `"${raw}" resolves to "${category.pathSlugs}", which has child categories (${children}). ` +
+      'A business has to be filed under a leaf, e.g. ' +
+      `"${category.pathSlugs}/${children.split(', ')[0].toLowerCase().replace(/[^a-z0-9]+/g, '-')}".`,
+    {
+      field: 'category',
+      reference: {
+        type: 'category_branch',
+        value: raw,
+        name: null,
+        parentId: category.id,
+        parentPath: category.pathSlugs,
+        children,
+      },
+    },
   )
 }
 

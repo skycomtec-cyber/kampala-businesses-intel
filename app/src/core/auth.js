@@ -27,6 +27,11 @@ export const CAPABILITIES = Object.freeze({
     'analytics:read', 'lab:read', 'lab:write',
     'user:read', 'user:write', 'import:read', 'import:write',
     'opportunity:read', 'opportunity:write',
+    // Extending the reference trees is what makes a rejected import row
+    // fixable, so it travels with import:write rather than sitting behind
+    // user:write. The trees are shared vocabulary: a category or division added
+    // here changes what every other role sees in search and every count.
+    'reference:write',
   ],
   editor: [
     'business:read', 'business:write', 'business:verify',
@@ -34,6 +39,7 @@ export const CAPABILITIES = Object.freeze({
     'analytics:read', 'lab:read',
     'import:read', 'import:write',
     'opportunity:read',
+    'reference:write',
   ],
   analyst: [
     'business:read', 'request:read',

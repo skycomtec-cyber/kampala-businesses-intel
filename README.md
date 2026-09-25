@@ -142,7 +142,7 @@ platform's own conservative default, so a three-column file still imports.
 | `description`, `address` | Free text. |
 | `latitude`, `longitude` | Decimal degrees. |
 | `phone`, `whatsapp`, `email`, `website`, `facebook` | Contact points, normalised on the way in. A phone number typed as `0772 111 222` and as `+256772111222` is the same number. |
-| `services`, `skills` | Separated by `,`, `;` or `\|`. Put the cell in quotes if a name itself contains a comma. |
+| `services`, `skills` | Separated by `,`, `;` or `\|`. A name that itself contains a comma has to use a semicolon or a pipe: splitting happens after the cell is read, so quoting does not protect it. |
 | `founded_year` | 1800 to 2100. |
 | `status`, `verification_state`, `capability_level` | Omit these and the listing arrives as a draft awaiting verification. Setting `status=active` does not make it public while it is unverified. |
 | `source` | Recorded on the listing, so you can tell which sheet it came from. |
@@ -155,10 +155,14 @@ so a file saved by Excel reads correctly.
 ### What it will not do
 
 **It does not invent anything.** A row whose category or location cannot be resolved is reported, not
-placed somewhere plausible. Add the location or category through the admin API first, then import
-again. This matters more than it sounds: the gap engine publishes conclusions about which markets
-are underserved, and a listing quietly filed under the wrong division corrupts every number computed
-from it.
+placed somewhere plausible, and a row filed under a category that still has children is reported too.
+This matters more than it sounds: the gap engine publishes conclusions about which markets are
+underserved, and a listing quietly filed under the wrong division, or counted in two trades at once,
+corrupts every number computed from it.
+
+**It does not guess what kind of place a name is.** "Kireka" could be a subcounty, a ward or a shop.
+Every count downstream is grouped by the kind, so the importer says the name and the parent it was
+headed for and leaves the kind to a person. See [Fixing what a file gets wrong](#fixing-what-a-file-gets-wrong).
 
 **It does not publish what it collects.** Imported contact points are recorded as private, because an
 operator typing a number off a shopfront has not verified that the shop wants it published. A listing
@@ -168,6 +172,52 @@ becomes public when somebody makes that decision, not when a spreadsheet lands.
 existing listing on a contact point, or, if it has no contact details at all, on the same name in the
 same location. Everything else is a separate business, because two real traders can share a name.
 
+### Fixing what a file gets wrong
+
+A survey of an area nobody has mapped fails on a handful of places, not four hundred different ones, so
+the report groups them:
+
+```json
+"unresolved": [
+  {
+    "type": "location",
+    "value": "Kampala/Nakawa Division/Kireka",
+    "name": "Kireka",
+    "parentId": "...",
+    "parentPath": "Uganda / Central Region / Kampala District / Kampala / Nakawa Division",
+    "lines": [2, 3]
+  },
+  {
+    "type": "category_branch",
+    "value": "services/beauty-and-personal-care",
+    "parentId": "...",
+    "children": "Barbering, Hairdressing, Nail And Spa",
+    "lines": [4]
+  }
+]
+```
+
+`location` and `category` entries can be posted straight to the bulk reference routes once you have
+supplied the `kind`, which is the one field the importer refused to decide:
+
+```bash
+curl -sS -X POST http://127.0.0.1:4310/api/v1/admin/reference/locations/bulk \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"locations":[{"name":"Kireka","kind":"subcounty","parentId":"..."}]}'
+# {"counts":{"created":1,"skipped":0,"failed":0}, ...}
+```
+
+Then import the same file again: the rows that succeeded are reported as duplicates, so nothing is
+written twice. The batch is per entry rather than all-or-nothing, because sending the same report twice
+is the one failure this has to survive — an entry already present is a `skipped`, not an error, and an
+entry the hierarchy refuses, such as a ward under a division, is a `failed` that does not stop the rest.
+
+A `category_branch` is not something to create. The row named a branch rather than a trade, so it has to
+be re-filed under one of the children, or the missing child added under the branch.
+
+For a new machine, put the same entries in the seed data instead, so every install starts from the same
+reference trees.
+
 ### Reporting
 
 ```json
@@ -176,12 +226,15 @@ same location. Everything else is a separate business, because two real traders 
   "rows": [
     { "line": 2, "name": "Nakawa Hair Studio", "outcome": "created", "detail": "would create", "id": null },
     { "line": 17, "name": "Kololo Cycles", "outcome": "skipped", "detail": "phone matches \"Kololo Cycles\"", "id": "..." }
-  ]
+  ],
+  "unresolved": []
 }
 ```
 
 A row that fails is contained: it is reported and the rest of the file is still imported. A row is
 also atomic — a listing whose contact details turn out to be invalid is not left behind without them.
+`unresolved` is always present, sorted and deduplicated, so re-running a file produces an identical
+report and a reviewer can diff the two.
 
 ### Over HTTP
 
@@ -258,6 +311,10 @@ API version is deployed to know whether the process is alive.
 | `POST`/`DELETE` | `/api/v1/admin/businesses/:id/skills[/:skillId]` | `business:write` |
 | `GET` | `/api/v1/admin/imports/businesses/schema` | `import:read` |
 | `POST` | `/api/v1/admin/imports/businesses` | `import:write` |
+| `POST` | `/api/v1/admin/reference/locations` | `reference:write` |
+| `POST` | `/api/v1/admin/reference/locations/bulk` | `reference:write` |
+| `POST` | `/api/v1/admin/reference/categories` | `reference:write` |
+| `POST` | `/api/v1/admin/reference/categories/bulk` | `reference:write` |
 
 Roles, from `GET /api/v1/auth/roles`:
 
@@ -417,7 +474,7 @@ print(created.json()["data"]["slug"])
 │   │   ├── api/              plugins, routes, response envelope
 │   │   └── server.js         the process
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin, import
-│   ├── test/                 67 tests, no network, temporary folders only
+│   ├── test/                 74 tests, no network, temporary folders only
 │   └── web/index.html        the status page served at /
 ├── install.js                Pinokio: dependencies, migrations, reference data, tests
 ├── start.js                  Pinokio: maintenance, then the server
@@ -438,7 +495,7 @@ cd app
 npm test
 ```
 
-67 tests, no network access, each against its own temporary database. The API tests mount the real
+74 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the response envelope, the k-anonymity floor, private contact

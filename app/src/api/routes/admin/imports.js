@@ -35,11 +35,16 @@ export default async function adminImportRoutes(fastify, { app }) {
             'services/beauty-and-personal-care/barbering.',
           'Location accepts a full path, a trailing part of one (Kampala/Nakawa Division), ' +
             'a name that is unique in the reference data, or an id.',
-          'Services and skills are separated by commas, semicolons or pipes, and are split ' +
-            'inside quotes so a comma inside a name is not a separator.',
+          'Services and skills are separated by commas, semicolons or pipes. A name that ' +
+            'itself contains a comma must be written with a semicolon or a pipe instead, ' +
+            'because splitting happens after the cell is read.',
           'Phone numbers are normalised, so 0772 111 222 and +256772111222 match.',
           'A row is skipped when it matches an existing listing on a contact point, or, if it ' +
             'has no contact details, on the same name in the same location.',
+          'A row is rejected when its category or location is not in the reference data, or ' +
+            'when the category is a branch rather than a leaf. Those are collected into ' +
+            '"unresolved" in the response, with the parent each one belongs under, and can ' +
+            'be posted to /admin/reference/locations/bulk or /admin/reference/categories/bulk.',
         ],
       }),
   )
@@ -54,9 +59,9 @@ export default async function adminImportRoutes(fastify, { app }) {
       const { csv, dryRun = true } = request.body
       const sourceId = toText(request.body.sourceId, { maxLength: 120 }) ?? 'import:csv'
 
-      const { summary, rows } = importBusinessesFromCsv(app, csv, { dryRun, sourceId })
+      const { summary, rows, unresolved } = importBusinessesFromCsv(app, csv, { dryRun, sourceId })
 
-      return single({ summary, rows }, { dryRun, sourceId })
+      return single({ summary, rows, unresolved }, { dryRun, sourceId })
     },
   )
 }

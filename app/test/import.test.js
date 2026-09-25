@@ -75,6 +75,25 @@ function csvFile(rows, columns = COLUMNS) {
   return lines.join('\n') + '\n'
 }
 
+/**
+ * Lookups by path rather than by slug.
+ *
+ * `findBySlug` only finds a node whose parent is the given one, and defaults to
+ * no parent at all, so asking it for "barbering" returns nothing. Tests want the
+ * node a spreadsheet would name, which is the whole path.
+ */
+function categoryAt(app, pathSlugs) {
+  const row = app.categories.all().find((entry) => entry.pathSlugs === pathSlugs)
+  assert.ok(row, `no category at ${pathSlugs}`)
+  return row
+}
+
+function locationNamed(app, name) {
+  const row = app.locations.list({ limit: 1000 }).items.find((entry) => entry.name === name)
+  assert.ok(row, `no location named ${name}`)
+  return row
+}
+
 test('the csv reader handles what spreadsheets actually contain', () => {
   const source =
     '﻿name,note\r\n' +
@@ -189,6 +208,145 @@ test('an unresolvable location fails the row instead of picking one', (t) => {
   assert.equal(summary.failed, 1)
   assert.equal(summary.created, 0)
   assert.equal(ctx.app.businesses.countActive(), before)
+})
+
+test('a path that only partly resolves is refused, not truncated', (t) => {
+  const ctx = freshApp()
+  t.after(() => ctx.cleanup())
+
+  // "Uganda" is a real place, and "Atlantis" is not. Matching the part that
+  // exists would file the listing in the whole country and read as a Kampala
+  // supply signal in every rollup, so a partial path has to fail like any other
+  // unresolved location.
+  assert.throws(
+    () => resolveLocation(ctx.app, 'Uganda/Atlantis'),
+    /is not a location in the reference data/,
+  )
+  assert.throws(
+    () => resolveLocation(ctx.app, 'Kampala/Nakawa Division/Atlantis/Nested'),
+    /is not a location in the reference data/,
+  )
+
+  // The full path still works, which is what makes the refusal above meaningful
+  // rather than a general inability to read a path.
+  assert.equal(
+    resolveLocation(ctx.app, 'Kampala/Nakawa Division').name,
+    'Nakawa Division',
+  )
+})
+
+test('a business has to be filed under a leaf category', (t) => {
+  const ctx = freshApp()
+  t.after(() => ctx.cleanup())
+
+  const branch = categoryAt(ctx.app, 'services/beauty-and-personal-care')
+
+  // A listing on a branch is counted in the rollup for that branch and for every
+  // ancestor, so one salon would read as supply in two trades at once.
+  const { summary, rows, unresolved } = importBusinessesFromCsv(
+    ctx.app,
+    csvFile([`Nakawa Hair Studio,services/beauty-and-personal-care,Kampala/Nakawa Division,0772111222`]),
+  )
+
+  assert.equal(summary.failed, 1)
+  assert.match(rows[0].detail, /has child categories/)
+  assert.equal(unresolved[0].type, 'category_branch')
+  assert.equal(unresolved[0].parentId, branch.id)
+
+  // And the same row passes once it names the leaf, which is the point of
+  // reporting the branch rather than refusing the file.
+  const fixed = importBusinessesFromCsv(
+    ctx.app,
+    csvFile([`Nakawa Hair Studio,${BARBERING},Kampala/Nakawa Division,0772111222`]),
+  )
+  assert.equal(fixed.summary.created, 1)
+})
+
+test('missing places are grouped into one report instead of one per row', (t) => {
+  const ctx = freshApp()
+  t.after(() => ctx.cleanup())
+
+  // Four rows, two unknown wards, one of them named three times. A field survey
+  // of an area nobody has mapped fails on a handful of places, not four hundred
+  // different ones, and the operator should have to add two.
+  const file = csvFile([
+    `Nakawa Kiosk,${BARBERING},Kampala/Nakawa Division/Nakawa Central,0772 111 222`,
+    `Nakawa Pharmacy,${BARBERING},Kampala/Nakawa Division/Nakawa Central,0772 333 444`,
+    `Kireka Kiosk,${BARBERING},Kampala/Nakawa Division/Kireka,0772 555 666`,
+    `Nakawa Kiosk Two,${BARBERING},Kampala/Nakawa Division/Nakawa Central,0772 777 888`,
+  ])
+
+  const { summary, unresolved } = importBusinessesFromCsv(ctx.app, file)
+
+  assert.equal(summary.failed, 4)
+  assert.equal(unresolved.length, 2, 'two distinct places, not four rows')
+
+  const central = unresolved.find((entry) => entry.name === 'Nakawa Central')
+  assert.ok(central, 'the ward is named, not the first segment of the path')
+  assert.deepEqual(central.lines, [2, 3, 5], 'every line that wanted it is listed')
+  assert.equal(central.parentPath, 'Uganda / Central Region / Kampala District / Kampala / Nakawa Division')
+
+  const kireka = unresolved.find((entry) => entry.name === 'Kireka')
+  assert.deepEqual(kireka.lines, [4])
+
+  // The digest is a pure function of the file, so re-running it produces the
+  // same report and a reviewer can diff the two.
+  const again = importBusinessesFromCsv(ctx.app, file)
+  assert.deepEqual(again.unresolved, unresolved)
+})
+
+test('an unknown category is reported with the parent it belongs under', (t) => {
+  const ctx = freshApp()
+  t.after(() => ctx.cleanup())
+
+  const { unresolved } = importBusinessesFromCsv(
+    ctx.app,
+    csvFile([
+      `Nakawa Braider,goods-and-products/fashion-and-textiles/hair-braiding,Kampala/Nakawa Division,0772111222`,
+    ]),
+  )
+
+  const entry = unresolved[0]
+  assert.equal(entry.type, 'category')
+  assert.equal(entry.name, 'hair-braiding')
+  assert.equal(entry.parentPath, 'goods-and-products/fashion-and-textiles')
+  assert.equal(entry.parentId, categoryAt(ctx.app, 'goods-and-products/fashion-and-textiles').id)
+})
+
+test('the missing places from a report can be added and the file re-imported', (t) => {
+  const ctx = freshApp()
+  t.after(() => ctx.cleanup())
+
+  const file = csvFile([
+    `Nakawa Kiosk,${BARBERING},Kampala/Nakawa Division/Nakawa Central,0772 111 222`,
+    `Kireka Kiosk,${BARBERING},Kampala/Nakawa Division/Kireka,0772 555 666`,
+  ])
+
+  const first = importBusinessesFromCsv(ctx.app, file)
+  assert.equal(first.summary.created, 0)
+
+  // What the operator does with the report: state the kind of place, which is
+  // the one thing the importer refused to guess. A subcounty is what can sit
+  // under a division here; a ward would need one of those first.
+  const division = locationNamed(ctx.app, 'Nakawa Division')
+  for (const entry of first.unresolved) {
+    ctx.app.locations.create({
+      name: entry.name,
+      kind: 'subcounty',
+      parentId: division.id,
+      sourceId: 'field-survey-2026-09',
+    })
+  }
+
+  const second = importBusinessesFromCsv(ctx.app, file)
+  assert.equal(second.summary.created, 2, 'the same rows now resolve')
+  assert.equal(second.unresolved.length, 0)
+
+  // And the ordinary replay guarantee is unchanged by any of this.
+  const third = importBusinessesFromCsv(ctx.app, file)
+  assert.equal(third.summary.created, 0)
+  assert.equal(third.summary.skipped, 2)
+  assert.equal(ctx.app.businesses.all().length, 2)
 })
 
 test('a dry run reports what it would do and writes nothing', (t) => {
@@ -601,6 +759,227 @@ test('an import over the api needs the import capability', async (t) => {
   })
   assert.equal(schema.statusCode, 200)
   assert.deepEqual(schema.json().data.required, ['name', 'category', 'location'])
+})
+
+test('a rejected import can be fixed over the api and re-run', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kip-import-loop-'))
+  const config = loadConfig({ dataDir: dir, databaseFile: path.join(dir, 'loop.db') })
+  const app = openApp({ config })
+  seedReferenceData(app, { config })
+  const server = await buildApi({ app, config, logger: false, web: false })
+  t.after(async () => {
+    await server.close()
+    app.close()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  app.users.create({ email: 'editor@kampala.ug', password: PASSWORD, displayName: 'Ed', role: 'editor' })
+  app.users.create({ email: 'analyst@kampala.ug', password: PASSWORD, displayName: 'An', role: 'analyst' })
+  const tokenFor = async (email) => {
+    const login = await server.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email, password: PASSWORD },
+    })
+    return { authorization: `Bearer ${login.json().data.token}` }
+  }
+  const editor = await tokenFor('editor@kampala.ug')
+  const analyst = await tokenFor('analyst@kampala.ug')
+
+  // A survey of one division, written the way somebody writes it on paper.
+  const file = csvFile([
+    `Nakawa Kiosk,${BARBERING},Kampala/Nakawa Division/Kireka,0772 111 222`,
+    `Kireka Salon,${BARBERING},Kampala/Nakawa Division/Kireka,0772 333 444`,
+    `Nakawa Chemist,${BARBERING},Kampala/Nakawa Division/Kasaato,0772 555 666`,
+  ])
+
+  const first = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/imports/businesses',
+    headers: editor,
+    payload: { csv: file },
+  })
+  assert.equal(first.statusCode, 200, first.body)
+  const report = first.json().data
+  assert.equal(report.summary.failed, 3, 'nothing was placed, because nothing resolved')
+  assert.equal(report.unresolved.length, 2, 'two places, not three rows')
+
+  const division = locationNamed(app, 'Nakawa Division')
+  const missing = report.unresolved.map((entry) => ({
+    name: entry.name,
+    // The one thing the importer will not decide. A ward under a division is
+    // refused by the hierarchy, so the operator states the kind and finds out
+    // immediately if it does not fit.
+    kind: 'subcounty',
+    parentId: entry.parentId ?? division.id,
+  }))
+  assert.deepEqual(missing.map((entry) => entry.name), ['Kasaato', 'Kireka'])
+  for (const entry of missing) {
+    assert.equal(entry.parentId, division.id, 'both belong to the division the file named')
+  }
+
+  // Adding reference data is a separate capability from importing businesses.
+  const refused = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/reference/locations/bulk',
+    headers: analyst,
+    payload: { locations: missing },
+  })
+  assert.equal(refused.statusCode, 403, 'an analyst may not change the reference trees')
+
+  const anonymous = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/reference/locations/bulk',
+    payload: { locations: missing },
+  })
+  assert.equal(anonymous.statusCode, 401)
+
+  const added = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/reference/locations/bulk',
+    headers: editor,
+    payload: { locations: missing },
+  })
+  assert.equal(added.statusCode, 201, added.body)
+  assert.deepEqual(added.json().data.counts, { created: 2, skipped: 0, failed: 0 })
+
+  // Sending the same report again is the ordinary case, not an error: the
+  // operator pressed the button twice, or a retry landed.
+  const again = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/reference/locations/bulk',
+    headers: editor,
+    payload: { locations: missing },
+  })
+  assert.equal(again.statusCode, 201)
+  assert.deepEqual(again.json().data.counts, { created: 0, skipped: 2, failed: 0 })
+
+  // A place that cannot sit where it was sent is reported on its own, and the
+  // rest of the batch still lands. A ward under a division is refused by the
+  // hierarchy, which is the model doing its job: a Kampala ward belongs under a
+  // subcounty, and the operator has to say which.
+  const mixed = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/reference/locations/bulk',
+    headers: editor,
+    payload: {
+      locations: [
+        { name: 'Ntinda Ward', kind: 'ward', parentId: division.id },
+        { name: 'Ntinda', kind: 'subcounty', parentId: division.id },
+      ],
+    },
+  })
+  assert.equal(mixed.statusCode, 201, mixed.body)
+  assert.deepEqual(mixed.json().data.counts, { created: 1, skipped: 0, failed: 1 })
+  assert.match(mixed.json().data.failed[0].reason, /cannot be nested inside a "division"/)
+  assert.equal(locationNamed(app, 'Ntinda').kind, 'subcounty')
+
+  // Re-sending an entry that already exists under the same parent is a skip
+  // rather than a failure, because the same report sent twice is the expected
+  // case and a half-applied batch has to be retryable.
+  const resend = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/reference/locations/bulk',
+    headers: editor,
+    payload: { locations: [{ name: 'ntinda', kind: 'subcounty', parentId: division.id }] },
+  })
+  assert.deepEqual(resend.json().data.counts, { created: 0, skipped: 1, failed: 0 })
+
+  // An unknown kind is refused by the schema rather than stored as a typo.
+  const badKind = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/reference/locations',
+    headers: editor,
+    payload: { name: 'Somewhere', kind: 'province' },
+  })
+  assert.equal(badKind.statusCode, 400, badKind.body)
+
+  // And now the file imports, then replays as duplicates.
+  const second = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/imports/businesses',
+    headers: editor,
+    payload: { csv: file, dryRun: false },
+  })
+  assert.equal(second.statusCode, 200, second.body)
+  const appliedReport = second.json().data
+  assert.equal(appliedReport.summary.created, 3)
+  assert.equal(appliedReport.unresolved.length, 0)
+
+  const third = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/imports/businesses',
+    headers: editor,
+    payload: { csv: file, dryRun: false },
+  })
+  assert.equal(third.json().data.summary.created, 0)
+  assert.equal(third.json().data.summary.skipped, 3)
+  assert.equal(app.businesses.all().length, 3)
+
+  // The listings landed under the places the operator added, which is the whole
+  // point of the loop: the report said where, and the tree now says so too.
+  const salon = app.businesses.findBySlug('kireka-salon')
+  assert.equal(salon.primaryLocationId, locationNamed(app, 'Kireka').id)
+})
+
+test('a category branch can be reported and the missing child added', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kip-branch-'))
+  const config = loadConfig({ dataDir: dir, databaseFile: path.join(dir, 'branch.db') })
+  const app = openApp({ config })
+  seedReferenceData(app, { config })
+  const server = await buildApi({ app, config, logger: false, web: false })
+  t.after(async () => {
+    await server.close()
+    app.close()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  app.users.create({ email: 'editor@kampala.ug', password: PASSWORD, displayName: 'Ed', role: 'editor' })
+  const login = await server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    payload: { email: 'editor@kampala.ug', password: PASSWORD },
+  })
+  const editor = { authorization: `Bearer ${login.json().data.token}` }
+
+  const report = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/imports/businesses',
+    headers: editor,
+    payload: {
+      csv: csvFile([
+        `Nakawa Braider,services/beauty-and-personal-care,Kampala/Nakawa Division,0772111222`,
+      ]),
+    },
+  })
+  const body = report.json().data
+  assert.equal(body.summary.failed, 1)
+  assert.equal(body.unresolved[0].type, 'category_branch')
+  assert.match(body.rows[0].detail, /has child categories/)
+
+  // A branch is not something to create: the operator was told to name a leaf.
+  // Adding a child under the branch is the fix, and then the same file works.
+  const branch = categoryAt(app, 'services/beauty-and-personal-care')
+  const added = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/reference/categories/bulk',
+    headers: editor,
+    payload: { categories: [{ name: 'Hair Braiding', parentId: branch.id }] },
+  })
+  assert.equal(added.statusCode, 201, added.body)
+  assert.deepEqual(added.json().data.counts, { created: 1, skipped: 0, failed: 0 })
+
+  const slug = added.json().data.created[0].category.pathSlugs
+  const reimported = await server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/imports/businesses',
+    headers: editor,
+    payload: {
+      csv: csvFile([`Nakawa Braider,${slug},Kampala/Nakawa Division,0772111222`]),
+      dryRun: false,
+    },
+  })
+  assert.equal(reimported.json().data.summary.created, 1, reimported.body)
 })
 
 test('the import cli reports a dry run and exits non-zero when rows fail', (t) => {

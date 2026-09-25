@@ -92,7 +92,7 @@ try {
   }
 
   const marker = { created: 'created ', skipped: 'skipped ', failed: 'FAILED ' }
-  const { summary, rows } = importBusinessesFromCsv(app, text, {
+  const { summary, rows, unresolved } = importBusinessesFromCsv(app, text, {
     dryRun: options.dryRun,
     sourceId: options.sourceId,
     onRow: (row) => {
@@ -109,6 +109,33 @@ try {
     `${summary.total} row(s): ${summary.created} ${verb}, ${summary.skipped} skipped, ` +
       `${summary.failed} failed.`,
   )
+
+  if (unresolved.length > 0) {
+    log('')
+    log(`The reference data is missing ${unresolved.length} entries this file needs:`)
+    for (const entry of unresolved) {
+      const lines = entry.lines.join(', ')
+      if (entry.type === 'category_branch') {
+        log(
+          `  category  "${entry.value}" is a branch, not a leaf. Its children are ` +
+            `${entry.children}. Re-file the row under one of them.  (line(s) ${lines})`,
+        )
+        continue
+      }
+      const where = entry.parentPath ? ` under "${entry.parentPath}"` : ' at the top level'
+      log(`  ${entry.type.padEnd(8)} "${entry.name}"${where}  (line(s) ${lines})`)
+    }
+    log('')
+    log(
+      'The importer will not guess what kind of place these are, because the kind is what ' +
+        'every count downstream is grouped by. Add them in one of two ways:',
+    )
+    log('  - the api: POST the "unresolved" block of the import response to')
+    log('      /api/v1/admin/reference/locations/bulk (adding "kind" to each entry), then')
+    log('      import the file again.')
+    log('  - the seed file: add the entries to src/seed/ and run "npm run seed" on a fresh')
+    log('    database, so a new machine gets the same reference data.')
+  }
 
   const failures = rows.filter((row) => row.outcome === 'failed')
   if (failures.length > 0) {

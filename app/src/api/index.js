@@ -17,6 +17,7 @@ import marketplaceRoutes from './routes/marketplace.js'
 import insightRoutes from './routes/insights.js'
 import adminBusinessRoutes from './routes/admin/businesses.js'
 import adminImportRoutes from './routes/admin/imports.js'
+import adminReferenceRoutes from './routes/admin/reference.js'
 
 /**
  * The api layer's assembly.
@@ -97,8 +98,9 @@ export async function buildApi({ app, config, logger = true, web = true }) {
       await api.register(authRoutes, { config, app })
       await api.register(marketplaceRoutes, { app })
       await api.register(insightRoutes, { config, app })
-      await api.register(adminBusinessRoutes, { app })
-      await api.register(adminImportRoutes, { app })
+  await api.register(adminBusinessRoutes, { app })
+  await api.register(adminImportRoutes, { app })
+  await api.register(adminReferenceRoutes, { app })
     },
     { prefix: config.api.prefix },
   )

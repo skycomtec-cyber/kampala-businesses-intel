@@ -67,6 +67,13 @@ export function importBusinessesFromCsv(app, text, options = {}) {
   }
   const rows = []
 
+  // Distinct places and categories the file referred to that the reference data
+  // does not have, with every line that wanted them. A 400 row survey of an area
+  // nobody has mapped yet fails on a handful of wards, not 400 different ones,
+  // and the operator should be able to read that off the report and add them in
+  // one call rather than discovering the same gap four hundred times.
+  const unresolved = new Map()
+
   // Names and contacts already in the directory, so a file that is internally
   // consistent is deduplicated against itself as well as against what is stored.
   // Both are maps because a duplicate report has to name the listing it matched.
@@ -110,6 +117,9 @@ export function importBusinessesFromCsv(app, text, options = {}) {
         outcome.outcome = 'failed'
         outcome.detail = error.message
         summary.failed += 1
+        if (error.details?.reference) {
+          noteUnresolved(unresolved, error.details.reference, line)
+        }
       } else {
         // An unexpected failure is still contained to its row, but it is not
         // disguised as a data problem: the operator needs to know it is a bug.
@@ -123,7 +133,29 @@ export function importBusinessesFromCsv(app, text, options = {}) {
     onRow?.(outcome)
   }
 
-  return { summary, rows }
+  return { summary, rows, unresolved: listUnresolved(unresolved) }
+}
+
+/**
+ * Groups one failed reference by what was asked for, not by line.
+ *
+ * Kept sorted and deduplicated so re-running a file produces a byte-identical
+ * report, which is what makes the report diffable in a review.
+ */
+function noteUnresolved(unresolved, reference, line) {
+  const key = `${reference.type}:${slugify(reference.value)}:${reference.parentId ?? ''}`
+  const existing = unresolved.get(key)
+  if (existing) {
+    existing.lines.push(line)
+    return
+  }
+  unresolved.set(key, { ...reference, lines: [line] })
+}
+
+function listUnresolved(unresolved) {
+  return [...unresolved.values()].sort(
+    (a, b) => a.type.localeCompare(b.type) || a.value.localeCompare(b.value),
+  )
 }
 
 /**
@@ -204,10 +236,17 @@ function findDuplicate(app, { input, contacts, seenContacts, seenNames }) {
   }
 
   const key = nameKey(input.name, input.locationId)
-  if (seenNames.has(key)) {
-    return { business: seenNames.get(key), reason: 'the same name already appears in this file' }
-  }
   if (contacts.length === 0) {
+    // Checked only for a row with no contact details. Two unrelated shops can
+    // share a name on one road, so a name match must never override a contact
+    // point that says otherwise; it is only evidence when there is nothing else
+    // to go on.
+    if (seenNames.has(key)) {
+      return {
+        business: seenNames.get(key),
+        reason: 'the same name already appears in this file, with no contact details to tell them apart',
+      }
+    }
     const existing = app.businesses.findByName(input.name, input.locationId)
     if (existing) {
       return {
