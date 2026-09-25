@@ -293,6 +293,84 @@ test('contact points are normalised and deduplicated', () => {
     assert.equal(app.businesses.findByContact({ value: '256772123456' }).id, business.id)
     assert.equal(app.businesses.findByContact({ value: '0772-123-456' }).id, business.id)
     assert.equal(app.businesses.findByContact({ value: '0700000000' }), null)
+
+    // A number filed as a WhatsApp contact is still the same business, so a
+    // phone-shaped lookup has to find it. This is the difference between an
+    // import merging a trader's two rows and writing them twice.
+    app.businesses.addContact(business.id, { kind: 'whatsapp', value: '0772 999 888' })
+    assert.equal(app.businesses.findByContact({ kind: 'whatsapp', value: '+256772999888' }).id, business.id)
+    assert.equal(
+      app.businesses.findByContact({ kind: 'phone', value: '0772 999 888' }).id,
+      business.id,
+    )
+
+    // A non-phone contact is matched on its own kind only, so a website and a
+    // phone that happen to share a string are not called the same business.
+    app.businesses.addContact(business.id, { kind: 'website', value: 'https://nakawa.ug' })
+    assert.equal(app.businesses.findByContact({ kind: 'website', value: 'nakawa.ug' }).id, business.id)
+    assert.equal(
+      app.businesses.findByContact({ kind: 'facebook', value: 'https://nakawa.ug' }),
+      null,
+      'a facebook contact is not a website contact',
+    )
+
+    // A value the platform would refuse to store is not a match, and must not
+    // throw out of a lookup.
+    assert.equal(app.businesses.findByContact({ kind: 'phone', value: 'not a number' }), null)
+  } finally {
+    cleanup()
+  }
+})
+
+test('two records are the same business when their contacts mean the same thing', () => {
+  const { app, cleanup } = freshApp()
+  try {
+    const category = app.categories.ensureRoots()[1]
+    const { city } = seedReference(app)
+
+    const first = app.businesses.create({
+      name: 'Nakawa Spares',
+      categoryId: category.id,
+      locationId: city.id,
+      status: 'active',
+    })
+    app.businesses.addContact(first.id, { kind: 'whatsapp', value: '0772 123 456' })
+    app.businesses.addContact(first.id, { kind: 'email', value: 'hello@nakawa.ug' })
+    app.businesses.addContact(first.id, { kind: 'website', value: 'https://nakawa.ug' })
+
+    const second = app.businesses.create({
+      name: 'Nakawa Spares',
+      categoryId: category.id,
+      locationId: city.id,
+      status: 'active',
+    })
+    // The same contacts, typed the way a second spreadsheet would type them.
+    app.businesses.addContact(second.id, { kind: 'phone', value: '+256772123456' })
+    app.businesses.addContact(second.id, { kind: 'email', value: 'Hello@Nakawa.UG' })
+    app.businesses.addContact(second.id, { kind: 'website', value: 'nakawa.ug' })
+
+    assert.ok(
+      app.businesses.looksLikeSameBusiness(
+        app.businesses.profile(first.id),
+        app.businesses.profile(second.id),
+      ),
+      'a whatsapp and a phone number with the same digits are the same business',
+    )
+
+    const unrelated = app.businesses.create({
+      name: 'Kololo Spares',
+      categoryId: category.id,
+      locationId: city.id,
+      status: 'active',
+    })
+    app.businesses.addContact(unrelated.id, { kind: 'phone', value: '0772 000 000' })
+    assert.equal(
+      app.businesses.looksLikeSameBusiness(
+        app.businesses.profile(first.id),
+        app.businesses.profile(unrelated.id),
+      ),
+      false,
+    )
   } finally {
     cleanup()
   }

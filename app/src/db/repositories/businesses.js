@@ -1,13 +1,15 @@
-import { newId, slugify, disambiguateSlug, normalisePhone, normaliseUrl } from '../../core/identifiers.js'
+import { newId, slugify, disambiguateSlug, normaliseUrl } from '../../core/identifiers.js'
 import {
   buildBusiness,
   buildContactPoint,
+  canonicalContactValue,
   contactPointsLikelySameBusiness,
   isPubliclyVisible,
   supplyWeight,
   assertBusinessStatus,
   assertVerificationState,
   assertProductCondition,
+  PHONE_KINDS,
 } from '../../core/business.js'
 import { assertCapabilityLevel } from '../../core/taxonomy.js'
 import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js'
@@ -65,6 +67,15 @@ export function createBusinessesRepository(db, deps = {}) {
   const selectBySlug = db.prepare(
     `SELECT ${BUSINESS_COLUMNS} FROM business b WHERE b.slug = ?`,
   )
+  // Name is compared case-insensitively inside one location, and only exactly.
+  // This is the fallback for a row that carries no contact details at all, so
+  // the bar has to be "the operator typed the same name for the same place".
+  // Fuzzy matching here would quietly merge two real neighbours.
+  const selectByName = db.prepare(
+    `SELECT ${BUSINESS_COLUMNS} FROM business b
+      WHERE b.primary_location_id = ? AND lower(b.name) = lower(?)
+      LIMIT 1`,
+  )
   const selectSlugExists = db.prepare(`SELECT 1 AS present FROM business WHERE slug = ?`)
   const selectAll = db.prepare(
     `SELECT ${BUSINESS_COLUMNS} FROM business b ORDER BY ${'b.created_at DESC'}`,
@@ -77,10 +88,10 @@ export function createBusinessesRepository(db, deps = {}) {
       WHERE b.status = 'active' AND b.verification_state <> 'rejected'
       ORDER BY b.name ASC`,
   )
-  const selectByPhone = db.prepare(
+  const selectByContact = db.prepare(
     `SELECT b.id, b.name, b.slug FROM business b
        JOIN contact_point cp ON cp.business_id = b.id
-      WHERE cp.kind = 'phone' AND cp.value = ?
+      WHERE cp.kind = @kind AND cp.value = @value
       LIMIT 1`,
   )
   const updateRow = db.prepare(
@@ -461,6 +472,16 @@ export function createBusinessesRepository(db, deps = {}) {
     },
 
     /**
+     * The same name in the same place, which is how a replayed spreadsheet is
+     * recognised when a row has no contact details to compare.
+     */
+    findByName(name, locationId) {
+      if (!name || !locationId) return null
+      const row = selectByName.get(locationId, name)
+      return row ? businessRow(row) : null
+    },
+
+    /**
      * Finds an existing business by any of its normalised contact points.
      *
      * This is the deduplication step for imports. Because contact values are
@@ -470,11 +491,21 @@ export function createBusinessesRepository(db, deps = {}) {
      * of just additive.
      */
     findByContact({ kind = 'phone', value }) {
-      const normalised =
-        kind === 'phone' || kind === 'whatsapp' ? normalisePhone(value) : value
-      if (!normalised) return null
-      const row = selectByPhone.get(normalised)
-      return row ? { id: row.id, name: row.name, slug: row.slug } : null
+      // The kind belongs in the query, not only in the normaliser: matching on
+      // value alone would report an unrelated contact as a duplicate whenever a
+      // phone number and a website happened to share a string.
+      const canonical = canonicalContactValue(kind, value)
+      if (!canonical) return null
+
+      // A WhatsApp number is the same business as the phone number with the same
+      // digits, and the two are stored under different kinds, so a phone-shaped
+      // lookup has to consider both.
+      const kinds = PHONE_KINDS.has(kind) ? ['phone', 'whatsapp'] : [kind]
+      for (const candidate of kinds) {
+        const row = selectByContact.get({ kind: candidate, value: canonical })
+        if (row) return { id: row.id, name: row.name, slug: row.slug }
+      }
+      return null
     },
 
     /** Two records describing the same business, judged on their contacts. */

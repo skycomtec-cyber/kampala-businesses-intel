@@ -190,12 +190,38 @@ export function buildContactPoint(input) {
   }
 }
 
+/** Contact kinds whose value is a phone number. */
+export const PHONE_KINDS = Object.freeze(new Set(['phone', 'whatsapp']))
+
 /** Two businesses at the same place with the same phone are the same business. */
 export function contactPointsLikelySameBusiness(a, b) {
   if (!a || !b) return false
+  // phone and whatsapp are the same identity: the same digits, stored under
+  // whichever kind the operator typed.
+  if (PHONE_KINDS.has(a.kind) && PHONE_KINDS.has(b.kind)) {
+    return normalisePhone(a.value) === normalisePhone(b.value)
+  }
   if (a.kind !== b.kind) return false
   if (a.kind === 'physical') return normaliseWhitespace(a.value) === normaliseWhitespace(b.value)
-  return a.value === b.value
+  if (a.kind === 'email') return a.value.toLowerCase() === b.value.toLowerCase()
+  return normaliseUrl(a.value) === normaliseUrl(b.value)
+}
+
+/**
+ * The value as it is stored, for looking a contact up.
+ *
+ * Returns null rather than throwing for a value the platform would refuse to
+ * store, because a duplicate check asks "is this the same business?", and an
+ * unusable value is simply not an answer to that question. Sharing
+ * buildContactPoint is what keeps a lookup and a write in agreement about what
+ * "the same" means.
+ */
+export function canonicalContactValue(kind, value) {
+  try {
+    return buildContactPoint({ kind, value }).value
+  } catch {
+    return null
+  }
 }
 
 export function capabilityWeight(level) {

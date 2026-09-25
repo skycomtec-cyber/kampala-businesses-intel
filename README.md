@@ -112,6 +112,91 @@ The insights routes only read the daily rollup, so without this the opportunity 
 `start.js` runs it before the port opens, because a launcher with no scheduler still needs the
 rollup to happen.
 
+## Importing businesses
+
+Indexing Kampala is a spreadsheet problem before it is a code problem. The importer takes a CSV and
+gives you back a report of what it would create, what it recognised as already in the directory, and
+what it could not make sense of, with the line number for every row it rejected.
+
+```bash
+npm run import -- businesses.csv --dry-run    # report only, writes nothing
+npm run import -- businesses.csv              # import
+npm run import -- businesses.csv --source field-survey-2026-09
+cat businesses.csv | npm run import -- -      # read from stdin
+```
+
+The exit status is `1` when any row failed, so a scheduled import fails loudly rather than importing
+the 96% of a sheet that happened to be valid. Importing the same file twice is safe: the second run
+creates nothing.
+
+### The columns
+
+`name`, `category` and `location` are required. Everything else is optional and takes the
+platform's own conservative default, so a three-column file still imports.
+
+| Column | Notes |
+| --- | --- |
+| `name` | 2 to 160 characters. Becomes the slug, disambiguated if needed. |
+| `category` | A path slug (`services/beauty-and-personal-care/barbering`), a name that is unique in the taxonomy, or an id. |
+| `location` | A full path, a trailing part of one (`Kampala/Nakawa Division`), a name that is unique in the reference data, or an id. |
+| `description`, `address` | Free text. |
+| `latitude`, `longitude` | Decimal degrees. |
+| `phone`, `whatsapp`, `email`, `website`, `facebook` | Contact points, normalised on the way in. A phone number typed as `0772 111 222` and as `+256772111222` is the same number. |
+| `services`, `skills` | Separated by `,`, `;` or `\|`. Put the cell in quotes if a name itself contains a comma. |
+| `founded_year` | 1800 to 2100. |
+| `status`, `verification_state`, `capability_level` | Omit these and the listing arrives as a draft awaiting verification. Setting `status=active` does not make it public while it is unverified. |
+| `source` | Recorded on the listing, so you can tell which sheet it came from. |
+
+Header names are matched loosely: `Phone Number`, `phone_number` and `phoneNumber` are the same
+column. A column the platform does not recognise is ignored rather than treated as an error. Quoted
+fields, embedded commas and newlines, CRLF line endings and a UTF-8 byte order mark are all handled,
+so a file saved by Excel reads correctly.
+
+### What it will not do
+
+**It does not invent anything.** A row whose category or location cannot be resolved is reported, not
+placed somewhere plausible. Add the location or category through the admin API first, then import
+again. This matters more than it sounds: the gap engine publishes conclusions about which markets
+are underserved, and a listing quietly filed under the wrong division corrupts every number computed
+from it.
+
+**It does not publish what it collects.** Imported contact points are recorded as private, because an
+operator typing a number off a shopfront has not verified that the shop wants it published. A listing
+becomes public when somebody makes that decision, not when a spreadsheet lands.
+
+**It does not merge businesses on a similar name.** A row is treated as a duplicate when it matches an
+existing listing on a contact point, or, if it has no contact details at all, on the same name in the
+same location. Everything else is a separate business, because two real traders can share a name.
+
+### Reporting
+
+```json
+{
+  "summary": { "total": 412, "created": 388, "updated": 0, "skipped": 21, "failed": 3, "dryRun": true },
+  "rows": [
+    { "line": 2, "name": "Nakawa Hair Studio", "outcome": "created", "detail": "would create", "id": null },
+    { "line": 17, "name": "Kololo Cycles", "outcome": "skipped", "detail": "phone matches \"Kololo Cycles\"", "id": "..." }
+  ]
+}
+```
+
+A row that fails is contained: it is reported and the rest of the file is still imported. A row is
+also atomic — a listing whose contact details turn out to be invalid is not left behind without them.
+
+### Over HTTP
+
+The same importer, behind the `import:write` capability. `dryRun` defaults to **true** here, so a
+payload nobody has read cannot create a hundred listings by accident.
+
+```bash
+curl -sS -X POST http://127.0.0.1:4310/api/v1/admin/imports/businesses \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "$(jq -Rn --rawfile csv businesses.csv '{csv: $csv}')"
+```
+
+`GET /api/v1/admin/imports/businesses/schema` returns the column contract as JSON, so a client does
+not have to parse this page.
+
 ## API
 
 Base URL `http://127.0.0.1:4310`. Every response uses the same envelope:
@@ -171,6 +256,8 @@ API version is deployed to know whether the process is alive.
 | `POST`/`PATCH`/`DELETE` | `/api/v1/admin/businesses/:id/products[/:productId]` | `business:write` |
 | `POST`/`PATCH`/`DELETE` | `/api/v1/admin/businesses/:id/contacts[/:contactId]` | `business:write` |
 | `POST`/`DELETE` | `/api/v1/admin/businesses/:id/skills[/:skillId]` | `business:write` |
+| `GET` | `/api/v1/admin/imports/businesses/schema` | `import:read` |
+| `POST` | `/api/v1/admin/imports/businesses` | `import:write` |
 
 Roles, from `GET /api/v1/auth/roles`:
 
@@ -326,10 +413,11 @@ print(created.json()["data"]["slug"])
 │   │   ├── core/             domain rules: auth, demand, privacy, identifiers, errors
 │   │   ├── db/               driver, migrations, repositories
 │   │   ├── seed/             idempotent reference import
+│   │   ├── import/           csv reader, row resolution, the importer itself
 │   │   ├── api/              plugins, routes, response envelope
 │   │   └── server.js         the process
-│   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin
-│   ├── test/                 41 tests, no network, temporary folders only
+│   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin, import
+│   ├── test/                 67 tests, no network, temporary folders only
 │   └── web/index.html        the status page served at /
 ├── install.js                Pinokio: dependencies, migrations, reference data, tests
 ├── start.js                  Pinokio: maintenance, then the server
@@ -350,12 +438,13 @@ cd app
 npm test
 ```
 
-41 tests, no network access, each against its own temporary database. The API tests mount the real
+67 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the response envelope, the k-anonymity floor, private contact
 points, the capability table, the rate limiter, that every documented filter actually filters, that
 every location level the data holds is filterable, and the rule that a bad sign-in cannot be used
-to find out which addresses exist. The CLI tests run `create-admin` as a real child process, since
-the interesting ways for it to fail — a launcher step that pipes nothing, a piped email with no
-password — are all about how it reads stdin.
+to find out which addresses exist. The CLI tests run `create-admin` and `import` as real child
+processes, since the interesting ways for them to fail — a launcher step that pipes nothing, a piped
+email with no password, an import whose sheet has one bad row in it — are all about how they read
+stdin and what they do with a file somebody else wrote.
