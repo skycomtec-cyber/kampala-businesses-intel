@@ -1,0 +1,1158 @@
+import { newId, slugify, disambiguateSlug, normalisePhone, normaliseUrl } from '../../core/identifiers.js'
+import {
+  buildBusiness,
+  buildContactPoint,
+  contactPointsLikelySameBusiness,
+  isPubliclyVisible,
+  supplyWeight,
+  assertBusinessStatus,
+  assertVerificationState,
+  assertProductCondition,
+} from '../../core/business.js'
+import { assertCapabilityLevel } from '../../core/taxonomy.js'
+import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js'
+import { camelizeRow, camelizeRows, nowIso, toSqlBool, fromSqlBool } from '../mapping.js'
+import { normalisePagination, where, likeParam, resolveOrder } from './common.js'
+
+/**
+ * Businesses and everything they offer.
+ *
+ * Two behaviours here are load-bearing for the rest of the platform:
+ *
+ *   1. Every write goes through core/business.js first, so no business can enter
+ *      the database without a name, a category, a valid location and an explicit
+ *      status. This layer trusts core; it does not re-validate.
+ *   2. Every write re-indexes the affected search documents in the same
+ *      transaction. The search index is not a background job that can fall
+ *      behind, because a directory whose search results lag behind its own edits
+ *      is a directory people stop trusting.
+ */
+
+const BUSINESS_COLUMNS = `
+  b.id, b.name, b.slug, b.description, b.category_id, b.primary_location_id,
+  b.status, b.verification_state, b.capability_level, b.website, b.founded_year,
+  b.source_id, b.is_open_source, b.created_at, b.updated_at, b.verified_at,
+  b.last_confirmed_at
+`
+
+const LIST_SORTS = Object.freeze({
+  newest: 'b.created_at DESC',
+  oldest: 'b.created_at ASC',
+  updated: 'b.updated_at DESC',
+  name: 'b.name ASC',
+  'name desc': 'b.name DESC',
+  status: 'b.status ASC',
+  verification: 'b.verification_state ASC',
+})
+
+export function createBusinessesRepository(db, deps = {}) {
+  const { searchIndex, skills, locations } = deps
+
+  const insert = db.prepare(
+    `INSERT INTO business (
+       id, name, slug, description, category_id, primary_location_id, status,
+       verification_state, capability_level, website, founded_year, source_id,
+       is_open_source
+     ) VALUES (
+       @id, @name, @slug, @description, @categoryId, @primaryLocationId, @status,
+       @verificationState, @capabilityLevel, @website, @foundedYear, @sourceId,
+       @isOpenSource
+     )`,
+  )
+  const selectById = db.prepare(
+    `SELECT ${BUSINESS_COLUMNS} FROM business b WHERE b.id = ?`,
+  )
+  const selectBySlug = db.prepare(
+    `SELECT ${BUSINESS_COLUMNS} FROM business b WHERE b.slug = ?`,
+  )
+  const selectSlugExists = db.prepare(`SELECT 1 AS present FROM business WHERE slug = ?`)
+  const selectAll = db.prepare(
+    `SELECT ${BUSINESS_COLUMNS} FROM business b ORDER BY ${'b.created_at DESC'}`,
+  )
+  const selectByCategory = db.prepare(
+    `SELECT ${BUSINESS_COLUMNS} FROM business b WHERE b.category_id = ?`,
+  )
+  const selectPublic = db.prepare(
+    `SELECT ${BUSINESS_COLUMNS} FROM business b
+      WHERE b.status = 'active' AND b.verification_state <> 'rejected'
+      ORDER BY b.name ASC`,
+  )
+  const selectByPhone = db.prepare(
+    `SELECT b.id, b.name, b.slug FROM business b
+       JOIN contact_point cp ON cp.business_id = b.id
+      WHERE cp.kind = 'phone' AND cp.value = ?
+      LIMIT 1`,
+  )
+  const updateRow = db.prepare(
+    `UPDATE business
+        SET name = @name,
+            description = @description,
+            category_id = @categoryId,
+            primary_location_id = @primaryLocationId,
+            status = @status,
+            verification_state = @verificationState,
+            capability_level = @capabilityLevel,
+            website = @website,
+            founded_year = @foundedYear,
+            is_open_source = @isOpenSource,
+            verified_at = @verifiedAt,
+            last_confirmed_at = @lastConfirmedAt,
+            updated_at = @now
+      WHERE id = @id`,
+  )
+  const touchConfirmed = db.prepare(
+    `UPDATE business SET last_confirmed_at = @now, updated_at = @now WHERE id = @id`,
+  )
+
+  // Secondary locations
+  const insertLocation = db.prepare(
+    `INSERT INTO business_location (
+       id, business_id, location_id, address_text, latitude, longitude, is_primary
+     ) VALUES (
+       @id, @businessId, @locationId, @addressText, @latitude, @longitude, @isPrimary
+     )`,
+  )
+  const selectLocations = db.prepare(
+    `SELECT bl.id, bl.business_id, bl.location_id, bl.address_text, bl.latitude,
+            bl.longitude, bl.is_primary, bl.created_at
+       FROM business_location bl
+       JOIN location l ON l.id = bl.location_id
+      WHERE bl.business_id = ?
+      ORDER BY bl.is_primary DESC, l.name ASC`,
+  )
+  const deleteLocation = db.prepare(`DELETE FROM business_location WHERE id = ?`)
+
+  // Contacts
+  const insertContact = db.prepare(
+    `INSERT INTO contact_point (
+       id, business_id, kind, value, is_primary, is_public
+     ) VALUES (
+       @id, @businessId, @kind, @value, @isPrimary, @isPublic
+     )`,
+  )
+  const selectContacts = db.prepare(
+    `SELECT id, business_id, kind, value, is_primary, is_public, created_at, updated_at
+       FROM contact_point WHERE business_id = ? ORDER BY is_primary DESC, kind ASC`,
+  )
+  const selectPublicContacts = db.prepare(
+    `SELECT id, business_id, kind, value, is_primary
+       FROM contact_point WHERE business_id = ? AND is_public = 1
+      ORDER BY is_primary DESC, kind ASC`,
+  )
+  const updateContact = db.prepare(
+    `UPDATE contact_point
+        SET is_public = @isPublic, is_primary = @isPrimary, updated_at = @now
+      WHERE id = @id`,
+  )
+  const deleteContact = db.prepare(`DELETE FROM contact_point WHERE id = ?`)
+
+  // Services and products
+  const insertService = db.prepare(
+    `INSERT INTO service (
+       id, business_id, category_id, name, slug, description,
+       price_min, price_max, price_unit
+     ) VALUES (
+       @id, @businessId, @categoryId, @name, @slug, @description,
+       @priceMin, @priceMax, @priceUnit
+     )`,
+  )
+  const selectService = db.prepare(`SELECT * FROM service WHERE id = ?`)
+  const selectServices = db.prepare(
+    `SELECT * FROM service WHERE business_id = ? AND is_active = 1 ORDER BY name ASC`,
+  )
+  const updateService = db.prepare(
+    `UPDATE service
+        SET name = @name, description = @description, category_id = @categoryId,
+            price_min = @priceMin, price_max = @priceMax, price_unit = @priceUnit,
+            is_active = @isActive, updated_at = @now
+      WHERE id = @id`,
+  )
+  const deleteService = db.prepare(`DELETE FROM service WHERE id = ?`)
+
+  const insertProduct = db.prepare(
+    `INSERT INTO product (
+       id, business_id, category_id, name, slug, description, condition,
+       quantity, price_min, price_max, currency, is_recyclable, status
+     ) VALUES (
+       @id, @businessId, @categoryId, @name, @slug, @description, @condition,
+       @quantity, @priceMin, @priceMax, @currency, @isRecyclable, @status
+     )`,
+  )
+  const selectProduct = db.prepare(`SELECT * FROM product WHERE id = ?`)
+  const selectProducts = db.prepare(
+    `SELECT * FROM product WHERE business_id = ? ORDER BY created_at DESC`,
+  )
+  const updateProduct = db.prepare(
+    `UPDATE product
+        SET name = @name, description = @description, category_id = @categoryId,
+            condition = @condition, quantity = @quantity,
+            price_min = @priceMin, price_max = @priceMax, currency = @currency,
+            is_recyclable = @isRecyclable, status = @status, updated_at = @now
+      WHERE id = @id`,
+  )
+  const deleteProduct = db.prepare(`DELETE FROM product WHERE id = ?`)
+
+  // Skills
+  const insertSkill = db.prepare(
+    `INSERT INTO business_skill (business_id, skill_id, proficiency, is_primary)
+     VALUES (@businessId, @skillId, @proficiency, @isPrimary)
+     ON CONFLICT(business_id, skill_id) DO UPDATE SET
+       proficiency = excluded.proficiency,
+       is_primary = excluded.is_primary`,
+  )
+  const selectSkills = db.prepare(
+    `SELECT s.id, s.name, s.slug, bs.proficiency, bs.is_primary
+       FROM business_skill bs
+       JOIN skill s ON s.id = bs.skill_id
+      WHERE bs.business_id = ?
+      ORDER BY bs.is_primary DESC, bs.proficiency DESC, s.name ASC`,
+  )
+  const selectSkillIds = db.prepare(
+    `SELECT skill_id FROM business_skill WHERE business_id = ?`,
+  )
+  const removeSkill = db.prepare(
+    `DELETE FROM business_skill WHERE business_id = ? AND skill_id = ?`,
+  )
+  const linkServiceSkill = db.prepare(
+    `INSERT OR IGNORE INTO service_skill (service_id, skill_id) VALUES (?, ?)`,
+  )
+
+  const countActive = db.prepare(
+    `SELECT COUNT(*) AS total FROM business
+      WHERE status = 'active' AND verification_state <> 'rejected'`,
+  )
+  const countByLocation = db.prepare(
+    `SELECT COUNT(*) AS total FROM business
+      WHERE primary_location_id = ? AND status = 'active'`,
+  )
+  // The supply count behind every "how much does Kampala actually have here?"
+  // question, including the browse counters in the api.
+  //
+  // Both filters are optional and independent, and `includeSubtree` widens each
+  // from an exact match to "anywhere at or below this node". The subtree form is
+  // the one a person means by "in Wakiso district": almost no business is
+  // registered against the district node itself, so an exact match would report
+  // zero for a district full of workshops.
+  const countFiltered = db.prepare(
+    `SELECT COUNT(*) AS total FROM business b
+       JOIN location l ON l.id = b.primary_location_id
+       JOIN category c ON c.id = b.category_id
+      WHERE (@status IS NULL OR b.status = @status)
+        AND (@categoryId IS NULL
+             OR b.category_id = @categoryId
+             OR (@includeSubtree = 1
+                 AND ('/' || c.path_slugs || '/') LIKE
+                     '%/' || (SELECT slug FROM category WHERE id = @categoryId) || '/%'))
+        AND (@locationId IS NULL
+             OR b.primary_location_id = @locationId
+             OR (@includeSubtree = 1
+                 AND ('/' || l.path_ids || '/') LIKE '%/' || @locationId || '/%'))`,
+  )
+  const supplyRows = db.prepare(
+    `SELECT id, status, verification_state, capability_level, primary_location_id
+       FROM business
+      WHERE status = 'active' AND verification_state <> 'rejected'`,
+  )
+
+  function requireBusiness(id) {
+    const row = selectById.get(id)
+    if (!row) throw new NotFoundError('Business', id)
+    return row
+  }
+
+  /**
+   * Finds a free slug.
+   *
+   * The loop lives here rather than in core because the uniqueness check needs
+   * the data layer, while the suffix format is a core rule. Two businesses named
+   * "Bright Future Bakery" therefore get `bright-future-bakery` and
+   * `bright-future-bakery-2`, and any caller gets the same suffixes.
+   */
+  function resolveSlug(preferred) {
+    const base = slugify(preferred)
+    for (let attempt = 1; attempt <= 200; attempt += 1) {
+      const candidate = disambiguateSlug(base, attempt)
+      if (!selectSlugExists.get(candidate)) return candidate
+    }
+    // 200 collisions of the same name is a sign of a broken import, not a
+    // naming problem, and a random suffix would hide it.
+    throw new ConflictError('Could not find a free slug for this business.', { preferred })
+  }
+
+  function businessRow(row) {
+    const record = camelizeRow(row)
+    record.isOpenSource = fromSqlBool(record.isOpenSource)
+    return record
+  }
+
+  function skillIdsFor(businessId) {
+    return selectSkillIds.all(businessId).map((row) => row.skill_id)
+  }
+
+  /** The document a business contributes to the search index. */
+  function businessDocument(business) {
+    const location = locations ? locations.findById(business.primaryLocationId) : null
+    return {
+      docKey: `business:${business.id}`,
+      sourceType: 'business',
+      sourceId: business.id,
+      title: business.name,
+      name: business.name,
+      path: `/business/${business.slug}`,
+      body: [
+        business.description,
+        ...selectServices.all(business.id).map((service) => service.name),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      keywords: [
+        ...selectSkills.all(business.id).map((skill) => skill.name),
+        location ? location.name : null,
+      ]
+        .filter(Boolean)
+        .map((keyword) => keyword.toLowerCase()),
+      locationId: business.primaryLocationId,
+      locationPathIds: location ? location.pathIds : null,
+      categoryId: business.categoryId,
+      skillIds: skillIdsFor(business.id),
+      locationPath: location ? location.pathNames : null,
+      summary: business.description ? business.description.slice(0, 200) : null,
+      trustWeight: supplyWeight(business),
+      isActive: isPubliclyVisible(business),
+    }
+  }
+
+  function serviceDocument(service, business) {
+    const location = locations ? locations.findById(business.primaryLocationId) : null
+    return {
+      docKey: `service:${service.id}`,
+      sourceType: 'service',
+      sourceId: service.id,
+      title: service.name,
+      name: service.name,
+      path: `/business/${business.slug}#service-${service.slug}`,
+      body: service.description ?? '',
+      keywords: [business.name, location ? location.name : null]
+        .filter(Boolean)
+        .map((keyword) => keyword.toLowerCase()),
+      locationId: business.primaryLocationId,
+      locationPathIds: location ? location.pathIds : null,
+      categoryId: service.category_id,
+      skillIds: [],
+      locationPath: location ? location.pathNames : null,
+      summary: service.description ? service.description.slice(0, 200) : null,
+      trustWeight: supplyWeight(business),
+      isActive: business.status === 'active' && service.is_active === 1,
+    }
+  }
+
+  function productDocument(product, business) {
+    const location = locations ? locations.findById(business.primaryLocationId) : null
+    return {
+      docKey: `product:${product.id}`,
+      sourceType: 'product',
+      sourceId: product.id,
+      title: product.name,
+      name: product.name,
+      path: `/business/${business.slug}#product-${product.slug}`,
+      body: [product.description, product.condition.replace(/_/g, ' ')]
+        .filter(Boolean)
+        .join('\n'),
+      keywords: [business.name, location ? location.name : null]
+        .filter(Boolean)
+        .map((keyword) => keyword.toLowerCase()),
+      locationId: business.primaryLocationId,
+      locationPathIds: location ? location.pathIds : null,
+      categoryId: product.category_id,
+      skillIds: [],
+      locationPath: location ? location.pathNames : null,
+      summary: product.description ? product.description.slice(0, 200) : null,
+      trustWeight: supplyWeight(business),
+      isActive: business.status === 'active' && product.status === 'available',
+    }
+  }
+
+  /**
+   * Reindexes a business and everything it offers.
+   *
+   * Called inside the same transaction as the write that triggered it, so a
+   * rolled-back write cannot leave a search document describing a business that
+   * does not exist.
+   */
+  function reindex(businessId) {
+    if (!searchIndex) return
+    const row = selectById.get(businessId)
+    if (!row) return
+    const business = businessRow(row)
+
+    searchIndex.index(businessDocument(business))
+    for (const service of selectServices.all(businessId)) {
+      searchIndex.index(serviceDocument(service, business))
+    }
+    for (const product of selectProducts.all(businessId)) {
+      searchIndex.index(productDocument(product, business))
+    }
+  }
+
+  const repository = {
+    create(input) {
+      const built = buildBusiness(input)
+      const id = newId()
+      const slug = resolveSlug(built.slug || built.name)
+
+      const write = db.transaction(() => {
+        insert.run({
+          id,
+          name: built.name,
+          slug,
+          description: built.description,
+          categoryId: built.categoryId,
+          primaryLocationId: built.primaryLocationId,
+          status: built.status,
+          verificationState: built.verificationState,
+          capabilityLevel: built.capabilityLevel,
+          website: built.website,
+          foundedYear: built.foundedYear,
+          sourceId: input.sourceId ?? null,
+          isOpenSource: toSqlBool(built.isOpenSource),
+        })
+        // The primary location also exists as a business_location row, so that
+        // "everywhere this business operates" is one query regardless of whether
+        // the place is its headquarters or a collection point.
+        insertLocation.run({
+          id: newId(),
+          businessId: id,
+          locationId: built.primaryLocationId,
+          addressText: input.addressText ?? null,
+          latitude: input.latitude ?? null,
+          longitude: input.longitude ?? null,
+          isPrimary: 1,
+        })
+        if (Array.isArray(input.skills) && input.skills.length > 0) {
+          for (const [index, name] of input.skills.entries()) {
+            const skill = skills.findOrCreate(name)
+            insertSkill.run({
+              businessId: id,
+              skillId: skill.id,
+              proficiency: 0.5,
+              isPrimary: index === 0 ? 1 : 0,
+            })
+          }
+        }
+        reindex(id)
+      })
+      write()
+
+      return repository.requireById(id)
+    },
+
+    findById(id) {
+      const row = selectById.get(id)
+      return row ? businessRow(row) : null
+    },
+
+    requireById(id) {
+      return businessRow(requireBusiness(id))
+    },
+
+    findBySlug(slug) {
+      const row = selectBySlug.get(slug)
+      return row ? businessRow(row) : null
+    },
+
+    /**
+     * Finds an existing business by any of its normalised contact points.
+     *
+     * This is the deduplication step for imports. Because contact values are
+     * canonicalised in core/business.js, a phone number typed as
+     * "0772 123 456" and as "+256772123456" produces the same value here, which
+     * is what makes a spreadsheet import of Kampala businesses mergeable instead
+     * of just additive.
+     */
+    findByContact({ kind = 'phone', value }) {
+      const normalised =
+        kind === 'phone' || kind === 'whatsapp' ? normalisePhone(value) : value
+      if (!normalised) return null
+      const row = selectByPhone.get(normalised)
+      return row ? { id: row.id, name: row.name, slug: row.slug } : null
+    },
+
+    /** Two records describing the same business, judged on their contacts. */
+    looksLikeSameBusiness(a, b) {
+      if (!a?.contacts || !b?.contacts) return false
+      return a.contacts.some((left) =>
+        b.contacts.some((right) => contactPointsLikelySameBusiness(left, right)),
+      )
+    },
+
+    all() {
+      return selectAll.all().map(businessRow)
+    },
+
+    publiclyVisible() {
+      return selectPublic.all().map(businessRow)
+    },
+
+    inCategory(categoryId) {
+      return selectByCategory.all(categoryId).map(businessRow)
+    },
+
+    countInLocation(locationId) {
+      return countByLocation.get(locationId).total
+    },
+
+    /**
+     * Counts businesses, optionally including whole subtrees.
+     *
+     * Both joins are inner joins on NOT NULL foreign keys, so they change no
+     * counts; they exist only to give the subtree predicates a path column.
+     */
+    count({ status = 'active', categoryId = null, locationId = null, includeSubtree = false } = {}) {
+      return countFiltered.get({
+        status,
+        categoryId,
+        locationId,
+        includeSubtree: includeSubtree ? 1 : 0,
+      }).total
+    },
+
+    countActive() {
+      return countActive.get().total
+    },
+
+    /**
+     * Filtered listing for the admin directory and the api.
+     *
+     * `sort` is resolved through an allowlist rather than interpolated, because
+     * this is the one query whose every parameter comes from a request.
+     */
+    list({
+      status,
+      verificationState,
+      categoryId,
+      locationId,
+      skillId,
+      search,
+      capabilityLevel,
+      sort = 'newest',
+      limit,
+      offset,
+    } = {}) {
+      const page = normalisePagination({ limit, offset })
+      const conditions = []
+      const params = {}
+
+      if (status) {
+        conditions.push('b.status = @status')
+        params.status = assertBusinessStatus(status)
+      }
+      if (verificationState) {
+        conditions.push('b.verification_state = @verificationState')
+        params.verificationState = assertVerificationState(verificationState)
+      }
+      if (capabilityLevel) {
+        conditions.push('b.capability_level = @capabilityLevel')
+        params.capabilityLevel = assertCapabilityLevel(capabilityLevel)
+      }
+      if (categoryId) {
+        conditions.push('b.category_id = @categoryId')
+        params.categoryId = categoryId
+      }
+      if (locationId) {
+        conditions.push('b.primary_location_id = @locationId')
+        params.locationId = locationId
+      }
+      if (skillId) {
+        // EXISTS rather than a join: a business with three of the requested
+        // skills must appear once, not three times, or the page total and the
+        // rows disagree with each other.
+        conditions.push(
+          'EXISTS (SELECT 1 FROM business_skill bs WHERE bs.business_id = b.id AND bs.skill_id = @skillId)',
+        )
+        params.skillId = skillId
+      }
+      if (search) {
+        conditions.push(
+          "(b.name LIKE @search ESCAPE '\\' OR b.description LIKE @search ESCAPE '\\')",
+        )
+        params.search = likeParam(search)
+      }
+
+      const whereSql = where(conditions)
+      // The id tiebreak keeps pagination stable: without it, rows with an equal
+      // sort key can be returned in a different order per page and one of them
+      // will be skipped.
+      const order = resolveOrder(sort, LIST_SORTS, LIST_SORTS.newest)
+      const rows = db
+        .prepare(
+          `SELECT ${BUSINESS_COLUMNS} FROM business b
+            ${whereSql}
+            ORDER BY ${order}, b.id ASC
+            LIMIT @limit OFFSET @offset`,
+        )
+        .all({ ...params, limit: page.limit, offset: page.offset })
+
+      const total = db
+        .prepare(`SELECT COUNT(*) AS total FROM business b ${whereSql}`)
+        .get(params).total
+
+      return { total, items: rows.map(businessRow) }
+    },
+
+    update(id, patch) {
+      const current = businessRow(requireBusiness(id))
+      const merged = {
+        name: patch.name ?? current.name,
+        description: patch.description === undefined ? current.description : patch.description,
+        categoryId: patch.categoryId ?? current.categoryId,
+        locationId: patch.locationId ?? current.primaryLocationId,
+        status: patch.status ?? current.status,
+        verificationState: patch.verificationState ?? current.verificationState,
+        capabilityLevel: patch.capabilityLevel ?? current.capabilityLevel,
+        website: patch.website === undefined ? current.website : normaliseUrl(patch.website),
+        foundedYear: patch.foundedYear ?? current.foundedYear,
+        isOpenSource:
+          patch.isOpenSource === undefined ? current.isOpenSource : patch.isOpenSource,
+      }
+      // buildBusiness is the single validator for a business shape, so an update
+      // is validated by rebuilding the whole record and diffing nothing.
+      const built = buildBusiness(merged)
+
+      const write = db.transaction(() => {
+        const now = nowIso()
+        updateRow.run({
+          id,
+          name: built.name,
+          description: built.description,
+          categoryId: built.categoryId,
+          primaryLocationId: built.primaryLocationId,
+          status: built.status,
+          verificationState: built.verificationState,
+          capabilityLevel: built.capabilityLevel,
+          website: built.website,
+          foundedYear: built.foundedYear,
+          isOpenSource: toSqlBool(built.isOpenSource),
+          verifiedAt: built.verificationState === 'verified' ? now : current.verifiedAt,
+          lastConfirmedAt: now,
+          now,
+        })
+        if (built.primaryLocationId !== current.primaryLocationId) {
+          const primary = selectLocations.all(id).find((row) => row.is_primary === 1)
+          if (primary) {
+            insertLocation.run({
+              id: newId(),
+              businessId: id,
+              locationId: built.primaryLocationId,
+              addressText: primary.address_text,
+              latitude: primary.latitude,
+              longitude: primary.longitude,
+              isPrimary: 1,
+            })
+            deleteLocation.run(primary.id)
+          }
+        }
+        reindex(id)
+      })
+      write()
+
+      return repository.requireById(id)
+    },
+
+    /**
+     * Verification is an editorial decision, so it is a dedicated method rather
+     * than a field on `update`. That way every path that grants a verified
+     * badge also writes `verified_at`, and the audit log has one action to record.
+     */
+    setVerification(id, verificationState, { at = null } = {}) {
+      requireBusiness(id)
+      const now = at ?? nowIso()
+      db.prepare(
+        `UPDATE business
+            SET verification_state = @state,
+                verified_at = CASE WHEN @state = 'verified' THEN @now ELSE verified_at END,
+                updated_at = @now
+          WHERE id = @id`,
+      ).run({ id, state: assertVerificationState(verificationState), now })
+      const write = db.transaction(() => reindex(id))
+      write()
+      return repository.requireById(id)
+    },
+
+    setStatus(id, status) {
+      assertBusinessStatus(status)
+      requireBusiness(id)
+      db.prepare(`UPDATE business SET status = @status, updated_at = @now WHERE id = @id`).run({
+        id,
+        status,
+        now: nowIso(),
+      })
+      const write = db.transaction(() => reindex(id))
+      write()
+      return repository.requireById(id)
+    },
+
+    setCapabilityLevel(id, capabilityLevel) {
+      assertCapabilityLevel(capabilityLevel)
+      requireBusiness(id)
+      db.prepare(
+        `UPDATE business SET capability_level = @level, updated_at = @now WHERE id = @id`,
+      ).run({ id, level: capabilityLevel, now: nowIso() })
+      const write = db.transaction(() => reindex(id))
+      write()
+      return repository.requireById(id)
+    },
+
+    /** Records that a business confirmed its own details. Feeds freshness. */
+    confirm(id) {
+      requireBusiness(id)
+      const now = nowIso()
+      touchConfirmed.run({ id, now })
+      return repository.requireById(id)
+    },
+
+    // ---- Secondary locations ------------------------------------------------
+
+    addLocation(businessId, { locationId, addressText, latitude, longitude, isPrimary }) {
+      requireBusiness(businessId)
+      if (!locationId) {
+        throw new ValidationError('A business location must reference a location.', {
+          field: 'locationId',
+        })
+      }
+      if (
+        db
+          .prepare(
+            `SELECT 1 AS present FROM business_location WHERE business_id = ? AND location_id = ?`,
+          )
+          .get(businessId, locationId)
+      ) {
+        throw new ConflictError('This business is already recorded at that location.', {
+          locationId,
+        })
+      }
+      const id = newId()
+      const write = db.transaction(() => {
+        if (isPrimary) {
+          db.prepare(
+            `UPDATE business_location SET is_primary = 0 WHERE business_id = ?`,
+          ).run(businessId)
+        }
+        insertLocation.run({
+          id,
+          businessId,
+          locationId,
+          addressText: addressText ?? null,
+          latitude: latitude ?? null,
+          longitude: longitude ?? null,
+          isPrimary: isPrimary ? 1 : 0,
+        })
+        reindex(businessId)
+      })
+      write()
+      return camelizeRow(
+        db.prepare(`SELECT * FROM business_location WHERE id = ?`).get(id),
+      )
+    },
+
+    locations(businessId) {
+      return camelizeRows(selectLocations.all(businessId)).map((row) => ({
+        ...row,
+        isPrimary: fromSqlBool(row.isPrimary),
+      }))
+    },
+
+    removeLocation(businessId, locationRowId) {
+      const row = db
+        .prepare(
+          `SELECT * FROM business_location WHERE id = ? AND business_id = ?`,
+        )
+        .get(locationRowId, businessId)
+      if (!row) throw new NotFoundError('BusinessLocation', locationRowId)
+      if (row.is_primary === 1) {
+        throw new ConflictError(
+          'The primary location cannot be removed. Move the business first.',
+        )
+      }
+      deleteLocation.run(locationRowId)
+      const write = db.transaction(() => reindex(businessId))
+      write()
+      return true
+    },
+
+    // ---- Contacts -----------------------------------------------------------
+
+    /**
+     * Adds a contact point.
+     *
+     * A phone number is the strongest identity signal a Ugandan business has, so
+     * adding one that already belongs to another business is reported as a
+     * possible duplicate rather than silently accepted.
+     */
+    addContact(businessId, input) {
+      requireBusiness(businessId)
+      const contact = buildContactPoint(input)
+      const id = newId()
+
+      const write = db.transaction(() => {
+        if (
+          db
+            .prepare(
+              `SELECT 1 AS present FROM contact_point
+                WHERE business_id = ? AND kind = ? AND value = ?`,
+            )
+            .get(businessId, contact.kind, contact.value)
+        ) {
+          throw new ConflictError(
+            `This business already has that ${contact.kind}.`,
+            { kind: contact.kind, value: contact.value },
+          )
+        }
+        if (contact.isPrimary) {
+          db.prepare(
+            `UPDATE contact_point SET is_primary = 0 WHERE business_id = ? AND kind = ?`,
+          ).run(businessId, contact.kind)
+        }
+        insertContact.run({
+          id,
+          businessId,
+          kind: contact.kind,
+          value: contact.value,
+          isPrimary: contact.isPrimary ? 1 : 0,
+          isPublic: toSqlBool(contact.isPublic),
+        })
+      })
+      write()
+
+      return {
+        id,
+        businessId,
+        kind: contact.kind,
+        value: contact.value,
+        isPrimary: contact.isPrimary,
+        isPublic: contact.isPublic,
+      }
+    },
+
+    contacts(businessId) {
+      return camelizeRows(selectContacts.all(businessId)).map((row) => ({
+        ...row,
+        isPrimary: fromSqlBool(row.isPrimary),
+        isPublic: fromSqlBool(row.isPublic),
+      }))
+    },
+
+    /** The only contacts that may be shown publicly. */
+    publicContacts(businessId) {
+      return camelizeRows(selectPublicContacts.all(businessId)).map((row) => ({
+        ...row,
+        isPrimary: fromSqlBool(row.isPrimary),
+      }))
+    },
+
+    setContactVisibility(contactId, { isPublic, isPrimary } = {}) {
+      const row = db.prepare(`SELECT * FROM contact_point WHERE id = ?`).get(contactId)
+      if (!row) throw new NotFoundError('ContactPoint', contactId)
+      updateContact.run({
+        id: contactId,
+        isPublic: toSqlBool(isPublic ?? fromSqlBool(row.is_public)),
+        isPrimary: toSqlBool(isPrimary ?? fromSqlBool(row.is_primary)),
+        now: nowIso(),
+      })
+      const write = db.transaction(() => reindex(row.business_id))
+      write()
+      return camelizeRow(
+        db.prepare(`SELECT * FROM contact_point WHERE id = ?`).get(contactId),
+      )
+    },
+
+    removeContact(contactId) {
+      const row = db.prepare(`SELECT * FROM contact_point WHERE id = ?`).get(contactId)
+      if (!row) throw new NotFoundError('ContactPoint', contactId)
+      deleteContact.run(contactId)
+      const write = db.transaction(() => reindex(row.business_id))
+      write()
+      return true
+    },
+
+    // ---- Services -----------------------------------------------------------
+
+    addService(businessId, input) {
+      requireBusiness(businessId)
+      const name = String(input.name ?? '').trim()
+      if (name.length < 2 || name.length > 160) {
+        throw new ValidationError('A service name must be 2 to 160 characters.', {
+          field: 'name',
+        })
+      }
+      const categoryId = input.categoryId ?? this.requireById(businessId).categoryId
+      const id = newId()
+      const slug = slugify(input.slug || name)
+
+      const write = db.transaction(() => {
+        insertService.run({
+          id,
+          businessId,
+          categoryId,
+          name,
+          slug,
+          description: input.description ?? null,
+          priceMin: numberOrNull(input.priceMin),
+          priceMax: numberOrNull(input.priceMax),
+          priceUnit: input.priceUnit ?? null,
+        })
+        for (const skillName of input.skills ?? []) {
+          const skill = skills.findOrCreate(skillName)
+          linkServiceSkill.run(id, skill.id)
+        }
+        reindex(businessId)
+      })
+      write()
+
+      return camelizeRow(selectService.get(id))
+    },
+
+    services(businessId) {
+      return camelizeRows(selectServices.all(businessId)).map((row) => ({
+        ...row,
+        isActive: fromSqlBool(row.isActive),
+      }))
+    },
+
+    updateService(serviceId, patch) {
+      const current = selectService.get(serviceId)
+      if (!current) throw new NotFoundError('Service', serviceId)
+      const write = db.transaction(() => {
+        updateService.run({
+          id: serviceId,
+          name: patch.name ?? current.name,
+          description:
+            patch.description === undefined ? current.description : patch.description,
+          categoryId: patch.categoryId ?? current.category_id,
+          priceMin:
+            patch.priceMin === undefined ? current.price_min : numberOrNull(patch.priceMin),
+          priceMax:
+            patch.priceMax === undefined ? current.price_max : numberOrNull(patch.priceMax),
+          priceUnit: patch.priceUnit === undefined ? current.price_unit : patch.priceUnit,
+          isActive:
+            patch.isActive === undefined ? current.is_active : patch.isActive ? 1 : 0,
+          now: nowIso(),
+        })
+        reindex(current.business_id)
+      })
+      write()
+      return camelizeRow(selectService.get(serviceId))
+    },
+
+    removeService(serviceId) {
+      const current = selectService.get(serviceId)
+      if (!current) throw new NotFoundError('Service', serviceId)
+      deleteService.run(serviceId)
+      if (searchIndex) searchIndex.removeSource('service', serviceId)
+      const write = db.transaction(() => reindex(current.business_id))
+      write()
+      return true
+    },
+
+    // ---- Products -----------------------------------------------------------
+
+    addProduct(businessId, input) {
+      requireBusiness(businessId)
+      const name = String(input.name ?? '').trim()
+      if (name.length < 2 || name.length > 160) {
+        throw new ValidationError('A product name must be 2 to 160 characters.', {
+          field: 'name',
+        })
+      }
+      const condition = assertProductCondition(input.condition ?? 'unknown')
+      const categoryId = input.categoryId ?? this.requireById(businessId).categoryId
+      const id = newId()
+
+      const write = db.transaction(() => {
+        insertProduct.run({
+          id,
+          businessId,
+          categoryId,
+          name,
+          slug: slugify(input.slug || name),
+          description: input.description ?? null,
+          condition,
+          quantity: Number.isInteger(input.quantity) ? input.quantity : null,
+          priceMin: numberOrNull(input.priceMin),
+          priceMax: numberOrNull(input.priceMax),
+          currency: input.currency ?? 'UGX',
+          isRecyclable: toSqlBool(Boolean(input.isRecyclable)),
+          status: input.status ?? 'available',
+        })
+        reindex(businessId)
+      })
+      write()
+
+      return productRow(selectProduct.get(id))
+    },
+
+    products(businessId) {
+      return selectProducts.all(businessId).map(productRow)
+    },
+
+    updateProduct(productId, patch) {
+      const current = selectProduct.get(productId)
+      if (!current) throw new NotFoundError('Product', productId)
+      if (patch.condition) assertProductCondition(patch.condition)
+      const write = db.transaction(() => {
+        updateProduct.run({
+          id: productId,
+          name: patch.name ?? current.name,
+          description:
+            patch.description === undefined ? current.description : patch.description,
+          categoryId: patch.categoryId ?? current.category_id,
+          condition: patch.condition ?? current.condition,
+          quantity: patch.quantity === undefined ? current.quantity : patch.quantity,
+          priceMin:
+            patch.priceMin === undefined ? current.price_min : numberOrNull(patch.priceMin),
+          priceMax:
+            patch.priceMax === undefined ? current.price_max : numberOrNull(patch.priceMax),
+          currency: patch.currency ?? current.currency,
+          isRecyclable:
+            patch.isRecyclable === undefined
+              ? current.is_recyclable
+              : toSqlBool(patch.isRecyclable),
+          status: patch.status ?? current.status,
+          now: nowIso(),
+        })
+        reindex(current.business_id)
+      })
+      write()
+      return productRow(selectProduct.get(productId))
+    },
+
+    removeProduct(productId) {
+      const current = selectProduct.get(productId)
+      if (!current) throw new NotFoundError('Product', productId)
+      deleteProduct.run(productId)
+      if (searchIndex) searchIndex.removeSource('product', productId)
+      const write = db.transaction(() => reindex(current.business_id))
+      write()
+      return true
+    },
+
+    /** Product stock for the Second Life Electronics vertical. */
+    findRecyclableProducts({ condition = null, limit = 50, offset = 0 } = {}) {
+      const page = normalisePagination({ limit, offset })
+      const conditions = ['p.is_recyclable = 1', "p.status = 'available'"]
+      const params = { limit: page.limit, offset: page.offset }
+      if (condition) {
+        conditions.push('p.condition = @condition')
+        params.condition = assertProductCondition(condition)
+      }
+      return db
+        .prepare(
+          `SELECT p.*, b.name AS business_name, b.slug AS business_slug
+             FROM product p
+             JOIN business b ON b.id = p.business_id
+            WHERE ${conditions.join(' AND ')}
+            ORDER BY p.created_at DESC
+            LIMIT @limit OFFSET @offset`,
+        )
+        .all(params)
+        .map((row) => ({ ...productRow(row), businessName: row.business_name }))
+    },
+
+    // ---- Skills -------------------------------------------------------------
+
+    addSkill(businessId, skillName, { proficiency = 0.5, isPrimary = false } = {}) {
+      requireBusiness(businessId)
+      if (typeof proficiency !== 'number' || proficiency < 0 || proficiency > 1) {
+        throw new ValidationError('Skill proficiency must be between 0 and 1.', {
+          field: 'proficiency',
+        })
+      }
+      const skill = skills.findOrCreate(skillName)
+      const write = db.transaction(() => {
+        insertSkill.run({
+          businessId,
+          skillId: skill.id,
+          proficiency,
+          isPrimary: isPrimary ? 1 : 0,
+        })
+        reindex(businessId)
+      })
+      write()
+      return skill
+    },
+
+    skills(businessId) {
+      return camelizeRows(selectSkills.all(businessId)).map((row) => ({
+        ...row,
+        isPrimary: fromSqlBool(row.isPrimary),
+      }))
+    },
+
+    removeSkill(businessId, skillId) {
+      removeSkill.run(businessId, skillId)
+      const write = db.transaction(() => reindex(businessId))
+      write()
+      return true
+    },
+
+    // ---- Whole-profile read -------------------------------------------------
+
+    /**
+     * Everything about one business in one call. The public profile page, the
+     * admin editor and the api all want this shape, and three separate
+     * round-trips to assemble it is three chances to forget that a contact is
+     * private.
+     */
+    profile(businessId, { includePrivateContacts = false } = {}) {
+      const business = repository.requireById(businessId)
+      return {
+        ...business,
+        locations: repository.locations(businessId),
+        contacts: includePrivateContacts
+          ? repository.contacts(businessId)
+          : repository.publicContacts(businessId),
+        services: repository.services(businessId),
+        products: repository.products(businessId),
+        skills: repository.skills(businessId),
+      }
+    },
+
+    /**
+     * The supply measurement the gap engine reads.
+     *
+     * Returns raw per-business weights rather than an aggregate, because the
+     * aggregation has to happen per coverage location and per category, and
+     * doing that here would bake the intelligence layer's shape into the data
+     * layer.
+     */
+    supplySnapshot() {
+      return supplyRows
+        .all()
+        .map((row) => ({
+          id: row.id,
+          primaryLocationId: row.primary_location_id,
+          capabilityLevel: row.capability_level,
+          weight: supplyWeight({
+            status: row.status,
+            verificationState: row.verification_state,
+            capabilityLevel: row.capability_level,
+          }),
+        }))
+    },
+
+    reindex,
+  }
+
+  return repository
+}
+
+function productRow(row) {
+  const record = camelizeRow(row)
+  record.isRecyclable = fromSqlBool(record.isRecyclable)
+  return record
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}

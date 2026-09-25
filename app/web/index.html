@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kampala Intelligence Platform</title>
+    <style>
+      :root {
+        --ink: #0d2a30;
+        --ink-soft: #163e46;
+        --gold: #f0b740;
+        --paper: #f7f4ee;
+        --muted: #6d7f83;
+        --line: #dcd6c9;
+        --radius: 10px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 3rem 1.5rem 5rem;
+        background: var(--paper);
+        color: var(--ink);
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      main {
+        max-width: 46rem;
+        margin: 0 auto;
+      }
+
+      header {
+        border-bottom: 2px solid var(--ink);
+        padding-bottom: 1.5rem;
+        margin-bottom: 2rem;
+      }
+
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.9rem;
+        letter-spacing: -0.02em;
+      }
+
+      .lede {
+        margin: 0;
+        color: var(--muted);
+        max-width: 38rem;
+      }
+
+      h2 {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: var(--muted);
+        margin: 2.5rem 0 0.75rem;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.9rem 1.1rem;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+
+      .dot {
+        width: 0.7rem;
+        height: 0.7rem;
+        border-radius: 50%;
+        background: var(--muted);
+        flex: none;
+      }
+
+      .dot.up {
+        background: #2f9e63;
+      }
+
+      .dot.down {
+        background: #c0453b;
+      }
+
+      .counts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+        gap: 1px;
+        background: var(--line);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+
+      .count {
+        background: #fff;
+        padding: 0.9rem 1rem;
+      }
+
+      .count b {
+        display: block;
+        font-size: 1.5rem;
+        letter-spacing: -0.02em;
+      }
+
+      .count span {
+        font-size: 0.78rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      ul.endpoints {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      ul.endpoints li {
+        border-bottom: 1px solid var(--line);
+        padding: 0.7rem 0;
+        display: flex;
+        gap: 1rem;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+
+      ul.endpoints a {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9rem;
+        color: var(--ink);
+        text-decoration: none;
+        border-bottom: 1px solid var(--gold);
+      }
+
+      ul.endpoints a:hover {
+        background: var(--gold);
+      }
+
+      ul.endpoints em {
+        font-style: normal;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      .note {
+        margin-top: 2.5rem;
+        padding: 1rem 1.1rem;
+        background: #fff;
+        border-left: 3px solid var(--gold);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        font-size: 0.92rem;
+        color: var(--ink-soft);
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.88em;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Kampala Intelligence Platform</h1>
+        <p class="lede">
+          A reference directory of businesses in Kampala and the districts around it, and the
+          demand engine that shows where the gaps are. The directory starts empty on purpose: it
+          is a reference, not a scraper's guess, and the only way a listing gets in is somebody
+          who was there entering it.
+        </p>
+      </header>
+
+      <h2>Engine</h2>
+      <div class="status">
+        <span class="dot" id="dot"></span>
+        <span id="status">Checking the engine&hellip;</span>
+      </div>
+
+      <h2>Reference data</h2>
+      <div class="counts" id="counts">
+        <div class="count"><b>&mdash;</b><span>Locations</span></div>
+        <div class="count"><b>&mdash;</b><span>Categories</span></div>
+        <div class="count"><b>&mdash;</b><span>Skills</span></div>
+        <div class="count"><b>&mdash;</b><span>Businesses</span></div>
+      </div>
+
+      <h2>Endpoints</h2>
+      <ul class="endpoints">
+        <li>
+          <a href="/api/v1/locations">/api/v1/locations</a>
+          <em>Every administrative level, filterable with ?kind=ward</em>
+        </li>
+        <li>
+          <a href="/api/v1/categories">/api/v1/categories</a>
+          <em>The category tree, with the skills linked to each node</em>
+        </li>
+        <li>
+          <a href="/api/v1/search?q=phone+screen">/api/v1/search?q=&hellip;</a>
+          <em>Full-text search. Records an anonymised demand signal</em>
+        </li>
+        <li>
+          <a href="/api/v1/insights/opportunities">/api/v1/insights/opportunities</a>
+          <em>Ranked gaps, subject to the k-anonymity floor</em>
+        </li>
+        <li>
+          <a href="/api/v1/requests">/api/v1/requests</a>
+          <em>What people are looking for, posted without an account</em>
+        </li>
+        <li>
+          <a href="/api/v1/meta">/api/v1/meta</a>
+          <em>Version, configuration, limits and current counts</em>
+        </li>
+      </ul>
+
+      <p class="note">
+        Aggregates computed over fewer than <strong><span id="k">&mdash;</span> distinct people</strong> are
+        withheld rather than rounded, so a small number of searches can never be subtracted down to
+        an individual. The engine knows the answer and says that it is not publishable yet.
+      </p>
+    </main>
+
+    <script>
+      const dot = document.getElementById('dot')
+      const status = document.getElementById('status')
+
+      const get = (url) => fetch(url, { headers: { accept: 'application/json' } })
+
+      get('/healthz')
+        .then((response) => response.json())
+        .then((body) => {
+          const health = body.data
+          dot.className = 'dot up'
+          status.textContent = `Running. ${health.migrationsApplied} migrations applied, database ${health.database}.`
+        })
+        .catch(() => {
+          dot.className = 'dot down'
+          status.textContent = 'The engine is not answering. Start it from the Pinokio menu.'
+        })
+
+      get('/api/v1/meta')
+        .then((response) => response.json())
+        .then((body) => {
+          const meta = body.data
+          const locations = Object.values(meta.counts.locations).reduce((a, b) => a + b, 0)
+          const figures = [
+            [locations.toLocaleString(), 'Locations'],
+            [meta.counts.categories.toLocaleString(), 'Categories'],
+            [meta.counts.skills.toLocaleString(), 'Skills'],
+            [meta.counts.activeBusinesses.toLocaleString(), 'Businesses'],
+          ]
+          document.getElementById('counts').innerHTML = figures
+            .map(([value, label]) => `<div class="count"><b>${value}</b><span>${label}</span></div>`)
+            .join('')
+          document.getElementById('k').textContent = meta.privacy.kThreshold
+        })
+        .catch(() => {
+          document.getElementById('counts').innerHTML =
+            '<div class="count"><b>—</b><span>Counts unavailable</span></div>'
+        })
+    </script>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+ENVIRONMENT
+node_modules
+venv
+.env
+# Editor and agent rule files. These are copies of AGENTS.md that individual
+# tools drop into the folder; they belong to the machine, not the launcher.
+# Named explicitly rather than with a bare `.*`, because that would also
+# ignore this file, and a clone would arrive with no ignore rules at all.
+.clinerules
+.cursorrules
+.geminiignore
+.windsurfrules
+# Skills the agent tooling downloads on demand, plus the lock file recording
+# what it fetched. Both are reproducible from the user-level copy.
+.agents/
+skills-lock.json
+.DS_Store
+Thumbs.db
+~*
+/logs/
+/cache/
+# The SQLite database, its WAL/SHM siblings, and any reference import staging
+# files. All of it is rebuilt by `npm run migrate` plus the reference import, and
+# none of it belongs in version control.
+app/data/
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+/QWEN.md
+/SPEC.md

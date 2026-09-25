@@ -1,0 +1,31 @@
+{
+  "name": "kampala-intelligence-platform",
+  "version": "0.1.0",
+  "description": "Kampala Data Engine + Intelligence Engine + Platform Services. The website is a replaceable interface over this engine.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20.11"
+  },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node scripts/migrate.js",
+    "seed": "node scripts/seed.js",
+    "create-admin": "node scripts/create-admin.js",
+    "bootstrap": "node scripts/bootstrap.js",
+    "maintenance": "node scripts/maintenance.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/formbody": "^8.0.2",
+    "@fastify/static": "^8.0.4",
+    "better-sqlite3": "^11.8.1",
+    "fastify": "^5.2.1",
+    "fastify-plugin": "^6.0.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true
+  }
+}

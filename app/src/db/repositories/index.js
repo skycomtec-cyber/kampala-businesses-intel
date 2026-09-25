@@ -1,0 +1,74 @@
+import { createUsersRepository, createSessionsRepository, createPasswordResetRepository, createAuditRepository } from './users.js'
+import { createLocationsRepository } from './locations.js'
+import { createCategoriesRepository, createSkillsRepository } from './taxonomy.js'
+import { createSearchIndexRepository } from './searchIndex.js'
+import { createBusinessesRepository } from './businesses.js'
+import { createDemandRepository } from './demand.js'
+import { createMarketplaceRepository } from './marketplace.js'
+import { createIntelligenceRepository } from './intelligence.js'
+
+/**
+ * Repository wiring.
+ *
+ * The order below is the dependency order and it matters: the search index needs
+ * the database, businesses need the index (so a write reindexes in the same
+ * transaction), and skills need nothing. Every repository is a plain object over
+ * the same better-sqlite3 handle, which is why `createBusinessesRepository` can
+ * call `skills.findOrCreate` without a module import cycle.
+ *
+ * Nothing above this line imports better-sqlite3, so swapping the engine means
+ * replacing `db/driver.js` and reimplementing this folder's signatures.
+ */
+export function createRepositories(db, config) {
+  const users = createUsersRepository(db, config)
+  const sessions = createSessionsRepository(db, config)
+  const passwordResets = createPasswordResetRepository(db, config)
+  const audit = createAuditRepository(db)
+  const locations = createLocationsRepository(db)
+  const categories = createCategoriesRepository(db)
+  const skills = createSkillsRepository(db)
+  const searchIndex = createSearchIndexRepository(db)
+  const businesses = createBusinessesRepository(db, { searchIndex, skills, locations })
+  const demand = createDemandRepository(db, config)
+  const marketplace = createMarketplaceRepository(db, config)
+  const intelligence = createIntelligenceRepository(db, config)
+
+  return {
+    db,
+    users,
+    sessions,
+    passwordResets,
+    audit,
+    locations,
+    categories,
+    skills,
+    searchIndex,
+    businesses,
+    demand,
+    marketplace,
+    intelligence,
+
+    /**
+     * Runs a unit of work atomically.
+     *
+     * better-sqlite3 is synchronous, so this is the whole concurrency story: a
+     * transaction cannot be interleaved because there is no await inside it. The
+     * one rule that follows from that is that no callback passed here may perform
+     * I/O, or the whole database blocks until it finishes.
+     */
+    transaction(fn) {
+      return db.transaction(fn)
+    },
+
+    /** Cheap liveness check for the health endpoint. */
+    health() {
+      const row = db.prepare('SELECT COUNT(*) AS total FROM schema_migration').get()
+      return {
+        ok: true,
+        migrations: row.total,
+        database: config.database.file,
+        fts: true,
+      }
+    },
+  }
+}
