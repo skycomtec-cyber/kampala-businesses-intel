@@ -103,11 +103,25 @@ export function createMarketplaceRepository(db, config) {
     `INSERT INTO request_offer (id, request_id, business_id, message, price, status)
      VALUES (@id, @requestId, @businessId, @message, @price, @status)`,
   )
+  // Everything, for the business that made the offer and for the requester.
   const selectOffers = db.prepare(
     `SELECT o.*, b.name AS business_name, b.slug AS business_slug
        FROM request_offer o
        JOIN business b ON b.id = o.business_id
       WHERE o.request_id = ?
+      ORDER BY o.created_at ASC`,
+  )
+  // The public view. An offer names the business that made it, and a business
+  // that is not published is a business the public is not supposed to know
+  // exists yet, so an offer from one is not shown at all rather than shown
+  // anonymously: an offer with no name on it is indistinguishable from a mistake.
+  const selectPublicOffers = db.prepare(
+    `SELECT o.*, b.name AS business_name, b.slug AS business_slug
+       FROM request_offer o
+       JOIN business b ON b.id = o.business_id
+      WHERE o.request_id = ?
+        AND b.status = 'active'
+        AND b.verification_state = 'approved'
       ORDER BY o.created_at ASC`,
   )
   const selectOffer = db.prepare(
@@ -325,7 +339,9 @@ export function createMarketplaceRepository(db, config) {
           ...item,
           isFilled: fromSqlBool(item.isFilled),
         })),
-        offers: camelizeRows(selectOffers.all(id)).map((offer) => ({
+        offers: camelizeRows(
+          (includePrivate ? selectOffers : selectPublicOffers).all(id),
+        ).map((offer) => ({
           ...offer,
           price: numberOrNull(offer.price),
           // An offer is addressed to the requester. On a public view, who made

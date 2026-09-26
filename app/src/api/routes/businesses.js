@@ -29,13 +29,16 @@ const listQuerySchema = {
     locationId: { type: 'string', pattern: uuidPattern },
     skillId: { type: 'string', pattern: uuidPattern },
     status: { type: 'string' },
-    verificationState: { type: 'string' },
     capabilityLevel: { type: 'string', enum: [...CAPABILITY_LEVELS] },
     search: { type: 'string', maxLength: 120 },
     sort: { type: 'string', enum: ['newest', 'oldest', 'updated', 'name', 'name desc', 'status', 'verification'] },
     limit: { type: 'integer', minimum: 1, maximum: 100 },
     offset: { type: 'integer', minimum: 0 },
   },
+  // A misspelled filter has to be refused. Silently ignoring it answers with the
+  // whole set, which a caller reads as "nothing matched" and a client author
+  // reads as "my filter worked", and neither of them is true.
+  additionalProperties: false,
 }
 
 export default async function businessRoutes(fastify, { app }) {
@@ -56,10 +59,15 @@ export default async function businessRoutes(fastify, { app }) {
         locationId: request.query.locationId ?? null,
         skillId: request.query.skillId ?? null,
         status: request.query.status ?? null,
-        verificationState: request.query.verificationState ?? null,
         capabilityLevel: request.query.capabilityLevel ?? null,
         search: toText(request.query.search, { maxLength: 120 }),
         sort: request.query.sort ?? 'newest',
+        // Set here rather than left to the repository default, because this route
+        // is the public one and "publicly visible" is not a filter a caller gets
+        // to supply. There is no `verificationState` parameter on this endpoint on
+        // purpose: a public caller asking for a review state could only ever be
+        // asking for records the public must not see.
+        publishedOnly: true,
         ...page,
       })
       return paged(result, page)
@@ -201,6 +209,10 @@ export default async function businessRoutes(fastify, { app }) {
     {
       schema: {
         summary: 'Find an existing business by name, phone or website, to avoid duplicate listings.',
+        description:
+          'Operator-only. Matching deliberately looks at records that are not published, ' +
+          'because the duplicate it is looking for is usually one still sitting in the review ' +
+          'queue, so this endpoint cannot be public.',
         tags: ['businesses'],
         querystring: {
           type: 'object',
@@ -210,7 +222,7 @@ export default async function businessRoutes(fastify, { app }) {
           },
         },
       },
-      preHandler: fastify.enforceRateLimit('read'),
+      preHandler: fastify.requireCapability('business:read'),
     },
     async (request) => {
       const phone = toText(request.query.phone, { maxLength: 32 })

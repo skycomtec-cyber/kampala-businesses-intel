@@ -1,10 +1,10 @@
 import { paged, single, toPage, toText, uuidPattern, idParamSchema } from '../../lib/http.js'
 import {
   BUSINESS_STATUSES,
-  VERIFICATION_STATES,
   PRODUCT_CONDITIONS,
   CONTACT_KINDS,
 } from '../../../core/business.js'
+import { REVIEW_ACTIONS, REVIEW_STATES } from '../../../core/catalogue.js'
 import { CAPABILITY_LEVELS } from '../../../core/taxonomy.js'
 
 /**
@@ -16,10 +16,25 @@ import { CAPABILITY_LEVELS } from '../../../core/taxonomy.js'
  * because a rule that only runs in the admin api is a rule the public search
  * index and the supply counts will quietly disagree with.
  *
- * There is no public "claim your business" flow in phase 1. Supply enters through
- * an operator who has actually spoken to the business, which is why nothing here
- * creates an active listing without a verification decision.
+ * There is no public "claim your business" flow, and there is no admin route that
+ * creates a published listing either. A listing is created into the queue and
+ * reaches the directory by being reviewed, so the only way to publish is to
+ * record a decision, and the only way to record a decision is to say which one
+ * and why.
  */
+
+/**
+ * The decisions that need `business:publish` rather than `business:verify`.
+ *
+ * `approve` and `unapprove` are here because they change whether the public can
+ * see a listing at all. `reject` is not, because rejecting only ever removes a
+ * listing from public view, and an editor who can verify a listing is close
+ * enough to the facts to be trusted with taking one back down.
+ */
+const PUBLISHING_ACTIONS = new Set(['approve', 'unapprove'])
+const REVIEW_ACTION_NAMES = Object.freeze(
+  Object.keys(REVIEW_ACTIONS).filter((name) => name !== 'import'),
+)
 
 const businessBodySchema = {
   type: 'object',
@@ -31,7 +46,6 @@ const businessBodySchema = {
     categoryId: { type: 'string', pattern: uuidPattern },
     locationId: { type: 'string', pattern: uuidPattern },
     status: { type: 'string', enum: [...BUSINESS_STATUSES] },
-    verificationState: { type: 'string', enum: [...VERIFICATION_STATES] },
     capabilityLevel: { type: 'string', enum: [...CAPABILITY_LEVELS] },
     website: { type: 'string', maxLength: 300 },
     foundedYear: { type: 'integer', minimum: 1800, maximum: 2100 },
@@ -111,7 +125,7 @@ export default async function adminBusinessRoutes(fastify, { app }) {
             categoryId: { type: 'string', pattern: uuidPattern },
             locationId: { type: 'string', pattern: uuidPattern },
             status: { type: 'string', enum: [...BUSINESS_STATUSES] },
-            verificationState: { type: 'string', enum: [...VERIFICATION_STATES] },
+            verificationState: { type: 'string', enum: [...REVIEW_STATES] },
             search: { type: 'string', maxLength: 120 },
             sort: {
               type: 'string',
@@ -120,6 +134,10 @@ export default async function adminBusinessRoutes(fastify, { app }) {
             limit: { type: 'integer', minimum: 1, maximum: 100 },
             offset: { type: 'integer', minimum: 0 },
           },
+          // Same reasoning as the public list: an unknown filter is answered, not
+          // dropped. An operator who mistypes `verificationState` has to be told,
+          // because the alternative is a queue that silently shows everything.
+          additionalProperties: false,
         },
       },
       preHandler: fastify.requireCapability('business:read'),
@@ -224,39 +242,55 @@ export default async function adminBusinessRoutes(fastify, { app }) {
     '/admin/businesses/:id/verification',
     {
       schema: {
-        summary: 'Record a verification decision.',
+        summary: 'Record one review decision about a listing.',
         description:
-          'Verification is a separate action from editing because it is a claim about reality: it should appear in the audit log on its own, with a reason, and be reversible on its own.',
+          'Review is a separate action from editing because it is a claim about reality: ' +
+          'it should appear in the history on its own, with a reason, and be reversible on ' +
+          'its own. The body names the decision (`action`) rather than the state it leaves ' +
+          'the record in, because the decision is what was done and who did it, and a state ' +
+          'cannot tell you whether anybody chose it or arrived in it.',
         tags: ['admin'],
         params: idParamSchema,
         body: {
           type: 'object',
-          required: ['verificationState'],
+          required: ['action'],
+          additionalProperties: false,
           properties: {
-            verificationState: { type: 'string', enum: [...VERIFICATION_STATES] },
-            reason: { type: 'string', maxLength: 500 },
+            action: { type: 'string', enum: [...REVIEW_ACTION_NAMES] },
+            reason: { type: 'string', minLength: 3, maxLength: 500 },
           },
         },
       },
       preHandler: fastify.requireCapability('business:verify'),
     },
     async (request) => {
+      const { action, reason } = request.body
+      // Publishing is the one decision that puts the platform's name on a
+      // listing, so it is refused here rather than deeper in, where the error
+      // would read as a pipeline problem instead of a permission one.
+      if (PUBLISHING_ACTIONS.has(action)) {
+        await fastify.requireCapability('business:publish')(request)
+      }
+
       const before = app.businesses.requireById(request.params.id)
-      const updated = app.businesses.setVerification(
-        request.params.id,
-        request.body.verificationState,
-      )
+      const updated = app.businesses.review(request.params.id, {
+        action,
+        reason,
+        actor: { id: request.user.id, role: request.user.role },
+      })
       app.audit.record({
         actorId: request.user.id,
         actorRole: request.user.role,
-        action: 'business.verify',
+        action: `business.${action}`,
         entityType: 'business',
         entityId: updated.id,
-        reason: request.body.reason ?? null,
+        reason: reason ?? null,
         before,
         after: updated,
       })
-      return single(updated)
+      // The recorded events come back with the decision, so a client never has to
+      // make a second call to find out what a reviewer actually did.
+      return single({ ...updated, reviewEvents: app.catalogue.eventsFor(updated.id) })
     },
   )
 
@@ -270,25 +304,33 @@ export default async function adminBusinessRoutes(fastify, { app }) {
    * and the alternative is not care, it is operator fatigue, which is worse.
    *
    * Two deliberate limits. The reason is required, so a batch carries one claim
-   * in the log that says what was decided and why rather than a hundred entries
-   * with nothing in them. And the ids are capped, so one request cannot quietly
-   * decide the entire directory: the batch is a page of a queue, not the queue.
+   * in the history that says what was decided and why rather than a hundred
+   * entries with nothing in them. And the ids are capped, so one request cannot
+   * quietly decide the entire directory: the batch is a page of a queue, not the
+   * queue.
    *
-   * Publishing a contact point stays a separate decision per contact. Verifying
-   * a listing makes the business visible; it does not make a phone number that
+   * An id whose transition is illegal is reported as refused rather than skipped
+   * silently. A batch of a hundred where nine were refused has to be visible as
+   * a batch of ninety-one, or the operator walks away believing the queue is
+   * clear when it is not.
+   *
+   * Publishing a contact point stays a separate decision per contact. Approving a
+   * listing makes the business visible; it does not make a phone number that
    * somebody typed off a shopfront visible, and this route does not change that.
    */
   fastify.post(
     '/admin/businesses/verification',
     {
       schema: {
-        summary: 'Record one verification decision for several listings.',
+        summary: 'Record one review decision for several listings.',
         description:
-          'Applies the same state and reason to every id, and reports each outcome separately. An id that is already in that state is left alone rather than rewritten, so a retried request does not churn the audit log.',
+          'Applies the same action and reason to every id, and reports each outcome ' +
+          'separately, including the ones the pipeline refused.',
         tags: ['admin'],
         body: {
           type: 'object',
-          required: ['ids', 'verificationState', 'reason'],
+          required: ['ids', 'action', 'reason'],
+          additionalProperties: false,
           properties: {
             ids: {
               type: 'array',
@@ -296,7 +338,7 @@ export default async function adminBusinessRoutes(fastify, { app }) {
               maxItems: 100,
               items: { type: 'string', pattern: uuidPattern },
             },
-            verificationState: { type: 'string', enum: [...VERIFICATION_STATES] },
+            action: { type: 'string', enum: [...REVIEW_ACTION_NAMES] },
             reason: { type: 'string', minLength: 3, maxLength: 500 },
           },
         },
@@ -304,15 +346,18 @@ export default async function adminBusinessRoutes(fastify, { app }) {
       preHandler: fastify.requireCapability('business:verify'),
     },
     async (request) => {
-      const { ids, verificationState, reason } = request.body
+      const { ids, action, reason } = request.body
+      if (PUBLISHING_ACTIONS.has(action)) {
+        await fastify.requireCapability('business:publish')(request)
+      }
 
-      // The batch is one unit of work: every decision and every log entry it
+      // The batch is one unit of work: every decision and every history entry it
       // produces land together or not at all. A halfway-applied batch would
       // leave listings whose state says one thing and whose history says
       // nothing, which is the one outcome worse than refusing the batch.
       const decide = app.db.transaction(() => {
         const rows = []
-        const counts = { updated: 0, unchanged: 0, missing: 0 }
+        const counts = { updated: 0, unchanged: 0, refused: 0, missing: 0 }
 
         for (const id of ids) {
           const existing = app.businesses.findById(id)
@@ -321,32 +366,51 @@ export default async function adminBusinessRoutes(fastify, { app }) {
             rows.push({ id, outcome: 'missing' })
             continue
           }
-          if (existing.verificationState === verificationState) {
+          const target = REVIEW_ACTIONS[action]
+          if (existing.verificationState === target) {
             // Already decided this way. Saying so is more useful than reporting
             // a change that did not happen.
             counts.unchanged += 1
             rows.push({ id, name: existing.name, outcome: 'unchanged' })
             continue
           }
-          const updated = app.businesses.setVerification(id, verificationState)
-          app.audit.record({
-            actorId: request.user.id,
-            actorRole: request.user.role,
-            action: 'business.verify',
-            entityType: 'business',
-            entityId: updated.id,
-            reason,
-            before: existing,
-            after: updated,
-          })
-          counts.updated += 1
-          rows.push({ id, name: updated.name, outcome: 'updated' })
+          try {
+            const updated = app.businesses.review(id, {
+              action,
+              reason,
+              actor: { id: request.user.id, role: request.user.role },
+            })
+            app.audit.record({
+              actorId: request.user.id,
+              actorRole: request.user.role,
+              action: `business.${action}`,
+              entityType: 'business',
+              entityId: updated.id,
+              reason,
+              before: existing,
+              after: updated,
+            })
+            counts.updated += 1
+            rows.push({ id, name: updated.name, outcome: 'updated' })
+          } catch (error) {
+            // One impossible transition does not abandon the other ninety-nine,
+            // and it does not roll them back either: each is its own transaction
+            // boundary inside the batch, and the outcome is reported per id.
+            counts.refused += 1
+            rows.push({
+              id,
+              name: existing.name,
+              outcome: 'refused',
+              from: existing.verificationState,
+              reason: error.message,
+            })
+          }
         }
 
         return { counts, rows }
       })
 
-      return single(decide(), { verificationState, reason })
+      return single(decide(), { action, reason })
     },
   )
 

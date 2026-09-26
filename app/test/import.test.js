@@ -199,7 +199,7 @@ test('an unresolvable location fails the row instead of picking one', (t) => {
   const ctx = freshApp()
   t.after(() => ctx.cleanup())
 
-  const before = ctx.app.businesses.countActive()
+  const before = ctx.app.businesses.all().length
   const { summary } = importBusinessesFromCsv(
     ctx.app,
     csvFile(['Some Shop,' + BARBERING + ',Atlantis,0772000111']),
@@ -207,7 +207,7 @@ test('an unresolvable location fails the row instead of picking one', (t) => {
 
   assert.equal(summary.failed, 1)
   assert.equal(summary.created, 0)
-  assert.equal(ctx.app.businesses.countActive(), before)
+  assert.equal(ctx.app.businesses.all().length, before)
 })
 
 test('a path that only partly resolves is refused, not truncated', (t) => {
@@ -393,9 +393,13 @@ test('an import writes the listing, its contacts, services and skills', (t) => {
   const business = ctx.app.businesses.findBySlug('nakawa-hair-studio')
   assert.ok(business, 'the listing is findable by the slug derived from the name')
   assert.equal(business.sourceId, 'import:csv')
+  // A CSV row is a claim that a business exists, so it is written as a listing
+  // that nobody has checked: waiting for review, and absent from every public
+  // surface until a reviewer approves it.
   assert.equal(business.status, 'draft', 'an imported listing is a draft until somebody verifies it')
-  assert.equal(business.verificationState, 'unverified')
+  assert.equal(business.verificationState, 'pending_review')
   assert.equal(business.website, 'https://nakawa.ug/')
+  assert.equal(ctx.app.searchIndex.search({ query: 'Nakawa Hair Studio' }).total, 0)
 
   const profile = ctx.app.businesses.profile(business.id, { includePrivateContacts: true })
   assert.deepEqual(

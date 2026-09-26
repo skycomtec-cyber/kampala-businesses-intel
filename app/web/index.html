@@ -160,6 +160,17 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.88em;
       }
+
+      .note a {
+        color: var(--ink);
+        border-bottom: 2px solid var(--gold);
+        text-decoration: none;
+      }
+
+      .note a:hover,
+      .note a:focus-visible {
+        background: var(--gold);
+      }
     </style>
   </head>
   <body>
@@ -220,6 +231,11 @@
         Aggregates computed over fewer than <strong><span id="k">&mdash;</span> distinct people</strong> are
         withheld rather than rounded, so a small number of searches can never be subtracted down to
         an individual. The engine knows the answer and says that it is not publishable yet.
+      </p>
+
+      <p class="note">
+        Working on the directory yourself? <a href="/operator.html">Sign in to the verification queue</a>.
+        Accounts are created by an admin; there is no public sign-up.
       </p>
     </main>
 

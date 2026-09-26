@@ -11,6 +11,13 @@ import {
   assertProductCondition,
   PHONE_KINDS,
 } from '../../core/business.js'
+import {
+  reviewPlan,
+  legalActions,
+  actionFor,
+  labelFor,
+  assertIntakeState,
+} from '../../core/catalogue.js'
 import { assertCapabilityLevel } from '../../core/taxonomy.js'
 import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js'
 import { camelizeRow, camelizeRows, nowIso, toSqlBool, fromSqlBool } from '../mapping.js'
@@ -19,7 +26,7 @@ import { normalisePagination, where, likeParam, resolveOrder } from './common.js
 /**
  * Businesses and everything they offer.
  *
- * Two behaviours here are load-bearing for the rest of the platform:
+ * Three behaviours here are load-bearing for the rest of the platform:
  *
  *   1. Every write goes through core/business.js first, so no business can enter
  *      the database without a name, a category, a valid location and an explicit
@@ -28,12 +35,18 @@ import { normalisePagination, where, likeParam, resolveOrder } from './common.js
  *      transaction. The search index is not a background job that can fall
  *      behind, because a directory whose search results lag behind its own edits
  *      is a directory people stop trusting.
+ *   3. A record's place in the review pipeline, the history of how it got there
+ *      and its search visibility are one unit of work. `review` writes all three
+ *      inside a single transaction, because a decision that is recorded but not
+ *      indexed publishes a listing the public cannot find, and one that is indexed
+ *      but not recorded cannot be explained to the business that was described.
  */
 
 const BUSINESS_COLUMNS = `
   b.id, b.name, b.slug, b.description, b.category_id, b.primary_location_id,
   b.status, b.verification_state, b.capability_level, b.website, b.founded_year,
-  b.source_id, b.is_open_source, b.created_at, b.updated_at, b.verified_at,
+  b.source_id, b.catalogue_source_id, b.is_open_source, b.created_at, b.updated_at,
+  b.verified_at, b.approved_at, b.review_owner_id, b.review_claimed_at,
   b.last_confirmed_at
 `
 
@@ -54,11 +67,11 @@ export function createBusinessesRepository(db, deps = {}) {
     `INSERT INTO business (
        id, name, slug, description, category_id, primary_location_id, status,
        verification_state, capability_level, website, founded_year, source_id,
-       is_open_source
+       catalogue_source_id, is_open_source
      ) VALUES (
        @id, @name, @slug, @description, @categoryId, @primaryLocationId, @status,
        @verificationState, @capabilityLevel, @website, @foundedYear, @sourceId,
-       @isOpenSource
+       @catalogueSourceId, @isOpenSource
      )`,
   )
   const selectById = db.prepare(
@@ -83,9 +96,12 @@ export function createBusinessesRepository(db, deps = {}) {
   const selectByCategory = db.prepare(
     `SELECT ${BUSINESS_COLUMNS} FROM business b WHERE b.category_id = ?`,
   )
+  // The published directory. `approved` and `active` are both required, and the
+  // rule is written out here rather than left to a caller's memory of it, because
+  // this is the query that decides what the public can see at all.
   const selectPublic = db.prepare(
     `SELECT ${BUSINESS_COLUMNS} FROM business b
-      WHERE b.status = 'active' AND b.verification_state <> 'rejected'
+      WHERE b.status = 'active' AND b.verification_state = 'approved'
       ORDER BY b.name ASC`,
   )
   const selectByContact = db.prepare(
@@ -113,6 +129,45 @@ export function createBusinessesRepository(db, deps = {}) {
   )
   const touchConfirmed = db.prepare(
     `UPDATE business SET last_confirmed_at = @now, updated_at = @now WHERE id = @id`,
+  )
+
+  /**
+   * One step of the review pipeline, as a single statement.
+   *
+   * The CASE expressions are the interesting part, and they are written this way so
+   * that the timestamps can never disagree with the state. A record that is not
+   * `verified` has no `verified_at`, a record that is not `approved` has no
+   * `approved_at`, and a record that is not `under_review` has no owner — not
+   * because three separate branches were kept in step by hand, but because the
+   * state column is the only input.
+   *
+   * A record reaching `approved` with no `verified_at` cannot happen through
+   * review(), because approval is only reachable from `verified`. The COALESCE is
+   * here so that a database edited outside the application still ends up with a
+   * date for the decision that published it.
+   */
+  const applyReviewStep = db.prepare(
+    `UPDATE business
+        SET verification_state = @to,
+            verified_at = CASE
+              WHEN @to = 'verified' THEN @now
+              WHEN @to = 'approved' THEN COALESCE(verified_at, @now)
+              ELSE NULL
+            END,
+            approved_at = CASE WHEN @to = 'approved' THEN @now ELSE NULL END,
+            review_owner_id = @ownerId,
+            review_claimed_at = CASE WHEN @to = 'under_review' THEN @now ELSE NULL END,
+            updated_at = @now
+      WHERE id = @id`,
+  )
+  const insertReviewEvent = db.prepare(
+    `INSERT INTO review_event (
+       id, business_id, from_state, to_state, action,
+       actor_id, actor_role, reason, source_id, created_at
+     ) VALUES (
+       @id, @businessId, @fromState, @toState, @action,
+       @actorId, @actorRole, @reason, @sourceId, @createdAt
+     )`,
   )
 
   // Secondary locations
@@ -174,8 +229,17 @@ export function createBusinessesRepository(db, deps = {}) {
      )`,
   )
   const selectService = db.prepare(`SELECT * FROM service WHERE id = ?`)
+  // Two reads, on purpose. `selectServices` is what a profile shows, so it
+  // excludes the retired ones. `selectEveryService` is what the indexer walks, so
+  // it includes them: a service that has just been retired is no longer returned
+  // by the first query, which means an indexer that only walked that query would
+  // never get to flip its document to inactive, and the search results and the
+  // profile would disagree about whether it exists.
   const selectServices = db.prepare(
     `SELECT * FROM service WHERE business_id = ? AND is_active = 1 ORDER BY name ASC`,
+  )
+  const selectEveryService = db.prepare(
+    `SELECT * FROM service WHERE business_id = ? ORDER BY name ASC`,
   )
   const updateService = db.prepare(
     `UPDATE service
@@ -234,13 +298,23 @@ export function createBusinessesRepository(db, deps = {}) {
     `INSERT OR IGNORE INTO service_skill (service_id, skill_id) VALUES (?, ?)`,
   )
 
-  const countActive = db.prepare(
+  // How many businesses the public can actually see. Same predicate as
+  // selectPublic, deliberately, so the count on a dashboard can never disagree
+  // with the directory it is counting.
+  const countPublished = db.prepare(
     `SELECT COUNT(*) AS total FROM business
-      WHERE status = 'active' AND verification_state <> 'rejected'`,
+      WHERE status = 'active' AND verification_state = 'approved'`,
+  )
+  // How many are waiting for a reviewer. Exposed because an operator needs to know
+  // whether the queue is growing, and a directory that silently accumulates
+  // unpublished records is a directory whose coverage claims are wrong.
+  const countByReviewState = db.prepare(
+    `SELECT verification_state, COUNT(*) AS total FROM business
+      GROUP BY verification_state`,
   )
   const countByLocation = db.prepare(
     `SELECT COUNT(*) AS total FROM business
-      WHERE primary_location_id = ? AND status = 'active'`,
+      WHERE primary_location_id = ? AND status = 'active' AND verification_state = 'approved'`,
   )
   // The supply count behind every "how much does Kampala actually have here?"
   // question, including the browse counters in the api.
@@ -250,11 +324,17 @@ export function createBusinessesRepository(db, deps = {}) {
   // the one a person means by "in Wakiso district": almost no business is
   // registered against the district node itself, so an exact match would report
   // zero for a district full of workshops.
+  //
+  // `publishedOnly` is the public-facing rule and is on by default: a coverage
+  // count that included records still sitting in the review queue would describe
+  // a directory bigger than the one anybody can search. The gap engine does not
+  // use this query, so nothing that needs unapproved evidence is affected.
   const countFiltered = db.prepare(
     `SELECT COUNT(*) AS total FROM business b
        JOIN location l ON l.id = b.primary_location_id
        JOIN category c ON c.id = b.category_id
       WHERE (@status IS NULL OR b.status = @status)
+        AND (@publishedOnly = 0 OR b.verification_state = 'approved')
         AND (@categoryId IS NULL
              OR b.category_id = @categoryId
              OR (@includeSubtree = 1
@@ -265,10 +345,16 @@ export function createBusinessesRepository(db, deps = {}) {
              OR (@includeSubtree = 1
                  AND ('/' || l.path_ids || '/') LIKE '%/' || @locationId || '/%'))`,
   )
+  // Every record that could still be real, including the ones nobody has checked
+  // yet. The gap engine reads these and weights them (see core/business.js), so the
+  // filter here is "not already decided to be false" rather than "published": a
+  // queue of checked-but-unapproved records is still evidence about where supply
+  // is, while a rejected or archived record is a decision that it is not.
   const supplyRows = db.prepare(
     `SELECT id, status, verification_state, capability_level, primary_location_id
        FROM business
-      WHERE status = 'active' AND verification_state <> 'rejected'`,
+      WHERE status = 'active'
+        AND verification_state NOT IN ('rejected', 'archived')`,
   )
 
   function requireBusiness(id) {
@@ -400,7 +486,11 @@ export function createBusinessesRepository(db, deps = {}) {
       locationPath: location ? location.pathNames : null,
       summary: service.description ? service.description.slice(0, 200) : null,
       trustWeight: supplyWeight(business),
-      isActive: business.status === 'active' && service.is_active === 1,
+      // A service inherits its owner's approval. Indexing a service off a queued
+      // business is the exact leak the approval rule exists to stop: the business
+      // row would be absent from results while its services kept answering
+      // searches with a description nobody reviewed.
+      isActive: isPubliclyVisible(business) && service.is_active === 1,
     }
   }
 
@@ -426,7 +516,7 @@ export function createBusinessesRepository(db, deps = {}) {
       locationPath: location ? location.pathNames : null,
       summary: product.description ? product.description.slice(0, 200) : null,
       trustWeight: supplyWeight(business),
-      isActive: business.status === 'active' && product.status === 'available',
+      isActive: isPubliclyVisible(business) && product.status === 'available',
     }
   }
 
@@ -444,7 +534,7 @@ export function createBusinessesRepository(db, deps = {}) {
     const business = businessRow(row)
 
     searchIndex.index(businessDocument(business))
-    for (const service of selectServices.all(businessId)) {
+    for (const service of selectEveryService.all(businessId)) {
       searchIndex.index(serviceDocument(service, business))
     }
     for (const product of selectProducts.all(businessId)) {
@@ -455,6 +545,13 @@ export function createBusinessesRepository(db, deps = {}) {
   const repository = {
     create(input) {
       const built = buildBusiness(input)
+      // A record is only ever created into a state that means "nobody has checked
+      // this yet". A caller that arrives with `approved` is either a script that
+      // misunderstood the api or an operator who has decided to skip the queue, and
+      // both are exactly what this phase exists to prevent, so the request is
+      // refused rather than quietly downgraded: a silent downgrade publishes a
+      // record nobody agreed to publish, which is the failure this rules out.
+      assertIntakeState(built.verificationState)
       const id = newId()
       const slug = resolveSlug(built.slug || built.name)
 
@@ -472,6 +569,7 @@ export function createBusinessesRepository(db, deps = {}) {
           website: built.website,
           foundedYear: built.foundedYear,
           sourceId: input.sourceId ?? null,
+          catalogueSourceId: input.catalogueSourceId ?? null,
           isOpenSource: toSqlBool(built.isOpenSource),
         })
         // The primary location also exists as a business_location row, so that
@@ -584,18 +682,45 @@ export function createBusinessesRepository(db, deps = {}) {
      *
      * Both joins are inner joins on NOT NULL foreign keys, so they change no
      * counts; they exist only to give the subtree predicates a path column.
+     *
+     * Only approved records are counted. This is the public coverage counter —
+     * "how many electricians does Wakiso actually have" — and a number that
+     * included records nobody had reviewed would describe a market that does not
+     * exist yet. An admin wanting the raw totals asks the review queue instead.
      */
-    count({ status = 'active', categoryId = null, locationId = null, includeSubtree = false } = {}) {
+    count({
+      status = 'active',
+      categoryId = null,
+      locationId = null,
+      includeSubtree = false,
+      publishedOnly = true,
+    } = {}) {
       return countFiltered.get({
         status,
         categoryId,
         locationId,
         includeSubtree: includeSubtree ? 1 : 0,
+        publishedOnly: publishedOnly ? 1 : 0,
       }).total
     },
 
-    countActive() {
-      return countActive.get().total
+    /** How many businesses the public can see. */
+    countPublished() {
+      return countPublished.get().total
+    },
+
+    /**
+     * How many records sit in each review state, including the zeroes.
+     *
+     * Every state is present in the result even when nothing is in it, because
+     * this is read by an operator deciding what to work on next, and a bar chart
+     * with a missing column is a bar chart that has to be interpreted.
+     */
+    reviewCounts() {
+      const rows = countByReviewState.all()
+      const counts = {}
+      for (const row of rows) counts[row.verification_state] = row.total
+      return counts
     },
 
     /**
@@ -621,11 +746,19 @@ export function createBusinessesRepository(db, deps = {}) {
       limit,
       offset,
       includeContacts = false,
+      publishedOnly = false,
     } = {}) {
       const page = normalisePagination({ limit, offset })
       const conditions = []
       const params = {}
 
+      // Off by default, because the review queue needs to list what is not
+      // published. When a caller asks for it, the approval requirement is added
+      // as a condition rather than left to that caller, so the flag can only ever
+      // narrow the result: it cannot be used to ask a different question.
+      if (publishedOnly) {
+        conditions.push("b.status = 'active' AND b.verification_state = 'approved'")
+      }
       if (status) {
         conditions.push('b.status = @status')
         params.status = assertBusinessStatus(status)
@@ -687,13 +820,26 @@ export function createBusinessesRepository(db, deps = {}) {
 
     update(id, patch) {
       const current = businessRow(requireBusiness(id))
+      // Review state is not an editable field. It changes through `review`, which
+      // records who decided and why; allowing it here as well would give the
+      // platform two doors to the same room, and the one without a trail is the
+      // one somebody will use by accident.
+      if (
+        patch.verificationState !== undefined &&
+        patch.verificationState !== current.verificationState
+      ) {
+        throw new ValidationError(
+          'Review state is changed by a review action, not by editing the record.',
+          { field: 'verificationState', current: current.verificationState },
+        )
+      }
       const merged = {
         name: patch.name ?? current.name,
         description: patch.description === undefined ? current.description : patch.description,
         categoryId: patch.categoryId ?? current.categoryId,
         locationId: patch.locationId ?? current.primaryLocationId,
         status: patch.status ?? current.status,
-        verificationState: patch.verificationState ?? current.verificationState,
+        verificationState: current.verificationState,
         capabilityLevel: patch.capabilityLevel ?? current.capabilityLevel,
         website: patch.website === undefined ? current.website : normaliseUrl(patch.website),
         foundedYear: patch.foundedYear ?? current.foundedYear,
@@ -718,7 +864,10 @@ export function createBusinessesRepository(db, deps = {}) {
           website: built.website,
           foundedYear: built.foundedYear,
           isOpenSource: toSqlBool(built.isOpenSource),
-          verifiedAt: built.verificationState === 'verified' ? now : current.verifiedAt,
+          // The review pipeline owns these two. An edit may change a business's
+          // details on the day it is approved, and that edit must not silently
+          // move the date the facts were last checked.
+          verifiedAt: current.verifiedAt,
           lastConfirmedAt: now,
           now,
         })
@@ -745,23 +894,91 @@ export function createBusinessesRepository(db, deps = {}) {
     },
 
     /**
-     * Verification is an editorial decision, so it is a dedicated method rather
-     * than a field on `update`. That way every path that grants a verified
-     * badge also writes `verified_at`, and the audit log has one action to record.
+     * Moves a record through the review pipeline.
+     *
+     * This is the only way a record's review state changes, and it is one unit of
+     * work on purpose. Four things have to move together, and the moment they can
+     * come apart is the moment the platform starts telling people two different
+     * stories about the same business:
+     *
+     *   - the state on the business,
+     *   - the event in review_event that says who decided and why,
+     *   - the timestamps and the reviewer's ownership, so a queue shows who is
+     *     working on what,
+     *   - the search documents, because approval is precisely the moment a listing
+     *     becomes findable and a decision nobody can search is not a decision.
+     *
+     * `actor` is the operator who decided. It is optional so that a scripted
+     * ingestion can record an event, but any call that changes what the public can
+     * see should carry one: a review trail with a null actor is a review trail that
+     * cannot be argued with, which is the same as no trail.
      */
-    setVerification(id, verificationState, { at = null } = {}) {
-      requireBusiness(id)
+    review(id, { action, actor = null, reason = null, at = null } = {}) {
+      const current = requireBusiness(id)
+      const from = current.verification_state
+      const steps = reviewPlan(from, action)
+      if (!steps) {
+        throw new ConflictError(
+          `A record that is ${labelFor(from)} cannot be ${String(action)}.`,
+          { from, action, allowedActions: legalActions(from) },
+        )
+      }
+
       const now = at ?? nowIso()
-      db.prepare(
-        `UPDATE business
-            SET verification_state = @state,
-                verified_at = CASE WHEN @state = 'verified' THEN @now ELSE verified_at END,
-                updated_at = @now
-          WHERE id = @id`,
-      ).run({ id, state: assertVerificationState(verificationState), now })
-      const write = db.transaction(() => reindex(id))
+      const write = db.transaction(() => {
+        for (const step of steps) {
+          applyReviewStep.run({
+            id,
+            to: step.to,
+            now,
+            ownerId: step.to === 'under_review' ? actor?.id ?? null : null,
+          })
+          insertReviewEvent.run({
+            id: newId(),
+            businessId: id,
+            fromState: step.from,
+            toState: step.to,
+            action: step.action,
+            actorId: actor?.id ?? null,
+            actorRole: actor?.role ?? null,
+            reason: step.action === 'claim' ? null : reason ?? null,
+            sourceId: null,
+            createdAt: now,
+          })
+        }
+        reindex(id)
+      })
       write()
+
       return repository.requireById(id)
+    },
+
+    /**
+     * The same decision expressed as a target state instead of an action.
+     *
+     * Kept because the pre-phase-2 api and the operator queue speak in states, and
+     * because "put this record into approved" is a legitimate thing for a script to
+     * ask for. What it no longer does is allow the jump: the transition table in
+     * core/catalogue.js applies, so a caller asking for an impossible state gets a
+     * 409 naming the states it could legally reach rather than a silent write.
+     */
+    setVerification(id, verificationState, { at = null, actor = null, reason = null } = {}) {
+      const current = requireBusiness(id)
+      const target = assertVerificationState(verificationState)
+      if (current.verification_state === target) return businessRow(current)
+      const action = actionFor(current.verification_state, target)
+      if (!action) {
+        throw new ConflictError(
+          `A record that is ${labelFor(current.verification_state)} cannot become ` +
+            `${labelFor(target)}.`,
+          {
+            from: current.verification_state,
+            to: target,
+            allowedActions: legalActions(current.verification_state),
+          },
+        )
+      }
+      return repository.review(id, { action, actor, reason, at })
     },
 
     setStatus(id, status) {
@@ -1121,10 +1338,21 @@ export function createBusinessesRepository(db, deps = {}) {
       return true
     },
 
-    /** Product stock for the Second Life Electronics vertical. */
+    /**
+     * Product stock for the Second Life Electronics vertical.
+     *
+     * Public, so the owning business has to be public: this returns the seller's
+     * name and slug, and a product left on a listing that is still in the review
+     * queue is a business nobody has agreed to publish.
+     */
     findRecyclableProducts({ condition = null, limit = 50, offset = 0 } = {}) {
       const page = normalisePagination({ limit, offset })
-      const conditions = ['p.is_recyclable = 1', "p.status = 'available'"]
+      const conditions = [
+        'p.is_recyclable = 1',
+        "p.status = 'available'",
+        "b.status = 'active'",
+        "b.verification_state = 'approved'",
+      ]
       const params = { limit: page.limit, offset: page.offset }
       if (condition) {
         conditions.push('p.condition = @condition')

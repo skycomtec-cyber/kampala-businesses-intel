@@ -19,12 +19,14 @@
 import process from 'node:process'
 import { loadConfig } from './config.js'
 import { openApp } from './db/index.js'
-import { seedReferenceData } from './seed/index.js'
+import { seedReferenceData, seedCatalogue } from './seed/index.js'
 import { buildApi } from './api/index.js'
 
 const config = loadConfig()
 const app = openApp({ config })
 seedReferenceData(app, { config })
+// After the vocabulary, so the record has a category and a district to point at.
+seedCatalogue(app, { config })
 
 const server = await buildApi({ app, config })
 let shuttingDown = false

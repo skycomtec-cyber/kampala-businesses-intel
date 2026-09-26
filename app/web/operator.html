@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Verification queue &middot; Kampala Intelligence Platform</title>
+    <style>
+      /*
+       * The operator surface for the verification queue.
+       *
+       * It shares the palette and the type stack of the status page on purpose:
+       * this is the same product, one layer deeper. What changes is the density
+       * and the weight, because this screen is read for an hour at a time by
+       * somebody making a decision about a real business, and the reason field
+       * is the only thing on it that is not optional.
+       */
+      :root {
+        --ink: #0d2a30;
+        --ink-soft: #163e46;
+        --gold: #f0b740;
+        --paper: #f7f4ee;
+        --card: #fffdf8;
+        --muted: #6d7f83;
+        --line: #dcd6c9;
+        --danger: #c0453b;
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0 1.5rem 12rem;
+        background: var(--paper);
+        color: var(--ink);
+        font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+
+      main,
+      .bar {
+        max-width: 62rem;
+        margin: 0 auto;
+      }
+
+      /* Masthead. Deliberately thin: this is a working screen, not a landing page. */
+      .masthead {
+        max-width: 62rem;
+        margin: 0 auto;
+        padding: 1.75rem 0 1rem;
+        border-bottom: 2px solid var(--ink);
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .masthead h1 {
+        margin: 0;
+        font-size: 1.4rem;
+        letter-spacing: -0.01em;
+      }
+
+      .masthead .sub {
+        margin: 0.15rem 0 0;
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      .who {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 0.86rem;
+        color: var(--ink-soft);
+      }
+
+      /* Sign in. One card, because there is one thing to do here. */
+      .gate {
+        max-width: 26rem;
+        margin: 3.5rem auto 0;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-top: 3px solid var(--gold);
+        border-radius: var(--radius);
+        padding: 1.75rem;
+      }
+
+      .gate h2 {
+        margin: 0 0 0.35rem;
+        font-size: 1.1rem;
+      }
+
+      .gate p {
+        margin: 0 0 1.25rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 1rem;
+        font-size: 0.85rem;
+        color: var(--ink-soft);
+      }
+
+      input[type='email'],
+      input[type='password'],
+      input[type='text'] {
+        display: block;
+        width: 100%;
+        margin-top: 0.3rem;
+        padding: 0.6rem 0.7rem;
+        font: inherit;
+        color: var(--ink);
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+
+      input:focus-visible,
+      button:focus-visible,
+      .row input:focus-visible {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
+      }
+
+      button {
+        font: inherit;
+        cursor: pointer;
+        border-radius: 6px;
+        border: 1px solid var(--ink);
+        background: var(--ink);
+        color: var(--paper);
+        padding: 0.6rem 1.1rem;
+      }
+
+      button.quiet {
+        background: transparent;
+        color: var(--ink-soft);
+        border-color: var(--line);
+        padding: 0.4rem 0.7rem;
+        font-size: 0.85rem;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
+      /* Queue. Rows are index cards from a survey: what it is, where it is, and
+         the number somebody wrote down. */
+      .queue-head {
+        display: flex;
+        align-items: baseline;
+        gap: 0.9rem;
+        flex-wrap: wrap;
+        padding: 1.6rem 0 0.75rem;
+      }
+
+      .queue-head h2 {
+        margin: 0;
+        font-size: 1.05rem;
+      }
+
+      .queue-head p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.86rem;
+        flex: 1 1 auto;
+      }
+
+      .rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0 0.9rem;
+        padding: 0.95rem 0.2rem;
+        border-bottom: 1px solid var(--line);
+        align-items: start;
+      }
+
+      /* Big enough to hit with a thumb. A 17px checkbox is a precision task,
+         and picking a row is the one thing this page asks a person to do. */
+      .row input {
+        margin-top: 0.3rem;
+        width: 1.5rem;
+        height: 1.5rem;
+        accent-color: var(--ink);
+        cursor: pointer;
+      }
+
+      .row .name {
+        margin: 0;
+        font-size: 1.02rem;
+        font-weight: 600;
+      }
+
+      /* Category and place, separated by a hairline rather than a middot: two
+         pieces of reference data, not a list of tags. */
+      .where {
+        margin: 0.15rem 0 0;
+        font-size: 0.86rem;
+        color: var(--ink-soft);
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+      }
+
+      .where .rule {
+        width: 1px;
+        height: 0.9em;
+        background: var(--line);
+      }
+
+      .where .absent {
+        color: var(--muted);
+      }
+
+      /* A trust level, or a review state: the two words on a row that are not a
+         name. Bordered rather than filled, because they are labels for the reader
+         and not the reader's own status. */
+      .tag {
+        font-size: 0.72rem;
+        padding: 0.05rem 0.4rem;
+        border-radius: 4px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+
+      .where .kind {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      /* The queue filter sits with the count rather than in a toolbar, because it
+         answers the same question: how much of this is there. */
+      .filter {
+        font-size: 0.82rem;
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      .filter select {
+        font: inherit;
+        color: var(--ink);
+        padding: 0.2rem 0.3rem;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--paper);
+      }
+
+      .none {
+        margin: 0.5rem 0 0;
+        font-size: 0.85rem;
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      .empty,
+      .problem {
+        margin: 1.25rem 0 0;
+        font-size: 0.9rem;
+      }
+
+      .empty {
+        color: var(--muted);
+        padding: 1.5rem 0;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .problem {
+        color: var(--danger);
+      }
+
+      .problem:empty {
+        display: none;
+      }
+
+      /*
+       * The decision bar. It sits at the bottom of the viewport for the whole
+       * session, because the reason is the part of this screen with a rule
+       * attached to it, and a rule you have to scroll up to satisfy is a rule
+       * nobody satisfies.
+       */
+      .bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 0.75rem 1.25rem;
+        padding: 0.9rem 1.5rem calc(0.9rem + env(safe-area-inset-bottom));
+        background: var(--card);
+        border-top: 2px solid var(--ink);
+        box-shadow: 0 -6px 18px rgba(13, 42, 48, 0.07);
+      }
+
+      .bar .selection {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--ink-soft);
+        white-space: nowrap;
+      }
+
+      .bar .selection b {
+        font-size: 1.15rem;
+      }
+
+      .states {
+        display: flex;
+        gap: 1rem;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        align-items: center;
+      }
+
+      .states label {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin: 0;
+        font-size: 0.88rem;
+        color: var(--ink);
+        white-space: nowrap;
+      }
+
+      .states input {
+        accent-color: var(--ink);
+        width: 1.15rem;
+        height: 1.15rem;
+      }
+
+      /* The label is the target, so it carries the height a finger needs rather
+         than the 13px radio inside it. */
+      .states label {
+        padding: 0.55rem 0.7rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        cursor: pointer;
+      }
+
+      .bar .reason {
+        grid-column: 1 / -1;
+        margin: 0;
+      }
+
+      .bar .reason input {
+        margin-top: 0.25rem;
+      }
+
+      .bar .outcome {
+        grid-column: 1 / -1;
+        margin: 0;
+        font-size: 0.86rem;
+        color: var(--ink-soft);
+      }
+
+      .bar .outcome:empty {
+        display: none;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      @media (max-width: 46rem) {
+        .bar {
+          grid-template-columns: 1fr;
+        }
+        .states {
+          flex-wrap: wrap;
+        }
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .row {
+          transition: background-color 120ms ease;
+        }
+        .row:hover {
+          background: #fbf8f1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="masthead">
+      <div>
+        <h1>Verification queue</h1>
+        <p class="sub">Kampala Intelligence Platform</p>
+      </div>
+      <div class="who" id="who" hidden>
+        <span id="who-name"></span>
+        <button type="button" class="quiet" id="sign-out">Sign out</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="gate" id="gate" hidden>
+        <h2>Sign in</h2>
+        <p>Accounts are created by an admin through the admin API. There is no public sign-up.</p>
+        <form id="sign-in-form" novalidate>
+          <label>
+            Email
+            <input type="email" id="email" name="email" autocomplete="username" required />
+          </label>
+          <label>
+            Password
+            <input type="password" id="password" name="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit" id="sign-in">Sign in</button>
+          <p class="problem" id="gate-problem" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="queue" hidden>
+        <div class="queue-head">
+          <h2>Awaiting a decision</h2>
+          <p id="queue-count"></p>
+          <label class="filter">
+            Show
+            <select id="state-filter">
+              <option value="">everything in review</option>
+              <option value="imported">just imported</option>
+              <option value="pending_review">waiting for review</option>
+              <option value="under_review">being checked</option>
+              <option value="verified">verified, not yet published</option>
+              <option value="approved">approved</option>
+              <option value="rejected">rejected</option>
+            </select>
+          </label>
+          <button type="button" class="quiet" id="refresh">Refresh</button>
+        </div>
+        <p class="problem" id="queue-problem" role="alert"></p>
+        <ul class="rows" id="rows"></ul>
+        <p class="empty" id="empty" hidden>
+          Nothing is waiting. Every listing that has been surveyed has a decision against it.
+        </p>
+      </section>
+    </main>
+
+    <div class="bar" id="bar" hidden>
+      <p class="selection" id="selection">Nothing selected</p>
+
+      <fieldset class="states" id="actions">
+        <legend hidden>Decision</legend>
+      </fieldset>
+
+      <button type="button" id="record" disabled>Record decision</button>
+
+      <label class="reason">
+        Why
+        <input
+          type="text"
+          id="reason"
+          maxlength="500"
+          autocomplete="off"
+          placeholder="Walked Nakawa on 25 September; the owner confirmed the shop is there and trades."
+        />
+      </label>
+
+      <p class="outcome" id="outcome" role="status" aria-live="polite"></p>
+    </div>
+
+    <script>
+      /*
+       * The session cookie is HttpOnly, so nothing here ever holds a token: the
+       * sign-in POST sets the cookie and every later call is a plain same-origin
+       * fetch. That is the whole reason this page can be a static file.
+       *
+       * Every value that came from a survey file is written with textContent and
+       * never with innerHTML. A business name is operator-typed text from a CSV,
+       * which is exactly the kind of string that must not be able to become
+       * markup in the one screen an operator trusts.
+       */
+      const gate = document.getElementById('gate')
+      const queue = document.getElementById('queue')
+      const bar = document.getElementById('bar')
+      const rows = document.getElementById('rows')
+      const empty = document.getElementById('empty')
+      const who = document.getElementById('who')
+      const reasonInput = document.getElementById('reason')
+      const recordButton = document.getElementById('record')
+      const outcome = document.getElementById('outcome')
+      const PAGE = 25
+
+      const state = {
+        user: null,
+        /**
+         * The capabilities the server reported for this session, read from
+         * /auth/me rather than restated here. A copy of the role table in this
+         * file would be a second definition that drifts from core/auth.js, and the
+         * operator who trusted it would press a button the server refuses.
+         */
+        capabilities: new Set(),
+        items: [],
+        selected: new Set(),
+        canDecide: true,
+        state: '',
+        categoryNames: new Map(),
+        locationNames: new Map(),
+      }
+
+      /** The decisions that change whether the public can see a listing at all. */
+      const PUBLISHING = new Set(['approve', 'unapprove'])
+
+      /**
+       * Whether this session may take an action, judged against the server's own
+       * answer rather than a role name. The server still checks; this only decides
+       * what to offer.
+       */
+      const may = (capability) => state.capabilities.has(capability)
+
+      /** One request helper, so every call agrees on credentials and errors. */
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          credentials: 'same-origin',
+          headers: { accept: 'application/json', ...(options.body ? { 'content-type': 'application/json' } : {}) },
+          ...options,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(payload?.error?.message ?? 'The request could not be completed.')
+          error.status = response.status
+          throw error
+        }
+        return payload
+      }
+
+      /*
+       * Reference names. The queue row carries a category id and a location id,
+       * and an id is not something a reviewer can decide from, so the two public
+       * reference trees are fetched once and held as id -> name. 32 locations and
+       * 90 categories: cheap, cacheable, and no reason to add a join to the list
+       * query for the sake of one page.
+       */
+      async function loadReferenceNames() {
+        const [categories, locations] = await Promise.all([
+          api('/api/v1/categories').catch(() => null),
+          api('/api/v1/locations?limit=500').catch(() => null),
+        ])
+        const flatten = (nodes) => {
+          for (const node of nodes ?? []) {
+            state.categoryNames.set(node.id, node.name)
+            flatten(node.children)
+          }
+        }
+        flatten(categories?.data)
+        for (const location of locations?.data ?? []) {
+          state.locationNames.set(location.id, location.name)
+        }
+      }
+
+      const say = (element, message) => {
+        element.textContent = message ?? ''
+      }
+
+      /* --- signing in and out ------------------------------------------- */
+
+      document.getElementById('sign-in-form').addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const button = document.getElementById('sign-in')
+        const problem = document.getElementById('gate-problem')
+        say(problem, '')
+        button.disabled = true
+        try {
+          await api('/api/v1/auth/login', {
+            method: 'POST',
+            body: {
+              email: document.getElementById('email').value.trim(),
+              password: document.getElementById('password').value,
+            },
+          })
+          // The password has done its job. Nothing keeps a copy of it.
+          document.getElementById('password').value = ''
+          await enter()
+        } catch (error) {
+          say(problem, error.message)
+        } finally {
+          button.disabled = false
+        }
+      })
+
+      document.getElementById('sign-out').addEventListener('click', async () => {
+        try {
+          await api('/api/v1/auth/logout', { method: 'POST' })
+        } catch {
+          // A session that is already gone is the state we wanted anyway.
+        }
+        state.user = null
+        showGate()
+      })
+
+      /* --- the queue ---------------------------------------------------- */
+
+      function showGate() {
+        gate.hidden = false
+        queue.hidden = true
+        bar.hidden = true
+        who.hidden = true
+        say(outcome, '')
+        document.getElementById('password').focus()
+      }
+
+      async function enter() {
+        try {
+          const me = await api('/api/v1/auth/me')
+          state.user = me.data.user
+          state.capabilities = new Set(me.data.capabilities ?? [])
+        } catch (error) {
+          if (error.status === 401) {
+            showGate()
+            return
+          }
+          say(document.getElementById('gate-problem'), error.message)
+          showGate()
+          return
+        }
+        gate.hidden = true
+        queue.hidden = false
+        bar.hidden = false
+        who.hidden = false
+        say(document.getElementById('who-name'), `${state.user.displayName} (${state.user.role})`)
+        // Saying up front what this account cannot do is better than letting an
+        // operator fill in a reason, press the button, and be refused.
+        if (!may('business:verify')) {
+          state.canDecide = false
+          say(
+            document.getElementById('who-name'),
+            `${state.user.displayName} (${state.user.role}) — read only`,
+          )
+        } else if (!may('business:publish')) {
+          say(
+            document.getElementById('who-name'),
+            `${state.user.displayName} (${state.user.role}) — can verify, cannot publish`,
+          )
+        }
+        await Promise.all([loadReferenceNames(), loadQueue()])
+        reasonInput.focus()
+      }
+
+      async function loadQueue() {
+        const problem = document.getElementById('queue-problem')
+        say(problem, '')
+        try {
+          // The catalogue queue, not the admin business list. It answers the
+          // question this screen exists to ask: what arrived, from where, how far
+          // through review it is, and what may be done to it next. It also hands
+          // over the legal actions per row, so this file does not carry a second
+          // copy of the state machine.
+          const filter = state.state ? `&state=${encodeURIComponent(state.state)}` : ''
+          const page = await api(`/api/v1/admin/catalogue/queue?limit=${PAGE}${filter}`)
+          state.items = page.data
+          state.selected.clear()
+          const counts = page.meta.counts ?? {}
+          const backlog = ['imported', 'pending_review', 'under_review', 'verified']
+            .map((step) => `${counts[step] ?? 0} ${step.replace(/_/g, ' ')}`)
+            .join(' · ')
+          say(document.getElementById('queue-count'), `${backlog}`)
+          renderRows()
+          updateBar()
+        } catch (error) {
+          if (error.status === 401) {
+            showGate()
+            return
+          }
+          // A role that cannot read businesses gets told so, and is not left
+          // staring at an empty queue that looks like good news.
+          say(problem, error.message)
+          say(document.getElementById('queue-count'), '')
+          state.items = []
+          renderRows()
+          updateBar()
+        }
+      }
+
+      document.getElementById('refresh').addEventListener('click', loadQueue)
+
+      document.getElementById('state-filter').addEventListener('change', (event) => {
+        state.state = event.target.value
+        loadQueue()
+      })
+
+      function renderRows() {
+        rows.replaceChildren()
+        empty.hidden = state.items.length > 0
+        for (const item of state.items) {
+          rows.append(buildRow(item))
+        }
+      }
+
+      function buildRow(item) {
+        const row = document.createElement('li')
+        row.className = 'row'
+
+        const box = document.createElement('input')
+        box.type = 'checkbox'
+        box.setAttribute('aria-label', `Select ${item.name}`)
+        box.addEventListener('change', () => {
+          if (box.checked) state.selected.add(item.id)
+          else state.selected.delete(item.id)
+          updateBar()
+        })
+
+        const body = document.createElement('div')
+
+        const name = document.createElement('p')
+        name.className = 'name'
+        name.textContent = item.name
+        body.append(name)
+
+        // What kind of business it is, and where. A reviewer is deciding whether a
+        // listing is true, and a computer repair shop in Wakiso is a different claim
+        // from one in Nansana, so this is not decoration either.
+        const where = document.createElement('p')
+        where.className = 'where'
+        const category = state.categoryNames.get(item.categoryId)
+        const place = state.locationNames.get(item.primaryLocationId)
+        const bits = []
+        if (category) bits.push({ text: category })
+        else if (item.categoryId) bits.push({ text: 'Unfiled category', absent: true })
+        else bits.push({ text: 'No category', absent: true })
+        if (place) bits.push({ text: place })
+        bits.forEach((bit, index) => {
+          if (index > 0) {
+            const rule = document.createElement('span')
+            rule.className = 'rule'
+            rule.setAttribute('aria-hidden', 'true')
+            where.append(rule)
+          }
+          const span = document.createElement('span')
+          if (bit.absent) span.className = 'absent'
+          span.textContent = bit.text
+          where.append(span)
+        })
+        body.append(where)
+
+        // Where it came from, and how far that source is trusted. A reviewer
+        // deciding whether a listing is true is partly deciding whether the
+        // source is, so both are on the row rather than one page away.
+        const origin = document.createElement('p')
+        origin.className = 'where'
+        const sourceText = document.createElement('span')
+        sourceText.textContent = item.sourceName ?? 'No source recorded'
+        if (!item.sourceName) sourceText.className = 'absent'
+        const trust = document.createElement('span')
+        trust.className = 'tag'
+        trust.textContent = item.sourceTrustLevel ?? 'unattributed'
+        const label = document.createElement('span')
+        label.className = 'kind'
+        label.textContent = item.stateLabel ?? item.verificationState
+        origin.append(sourceText, trust, label)
+        body.append(origin)
+
+        if (item.ownerName) {
+          const claimed = document.createElement('p')
+          claimed.className = 'none'
+          claimed.textContent = `Claimed by ${item.ownerName}.`
+          body.append(claimed)
+        }
+
+        row.append(box, body)
+        return row
+      }
+
+      /* --- the decision ------------------------------------------------- */
+
+      /**
+       * The actions that are legal for every selected row, and that this session is
+       * allowed to take.
+       *
+       * The intersection, not the union. A batch of three where only two can be
+       * rejected is not a batch of three, and offering the button anyway would mean
+       * the operator reads "rejected 3" from a response that says "refused 1" — so
+       * the server would report it, but the screen should not have offered it.
+       */
+      function availableActions() {
+        const rows = state.items.filter((item) => state.selected.has(item.id))
+        if (rows.length === 0) return []
+        return rows
+          .reduce((shared, row) => {
+            const actions = row.availableActions ?? []
+            return shared === null ? actions : shared.filter((action) => actions.includes(action))
+          }, null)
+          .filter((action) => {
+            if (!may('business:verify')) return false
+            if (PUBLISHING.has(action)) return may('business:publish')
+            return true
+          })
+      }
+
+      const ACTION_LABELS = {
+        claim: 'Take it',
+        verify: 'Verified the facts',
+        approve: 'Approve and publish',
+        unapprove: 'Withdraw from the directory',
+        reject: 'Reject',
+        submit: 'Send back to review',
+        reopen: 'Reopen',
+        archive: 'Archive',
+        restore: 'Restore',
+      }
+
+      /** Redraws the decision buttons for whatever is selected right now. */
+      function renderActions() {
+        const holder = document.getElementById('actions')
+        const chosen = chosenAction()
+        holder.replaceChildren()
+        for (const action of availableActions()) {
+          const label = document.createElement('label')
+          const input = document.createElement('input')
+          input.type = 'radio'
+          input.name = 'action'
+          input.value = action
+          input.checked = action === chosen
+          label.append(input, document.createTextNode(` ${ACTION_LABELS[action] ?? action}`))
+          holder.append(label)
+        }
+        if (availableActions().length === 0) {
+          const none = document.createElement('p')
+          none.className = 'none'
+          none.textContent = state.selected.size
+            ? 'No single decision applies to every selected listing.'
+            : 'Select the listings this decision applies to.'
+          holder.append(none)
+        }
+      }
+
+      function chosenAction() {
+        const picked = document.querySelector('input[name="action"]:checked')
+        return picked ? picked.value : null
+      }
+
+      function updateBar() {
+        const count = state.selected.size
+        const label = document.getElementById('selection')
+        label.replaceChildren()
+        if (count === 0) {
+          label.append('Select the listings this decision applies to.')
+        } else {
+          const strong = document.createElement('b')
+          strong.textContent = String(count)
+          label.append(strong, ` listing${count === 1 ? '' : 's'} selected`)
+        }
+        // A decision that has been picked before a different selection was made may
+        // no longer be legal, so the buttons are rebuilt from the current selection
+        // and the button follows what they allow.
+        renderActions()
+        const ready =
+          count > 0 && chosenAction() !== null && reasonInput.value.trim().length >= 3
+        recordButton.disabled = !ready || !state.canDecide
+      }
+
+      document.getElementById('actions').addEventListener('change', updateBar)
+      reasonInput.addEventListener('input', updateBar)
+      reasonInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !recordButton.disabled) {
+          event.preventDefault()
+          record()
+        }
+      })
+
+      recordButton.addEventListener('click', () => {
+        record()
+      })
+
+      async function record() {
+        if (recordButton.disabled) return
+        const ids = state.items
+          .map((item) => item.id)
+          .filter((id) => state.selected.has(id))
+        const action = chosenAction()
+        const reason = reasonInput.value.trim()
+
+        recordButton.disabled = true
+        say(outcome, 'Recording…')
+        try {
+          const result = await api('/api/v1/admin/businesses/verification', {
+            method: 'POST',
+            body: { ids, action, reason },
+          })
+          const { updated, unchanged, missing, refused } = result.data.counts
+          const parts = [`Recorded ${updated} decision${updated === 1 ? '' : 's'}.`]
+          // The other outcomes are reported rather than hidden: a retry that
+          // changed nothing is information, and a refusal means the server
+          // disagreed with this screen, which is worth seeing plainly.
+          if (unchanged > 0) parts.push(`${unchanged} already in that state.`)
+          if (refused > 0) parts.push(`${refused} refused by the server.`)
+          if (missing > 0) parts.push(`${missing} no longer exist.`)
+          say(outcome, parts.join(' '))
+          reasonInput.value = ''
+          await loadQueue()
+        } catch (error) {
+          if (error.status === 401) {
+            showGate()
+            return
+          }
+          if (error.status === 403) {
+            // The server is the authority on what a role may do; take its word,
+            // stop offering the control, and do not carry a capability table in
+            // this file that could drift from the one in core/auth.js.
+            state.canDecide = false
+            say(outcome, error.message)
+          } else {
+            say(outcome, error.message)
+          }
+          updateBar()
+        } finally {
+          updateBar()
+        }
+      }
+
+      /* --- start -------------------------------------------------------- */
+
+      loadReferenceNames().catch(() => {})
+      enter()
+    </script>
+  </body>
+</html>

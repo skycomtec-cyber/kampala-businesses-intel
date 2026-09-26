@@ -53,7 +53,7 @@ export async function metaRoutes(fastify, { config, app }) {
     async () =>
       single({
         name: 'Kampala Businesses Intelligence Platform',
-        phase: 1,
+        phase: 2,
         engine: 'kampala-data-engine',
         apiVersion: 'v1',
         environment: config.env,
@@ -68,7 +68,22 @@ export async function metaRoutes(fastify, { config, app }) {
           // tell "this engine has not been seeded" from "this engine is young".
           categories: app.categories.all().length,
           skills: app.skills.count(),
-          activeBusinesses: app.businesses.countActive(),
+          // Named for what it counts. An earlier version of this field counted
+          // every active row, which after the review pipeline arrived meant the
+          // number grew as records were imported and shrank as they were
+          // approved, so the figure nobody could interpret was the one published.
+          publishedBusinesses: app.businesses.countPublished(),
+          // How much is waiting for a human. This is a workload figure, not a
+          // coverage figure, which is the difference between the two numbers
+          // above and why they are not summed anywhere.
+          businessesInReview: Object.values(app.businesses.reviewCounts()).reduce(
+            (total, n) => total + n,
+            0,
+          ),
+          catalogueSources: app.catalogue.allSources().filter((s) => s.isActive).length,
+          // Published search documents only. The index deliberately keeps a
+          // document for a record that is not public, so counting its rows
+          // unfiltered would report the size of the queue.
           searchDocuments: app.searchIndex.count(),
         },
       }),

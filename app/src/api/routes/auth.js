@@ -1,6 +1,6 @@
 import { single } from '../lib/http.js'
 import { sessionContext } from '../lib/actor.js'
-import { ROLES } from '../../core/auth.js'
+import { ROLES, CAPABILITIES } from '../../core/auth.js'
 import { UnauthenticatedError } from '../../core/errors.js'
 
 /**
@@ -72,8 +72,8 @@ export default async function authRoutes(fastify, { config, app }) {
       schema: {
         summary: 'Destroy the current session.',
         tags: ['auth'],
-        preHandler: fastify.requireAuth(),
       },
+      preHandler: fastify.requireAuth(),
     },
     async (request, reply) => {
       app.sessions.destroy(request.sessionToken)
@@ -82,18 +82,30 @@ export default async function authRoutes(fastify, { config, app }) {
     },
   )
 
+  /**
+   * Who you are, what you may do, and when the session ends.
+   *
+   * The capability list is the point. A browser that has to guess which controls
+   * to show ends up showing a button the server will refuse, or hiding one it
+   * would accept, and both are the interface lying to the operator. Sending the
+   * table means there is exactly one definition of who may do what — the one in
+   * core/auth.js — and the interface reads it rather than restating it.
+   */
   fastify.get(
     '/auth/me',
     {
       schema: {
         summary: 'The signed-in user and their capabilities.',
         tags: ['auth'],
-        preHandler: fastify.requireAuth(),
       },
+      preHandler: fastify.requireAuth(),
     },
     async (request) =>
       single({
         user: request.user,
+        // Sorted, so the payload is stable and a client can compare two sessions
+        // without caring which order the table happened to be written in.
+        capabilities: [...CAPABILITIES[request.user.role]].sort(),
         session: {
           expiresAt: request.session.expiresAt,
           lastSeenAt: request.session.lastSeenAt,
@@ -107,7 +119,6 @@ export default async function authRoutes(fastify, { config, app }) {
       schema: {
         summary: 'Change your own password.',
         tags: ['auth'],
-        preHandler: fastify.requireAuth(),
         body: {
           type: 'object',
           required: ['currentPassword', 'newPassword'],
@@ -118,6 +129,7 @@ export default async function authRoutes(fastify, { config, app }) {
           },
         },
       },
+      preHandler: fastify.requireAuth(),
     },
     async (request, reply) => {
       app.users.changePassword(
@@ -218,8 +230,8 @@ export default async function authRoutes(fastify, { config, app }) {
       schema: {
         summary: 'The roles the platform recognises.',
         tags: ['auth'],
-        preHandler: fastify.requireAuth(),
       },
+      preHandler: fastify.requireAuth(),
     },
     async () => single({ roles: ROLES }),
   )

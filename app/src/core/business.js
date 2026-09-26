@@ -1,6 +1,11 @@
 import { ValidationError } from './errors.js'
 import { slugify, normalisePhone, normaliseUrl, isValidEmail } from './identifiers.js'
 import { CAPABILITY_RANK, assertCapabilityLevel } from './taxonomy.js'
+import {
+  REVIEW_STATES,
+  PUBLISHED_STATE,
+  assertReviewState,
+} from './catalogue.js'
 
 /**
  * Supply-side domain rules.
@@ -10,18 +15,24 @@ import { CAPABILITY_RANK, assertCapabilityLevel } from './taxonomy.js'
  * repairer is a business, "laptop screen replacement" is a service on that
  * business, and "used ThinkPad battery" is a product on it.
  *
- * Verification state is tracked separately from capability level. A business can
- * be confidently known to exist (verification) and still offer only informal
- * services (capability), and the two must not be collapsed into one score.
+ * Review state is tracked separately from capability level. A business can be
+ * confidently known to exist (review) and still offer only informal services
+ * (capability), and the two must not be collapsed into one score.
+ *
+ * The review vocabulary itself lives in catalogue.js, because it is a pipeline
+ * with rules about which step may follow which, and those rules are used by the
+ * importers and the api layer as much as by this file.
  */
 
-export const VERIFICATION_STATES = Object.freeze([
-  'unverified',
-  'claimed',
-  'pending_review',
-  'verified',
-  'rejected',
-])
+/**
+ * Kept as the historical name of the review vocabulary.
+ *
+ * `business.verification_state` is the column, and it has been called that since
+ * the first migration, so the name stays. What the values mean has changed: see
+ * catalogue.js. Re-exported rather than re-declared so there is exactly one list
+ * in the codebase that a schema, a route and a test can all be checked against.
+ */
+export const VERIFICATION_STATES = REVIEW_STATES
 
 export const BUSINESS_STATUSES = Object.freeze([
   'draft',
@@ -50,12 +61,7 @@ export const CONTACT_KINDS = Object.freeze([
 ])
 
 export function assertVerificationState(state) {
-  if (!VERIFICATION_STATES.includes(state)) {
-    throw new ValidationError(`Unknown verification state "${state}".`, {
-      allowed: VERIFICATION_STATES,
-    })
-  }
-  return state
+  return assertReviewState(state)
 }
 
 export function assertBusinessStatus(status) {
@@ -100,8 +106,12 @@ export function buildBusiness(input) {
   }
 
   const status = assertBusinessStatus(input.status ?? 'draft')
+  // A business written by hand is not raw intake, but it is also not checked, so
+  // it enters the review queue rather than appearing in public view. Callers that
+  // are ingesting from a source pass `imported` or the state the source claims;
+  // nothing passes `approved` without going through the review pipeline.
   const verificationState = assertVerificationState(
-    input.verificationState ?? 'unverified',
+    input.verificationState ?? 'pending_review',
   )
   const capabilityLevel = assertCapabilityLevel(
     input.capabilityLevel ?? 'unverified',
@@ -229,31 +239,51 @@ export function capabilityWeight(level) {
 }
 
 /**
- * Whether a listing may be shown in public search results. A listing is
- * public only if the business is active, and we never let a business escalate
- * itself out of the unverified state: verification is an editorial decision.
+ * Whether a listing may be shown to the public.
+ *
+ * This is the rule the whole phase turns on, and it is stricter than it used to
+ * be: before the review pipeline, any active business that had not been rejected
+ * was public, so a row nobody had read looked exactly like a listing the platform
+ * stood behind. Now a listing is public only when it is active *and* approved,
+ * which means somebody checked the facts and somebody else, or the same person
+ * later, agreed to publish them.
+ *
+ * The two conditions are not one. Approval is a claim about the facts; `active` is
+ * a decision about today. A business can be approved and suspended, and the
+ * public sees nothing, which is the behaviour an operator expects when a shop
+ * closes for a week.
  */
 export function isPubliclyVisible(business) {
-  return business.status === 'active' && business.verificationState !== 'rejected'
+  return business.status === 'active' && business.verificationState === PUBLISHED_STATE
 }
 
 /**
- * Whether a listing counts toward supply in gap analysis. Unverified businesses
- * still count, but at a reduced weight, so that the gap engine does not
- * conclude a market is well supplied on the strength of unconfirmed claims
- * while still not discarding the signal entirely.
+ * How much a business counts toward supply in gap analysis.
+ *
+ * Unapproved businesses still count, at a reduced weight. Throwing them away
+ * instead would be wrong in a way that is hard to see: a queue of a thousand
+ * checked-but-unpublished records is a large amount of real evidence about where
+ * supply is, and a gap engine that cannot see it would report a market as empty
+ * while somebody works through its queue. What it must not do is let an unchecked
+ * claim outweigh a verified one, which is what the weights below prevent.
+ *
+ * Rejected and archived records count for nothing at all. A rejection is a
+ * decision that the record is not a real business, and continuing to read supply
+ * from it would mean a bad review quietly survives as data.
  */
 export function supplyWeight(business) {
-  if (!isPubliclyVisible(business)) return 0
-  const base = 0.5
-  const byVerification = {
-    verified: 0.5,
-    claimed: 0.35,
-    pending_review: 0.3,
-    unverified: 0.15,
+  if (business.status !== 'active') return 0
+  const byReviewState = {
+    approved: 0.5,
+    verified: 0.45,
+    under_review: 0.3,
+    pending_review: 0.25,
+    imported: 0.15,
     rejected: 0,
+    archived: 0,
   }
-  return base + (byVerification[business.verificationState] ?? 0) + capabilityWeight(business.capabilityLevel) * 0.05
+  const base = 0.5
+  return base + (byReviewState[business.verificationState] ?? 0) + capabilityWeight(business.capabilityLevel) * 0.05
 }
 
 function clampText(value, max) {

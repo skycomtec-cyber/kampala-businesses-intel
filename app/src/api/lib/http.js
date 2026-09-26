@@ -21,8 +21,14 @@ export function single(data, meta) {
  * `total` is the count before paging, so a client can render "showing 1-25 of
  * 340" without a second request, and `hasMore` is what the infinite-scroll
  * callers actually branch on.
+ *
+ * Anything else on the page object is copied into `meta` as well. A route that has
+ * something extra to say about the page — the queue's per-step counts, a
+ * generator's revision — belongs in the envelope, and the alternative was
+ * silently dropping it, which is how a response ends up promising counts that
+ * never arrive.
  */
-export function collection(items, { total, limit, offset }) {
+export function collection(items, { total, limit, offset, ...extra }) {
   return {
     data: items,
     meta: {
@@ -31,6 +37,7 @@ export function collection(items, { total, limit, offset }) {
       offset,
       count: items.length,
       hasMore: offset + items.length < total,
+      ...extra,
     },
   }
 }
@@ -45,7 +52,8 @@ export function collection(items, { total, limit, offset }) {
 export function paged(result, page) {
   const items = Array.isArray(result) ? result : result.items
   const total = Array.isArray(result) ? items.length : result.total
-  return collection(items, { total, limit: page.limit, offset: page.offset })
+  const { limit, offset, ...extra } = page
+  return collection(items, { total, limit, offset, ...extra })
 }
 
 const INTEGER = /^-?\d+$/

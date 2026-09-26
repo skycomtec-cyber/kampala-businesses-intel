@@ -43,10 +43,17 @@ export function httpError(status, code, message, details = null) {
   return new HttpError(status, code, message, details)
 }
 
-/** Maps a domain error onto a status, defaulting to 400 for the unlisted ones. */
+/**
+ * Maps a domain error onto a status.
+ *
+ * An error whose code is not in the table is a bug, not a request, so it becomes
+ * a 500. Defaulting those to 400 would report a crash in our own code as the
+ * caller's mistake, and would keep it out of the 5xx branch below that logs the
+ * stack, which is how a plain TypeError can hide in a codebase for months.
+ */
 export function statusForDomainError(error) {
   if (error instanceof HttpError) return error.status
-  return STATUS_BY_CODE[error?.code] ?? 400
+  return STATUS_BY_CODE[error?.code] ?? 500
 }
 
 /** The error body. Identical in shape on every failure, whatever caused it. */

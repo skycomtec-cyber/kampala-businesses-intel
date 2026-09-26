@@ -16,9 +16,33 @@ import { DEFAULT_MIGRATIONS_DIR } from './driver.js'
  * later changes, that is not a migration, it is an edited history, and the
  * runner refuses rather than leaving two machines with the same version number
  * and different schemas.
+ *
+ * A migration that has to change a CHECK constraint recreates a table, which
+ * needs foreign key enforcement suspended around its transaction. It says so
+ * with a `-- migrate:table_rebuild` line, and the runner then replaces the
+ * enforcement with an explicit `PRAGMA foreign_key_check` before committing.
  */
 
 const MIGRATION_PATTERN = /^(\d{3,})_([a-z0-9_]+)\.sql$/
+
+/**
+ * Opt-in marker for the SQLite table-rebuild procedure.
+ *
+ * Changing a CHECK constraint means recreating a table, and the documented
+ * procedure requires foreign key enforcement to be suspended while the old table
+ * is dropped, because `DROP TABLE` on a parent runs an implicit `DELETE FROM` and
+ * that would cascade to every child row. Suspension is a connection setting and
+ * cannot be done from inside the migration's transaction, so a migration that
+ * needs it declares it in a comment and the runner does it around the
+ * transaction.
+ *
+ * It is opt-in per migration rather than global because the runner's default is
+ * the stricter behaviour: a schema change that violates a foreign key fails
+ * immediately, as it always has. A migration that opts in gets the same
+ * guarantee back through an explicit `PRAGMA foreign_key_check` at the end of its
+ * transaction, which is a stronger check than enforcement, not a weaker one.
+ */
+const REBUILD_MARKER = /^\s*--\s*migrate:table_rebuild\s*$/m
 
 const CREATE_LEDGER = `
   CREATE TABLE IF NOT EXISTS schema_migration (
@@ -157,24 +181,59 @@ export function migrate(db, options = {}) {
     }
 
     const startedAt = process.hrtime.bigint()
-    // Each migration is atomic on its own. A migration with a syntax error half
-    // way through leaves the database exactly as it was.
-    const apply = db.transaction(() => {
-      db.exec(migration.sql)
-      record.run({
-        id: migration.id,
-        checksum: migration.checksum,
-        statements: countStatements(migration.sql),
-        duration_ms: Number((process.hrtime.bigint() - startedAt) / 1000000n),
+    const rebuildsTable = REBUILD_MARKER.test(migration.sql)
+    if (rebuildsTable) {
+      db.pragma('foreign_keys = OFF')
+    }
+    try {
+      // Each migration is atomic on its own. A migration with a syntax error half
+      // way through leaves the database exactly as it was.
+      const apply = db.transaction(() => {
+        db.exec(migration.sql)
+        if (rebuildsTable) {
+          assertNoForeignKeyViolations(db, migration)
+        }
+        record.run({
+          id: migration.id,
+          checksum: migration.checksum,
+          statements: countStatements(migration.sql),
+          duration_ms: Number((process.hrtime.bigint() - startedAt) / 1000000n),
+        })
       })
-    })
-    apply()
+      apply()
+    } finally {
+      if (rebuildsTable) {
+        db.pragma('foreign_keys = ON')
+      }
+    }
 
     results.push({ id: migration.id, status: 'applied' })
     onProgress({ ...migration, status: 'applied' })
   }
 
   return results
+}
+
+/**
+ * The integrity check that stands in for the suspended foreign keys.
+ *
+ * Run inside the migration's transaction so a rebuild that leaves a dangling
+ * reference rolls back rather than being applied and then complained about: a
+ * migration recorded as applied is a promise that the schema is sound, and a
+ * schema with a dangling foreign key is not one.
+ */
+function assertNoForeignKeyViolations(db, migration) {
+  const violations = db.pragma('foreign_key_check')
+  if (violations.length > 0) {
+    const detail = violations
+      .slice(0, 5)
+      .map((row) => `${row.table || '(rowid ' + row.rowid + ')'}`)
+      .join(', ')
+    throw new Error(
+      `Migration "${migration.id}" left ${violations.length} foreign key ` +
+        `violation(s) behind: ${detail}${violations.length > 5 ? ', ...' : ''}`,
+    )
+  }
 }
 
 export function migrationStatus(db, options = {}) {

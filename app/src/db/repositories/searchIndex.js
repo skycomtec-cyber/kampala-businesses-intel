@@ -62,7 +62,10 @@ export function createSearchIndexRepository(db) {
   const selectDocumentsBySource = db.prepare(
     `SELECT ${DOCUMENT_COLUMNS} FROM search_document WHERE source_type = ? AND source_id = ?`,
   )
-  const selectDocumentIds = db.prepare(`SELECT id FROM search_document`)
+  const countDocuments = db.prepare(
+    `SELECT COUNT(*) AS total FROM search_document
+      WHERE (@publishedOnly = 0 OR is_active = 1)`,
+  )
   const insertFts = db.prepare(
     `INSERT INTO search_index (rowid, name, body, keywords) VALUES (?, ?, ?, ?)`,
   )
@@ -279,8 +282,16 @@ export function createSearchIndexRepository(db) {
       return count.length
     },
 
-    count() {
-      return selectDocumentIds.all().length
+    /**
+     * How many documents the public can be served from.
+     *
+     * A document is kept after its record stops being public, because the record
+     * is usually only rejected or withdrawn, and re-reviewing it later is cheaper
+     * than rebuilding its documents. So the raw row count is not the size of the
+     * public index, it is the size of the public index plus the queue.
+     */
+    count({ publishedOnly = true } = {}) {
+      return countDocuments.get({ publishedOnly: publishedOnly ? 1 : 0 }).total
     },
 
     require(docKey) {

@@ -12,8 +12,25 @@ venv
 .windsurfrules
 # Skills the agent tooling downloads on demand, plus the lock file recording
 # what it fetched. Both are reproducible from the user-level copy.
+#
+# Every tool gets its own mirror of the same skills under its own dot folder,
+# so they are listed rather than folded into a `.*` rule, which would also take
+# .gitignore itself and the other named files with it. `skills/` is the same
+# mirror one level up.
 .agents/
+skills/
 skills-lock.json
+.autohand/
+.claude/
+.codeartsdoer/
+.codebuddy/
+.codemaker/
+.codestudio/
+.commandcode/
+.continue/
+.grok/
+.jazz/
+.openhands/
 .DS_Store
 Thumbs.db
 ~*

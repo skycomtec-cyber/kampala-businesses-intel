@@ -284,6 +284,25 @@ published on its own.
 The contact evidence on those rows is operator-only. `GET /api/v1/businesses` carries no `contacts`
 field and no counts, so a caller cannot read a private number out of a listing page by accident.
 
+### The same queue, in a browser
+
+`http://127.0.0.1:4310/operator.html` is the queue as a page, so working through an import does not
+mean pasting ids into curl. It is one static file with no build step and no dependencies, served from
+the same origin as the api, and the `/` status page links to it.
+
+Sign in with an account from `create-admin` or the `create-admin.js` launcher. There is no sign-up,
+deliberately: a public form that creates accounts would collect the very addresses this platform
+exists not to collect. The page holds no token. The session is an HttpOnly cookie, so the browser
+cannot hand it to a cross-site bug, and every page load asks `GET /api/v1/auth/me` who it is talking
+to rather than trusting anything in local storage.
+
+Each row carries what the decision turns on: the contact points as they were imported, marked
+private or public, the category and the place resolved to the names a person would say, and nothing
+that has already been decided. Tick the rows, choose `Verified`, `Rejected` or `Needs checking`, write
+one reason, and the page sends the same batch endpoint the curl example above uses, up to 100 rows at a
+time. The reason is required, for the same reason it is required in the api: an audit line that says
+only "verified" is worth very little later.
+
 ## API
 
 Base URL `http://127.0.0.1:4310`. Every response uses the same envelope:
@@ -350,6 +369,14 @@ API version is deployed to know whether the process is alive.
 | `POST` | `/api/v1/admin/reference/locations/bulk` | `reference:write` |
 | `POST` | `/api/v1/admin/reference/categories` | `reference:write` |
 | `POST` | `/api/v1/admin/reference/categories/bulk` | `reference:write` |
+| `GET` | `/api/v1/admin/catalogue/sources` | `source:read` |
+| `POST` | `/api/v1/admin/catalogue/sources` | `source:write` |
+| `GET` | `/api/v1/admin/catalogue/sources/:id` | `source:read` |
+| `PATCH` | `/api/v1/admin/catalogue/sources/:id` | `source:write` |
+| `GET` | `/api/v1/admin/catalogue/queue` | `business:verify` |
+| `POST` | `/api/v1/admin/catalogue/intake` | `business:write` |
+| `POST` | `/api/v1/admin/catalogue/records/:id/review` | `business:verify` (actions: `claim`, `submit`, `verify`, `approve`*, `unapprove`*, `reject`, `archive`, `reopen`; *requires `business:publish`) |
+| `GET` | `/api/v1/admin/catalogue/records/:id/history` | `business:read` |
 
 Roles, from `GET /api/v1/auth/roles`:
 
@@ -509,8 +536,8 @@ print(created.json()["data"]["slug"])
 │   │   ├── api/              plugins, routes, response envelope
 │   │   └── server.js         the process
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin, import
-│   ├── test/                 74 tests, no network, temporary folders only
-│   └── web/index.html        the status page served at /
+│   ├── test/                 89 tests, no network, temporary folders only
+│   └── web/                  the two pages: status at /, operator at /operator.html
 ├── install.js                Pinokio: dependencies, migrations, reference data, tests
 ├── start.js                  Pinokio: maintenance, then the server
 ├── create-admin.js           Pinokio: the only way an account is created
@@ -530,13 +557,22 @@ cd app
 npm test
 ```
 
-77 tests, no network access, each against its own temporary database. The API tests mount the real
+89 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
-decisions rather than plumbing: the response envelope, the k-anonymity floor, private contact
-points, the capability table, the rate limiter, that every documented filter actually filters, that
-every location level the data holds is filterable, and the rule that a bad sign-in cannot be used
-to find out which addresses exist. The CLI tests run `create-admin` and `import` as real child
-processes, since the interesting ways for them to fail — a launcher step that pipes nothing, a piped
-email with no password, an import whose sheet has one bad row in it — are all about how they read
-stdin and what they do with a file somebody else wrote.
+decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule
+that only approved records reach public search, the response envelope, the k-anonymity floor, private contact
+points, the capability table, the rate limiter, that every documented filter actually filters and an
+undocumented one is refused, that every signed-in route refuses an anonymous caller, that a bug in
+our own code is answered as a 500 rather than as the caller's mistake, that every location level the
+data holds is filterable, and the rule that a bad sign-in cannot be used to find out which addresses
+exist. The CLI tests run `create-admin` and `import` as real child processes, since the interesting
+ways for them to fail — a launcher step that pipes nothing, a piped email with no password, an import
+whose sheet has one bad row in it — are all about how they read stdin and what they do with a file
+somebody else wrote.
+
+The operator page has no build step and therefore no unit tests, so it is driven the only way that
+says anything: a real Chromium against a real server on a throwaway database, signing in, working a
+batch, and reading the rows back. That pass is what caught `preHandler` being written inside a
+`schema` object, where Fastify ignored it and four routes answered anonymous callers.
+

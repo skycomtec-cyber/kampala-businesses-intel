@@ -180,11 +180,21 @@ export function createCategoriesRepository(db) {
       return roots
     },
 
+    /**
+     * Puts a published count on every node, rolled up the tree.
+     *
+     * `approved` and `active` are required here for the same reason they are
+     * required in the search index: this number is what a client shows a user to
+     * decide whether a market is covered, so counting records that nobody has
+     * checked would promise coverage the directory does not have. An operator
+     * who wants the queue size asks the review queue, which is a different
+     * question and lives at a different path.
+     */
     _attachCounts(nodes, roots) {
       const rows = db
         .prepare(
           `SELECT category_id, COUNT(*) AS total FROM business
-            WHERE status = 'active' AND verification_state <> 'rejected'
+            WHERE status = 'active' AND verification_state = 'approved'
             GROUP BY category_id`,
         )
         .all()

@@ -1,4 +1,5 @@
 import { slugify } from '../core/identifiers.js'
+import { seedCatalogueDemo } from './catalogue-demo.js'
 import {
   CATEGORIES,
   CATEGORIES_VERSION,
@@ -190,4 +191,35 @@ export function seedReferenceData(app, { config = { seed: { reference: true } } 
   seedSkills(app, seedCategories(app, counters), counters)
   recordProvenance(app)
   return counters
+}
+
+/**
+ * Registers the manual source and imports the one real demonstration record.
+ *
+ * Not part of `seedReferenceData`, and the split is the point. `seedReferenceData`
+ * is vocabulary: countries, districts, categories, skills, the things every
+ * install shares. This is content: one business, arriving through the catalogue
+ * like any other, landing in the review queue. Bundling them would mean either
+ * every test that counts businesses has to know about the demonstration record,
+ * or the switch that turns the demonstration off also turns off the district list.
+ *
+ * Runs after the reference data, because a record with no category and no district
+ * is a queue item nobody can triage.
+ *
+ * @param {object} app the open database handle and repositories
+ * @param {{ config?: object }} [options] `config.seed.catalogueDemo === false` skips it
+ * @returns {{ skipped: boolean, created: boolean, state: string|null, reason: string|null }}
+ */
+export function seedCatalogue(app, { config = { seed: { catalogueDemo: true } } } = {}) {
+  if (config.seed.catalogueDemo === false) {
+    return { skipped: true, created: false, state: null, reason: null }
+  }
+
+  const result = seedCatalogueDemo(app)
+  return {
+    skipped: false,
+    created: result.created,
+    state: result.business?.verificationState ?? null,
+    reason: result.reason ?? null,
+  }
 }

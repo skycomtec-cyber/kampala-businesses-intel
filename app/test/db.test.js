@@ -84,7 +84,7 @@ test('migrations are idempotent and recorded', () => {
     // Re-running the migrator on an up-to-date database must be a no-op, or the
     // launcher would re-apply the schema on every start.
     const results = migrate(app.db)
-    assert.equal(results.length, 8)
+    assert.equal(results.length, 9)
     assert.ok(results.every((row) => row.status === 'skipped'))
 
     const ledger = app.db.prepare('SELECT id FROM schema_migration ORDER BY id').all()
@@ -99,6 +99,7 @@ test('migrations are idempotent and recorded', () => {
         '006_intelligence',
         '007_marketplace_access_tokens',
         '008_audit_reason',
+        '009_catalogue_ingestion',
       ],
     )
   } finally {
@@ -225,6 +226,18 @@ test('a business write indexes it for search, and a hide unindexes it', () => {
       skills: ['laptop repair', 'screen replacement'],
     })
 
+    // Indexed, but not answerable. The document exists from the moment the record
+    // does, so a reindex never has to guess whether it is missing a document or
+    // whether the record was never there; `is_active` is what decides whether a
+    // public search may return it, and until approval it may not.
+    const whileQueued = app.searchIndex.search({ query: 'Entebbe' })
+    assert.equal(whileQueued.total, 0, 'a record in the queue is indexed but not searchable')
+    assert.equal(app.searchIndex.count({ publishedOnly: false }), 1)
+    assert.equal(app.searchIndex.count(), 0)
+
+    app.businesses.review(business.id, { action: 'verify', reason: 'Checked the details.' })
+    app.businesses.review(business.id, { action: 'approve', reason: 'Published it.' })
+
     const byName = app.searchIndex.search({ query: 'Entebbe' })
     assert.equal(byName.total, 1)
     assert.equal(byName.items[0].docKey, `business:${business.id}`)
@@ -237,6 +250,15 @@ test('a business write indexes it for search, and a hide unindexes it', () => {
     assert.equal(app.searchIndex.search({ query: 'laptop repair' }).total >= 1, true)
     assert.equal(app.searchIndex.search({ query: 'laptop repair', skillId: skill.id }).total, 1)
 
+    // Approval is what published it, so taking the approval back takes the
+    // listing out of the results in the same transaction.
+    app.businesses.review(business.id, { action: 'unapprove', reason: 'Source withdrew it.' })
+    assert.equal(app.searchIndex.search({ query: 'Entebbe' }).total, 0)
+
+    // And so does hiding it, which is a decision about today rather than about
+    // whether the facts were ever true.
+    app.businesses.review(business.id, { action: 'approve', reason: 'Published again.' })
+    assert.equal(app.searchIndex.search({ query: 'Entebbe' }).total, 1)
     app.businesses.setStatus(business.id, 'suspended')
     assert.equal(app.searchIndex.search({ query: 'Entebbe' }).total, 0)
   } finally {
@@ -1014,14 +1036,17 @@ test('supply measurement aggregates per location and category', () => {
   try {
     const { city } = seedReference(app)
     const category = app.categories.ensureRoots()[1]
-    app.businesses.create({
+    // Created into the queue, then walked to `verified`, because a record cannot
+    // be created into a checked state any more. The supply snapshot is what still
+    // counts unchecked records, so both of these have to appear in it.
+    const checked = app.businesses.create({
       name: 'Verified Fixer',
       categoryId: category.id,
       locationId: city.id,
       status: 'active',
-      verificationState: 'verified',
       capabilityLevel: 'established',
     })
+    app.businesses.review(checked.id, { action: 'verify', reason: 'Checked.' })
     app.businesses.create({
       name: 'Unverified Fixer',
       categoryId: category.id,
@@ -1056,32 +1081,45 @@ test('supply measurement aggregates per location and category', () => {
   }
 })
 
-test('a verified business is trusted more than an unverified one', () => {
+test('an approved business is trusted more than an unchecked one', () => {
   const { app, cleanup } = freshApp()
   try {
     const { city } = seedReference(app)
     const category = app.categories.ensureRoots()[1]
-    const verified = app.businesses.create({
+    const approved = app.businesses.create({
       name: 'Trusted Fixer',
       categoryId: category.id,
       locationId: city.id,
       status: 'active',
-      verificationState: 'verified',
       capabilityLevel: 'operating',
     })
-    const claimed = app.businesses.create({
+    const pending = app.businesses.create({
       name: 'Claimed Fixer',
       categoryId: category.id,
       locationId: city.id,
       status: 'active',
-      verificationState: 'claimed',
     })
 
-    const ranked = app.searchIndex.search({ query: 'fixer' })
-    assert.equal(ranked.items[0].docKey, `business:${verified.id}`)
+    // Only the approved one is publicly searchable, so it is the only one the
+    // ranking can be asked about at all.
+    const queued = app.searchIndex.search({ query: 'fixer' })
+    assert.deepEqual(queued.items, [])
 
-    app.businesses.setVerification(claimed.id, 'verified')
-    assert.equal(app.businesses.requireById(claimed.id).verifiedAt !== null, true)
+    app.businesses.review(approved.id, { action: 'verify', reason: 'Checked.' })
+    app.businesses.review(approved.id, { action: 'approve', reason: 'Published.' })
+    app.businesses.review(pending.id, { action: 'claim', reason: 'Picked up.' })
+
+    const ranked = app.searchIndex.search({ query: 'fixer' })
+    assert.equal(ranked.items[0].docKey, `business:${approved.id}`)
+
+    // Verification stamps the moment the facts were checked, and approval stamps
+    // its own: they are different claims and collapsing them loses which one a
+    // later reader is looking at.
+    const afterVerifyOnly = app.businesses.review(pending.id, { action: 'verify', reason: 'Checked.' })
+    assert.notEqual(afterVerifyOnly.verifiedAt, null)
+    assert.equal(afterVerifyOnly.approvedAt, null)
+    app.businesses.review(pending.id, { action: 'approve', reason: 'Published.' })
+    assert.notEqual(app.businesses.requireById(pending.id).approvedAt, null)
   } finally {
     cleanup()
   }

@@ -81,7 +81,7 @@ test('health, meta and the reference endpoints answer without a session', async 
   const health = await ctx.server.inject({ method: 'GET', url: '/healthz' })
   assert.equal(health.statusCode, 200)
   assert.equal(health.json().data.status, 'ok')
-  assert.equal(health.json().data.migrationsApplied, 8)
+  assert.equal(health.json().data.migrationsApplied, 9)
 
   const meta = await ctx.server.inject({ method: 'GET', url: '/api/v1/meta' })
   assert.equal(meta.statusCode, 200)
@@ -178,6 +178,29 @@ test('every documented filter is honoured rather than quietly ignored', async (t
   assert.equal(created.statusCode, 201, created.body)
   const business = created.json().data
 
+  // The public list only answers with records the platform stands behind, so a
+  // listing that is still in the queue has to be driven to `approved` through the
+  // review pipeline before any of the filters below can see it. Creating it and
+  // then filtering for it used to be enough, back when `active` was the only bar.
+  assert.equal(business.verificationState, 'pending_review')
+  assert.deepEqual((await ctx.server.inject({ method: 'GET', url: '/api/v1/businesses' })).json().data, [])
+
+  const submitted = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/admin/businesses/${business.id}/verification`,
+    headers: auth,
+    payload: { action: 'verify', reason: 'Checked the details against the source.' },
+  })
+  assert.equal(submitted.statusCode, 200, submitted.body)
+  const approved = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/admin/businesses/${business.id}/verification`,
+    headers: auth,
+    payload: { action: 'approve', reason: 'Published in the directory.' },
+  })
+  assert.equal(approved.statusCode, 200, approved.body)
+  assert.equal(approved.json().data.verificationState, 'approved')
+
   const link = await ctx.server.inject({
     method: 'POST',
     url: `/api/v1/admin/businesses/${business.id}/skills`,
@@ -215,6 +238,34 @@ test('every documented filter is honoured rather than quietly ignored', async (t
   const filtered = byCategory.json()
   assert.equal(filtered.meta.total, filtered.data.length)
   assert.equal(filtered.meta.total, 1)
+
+  // The other half of the promise: a filter this api does not have is refused
+  // rather than dropped. `verificationStatus` is the spelling a caller reaches
+  // for first, and while it was ignored the answer was every listing.
+  const misspelled = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/businesses?verificationStatus=verified',
+  })
+  assert.equal(misspelled.statusCode, 400)
+  assert.equal(misspelled.json().error.code, 'request_invalid')
+
+  // `verificationState` is not misspelled, it is a different question, and it is
+  // a question only the review queue is allowed to ask. The public list answers
+  // `approved` and nothing else, so there is no parameter to supply.
+  const notOnPublic = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/businesses?verificationState=rejected',
+  })
+  assert.equal(notOnPublic.statusCode, 400)
+  assert.equal(notOnPublic.json().error.code, 'request_invalid')
+
+  const misspelledInTheQueue = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/admin/businesses?verificationStatus=unverified',
+    headers: auth,
+  })
+  assert.equal(misspelledInTheQueue.statusCode, 400)
+  assert.equal(misspelledInTheQueue.json().error.code, 'request_invalid')
 })
 
 test('a private contact point is unreachable from the public profile', async (t) => {
@@ -236,11 +287,26 @@ test('a private contact point is unreachable from the public profile', async (t)
       categoryId: category.id,
       locationId: district.id,
       status: 'active',
-      verificationState: 'verified',
     },
   })
   assert.equal(created.statusCode, 201, created.body)
   const business = created.json().data
+
+  // Approved through the pipeline rather than created approved, because a
+  // listing nobody reviewed has no public profile to leak a phone number from,
+  // and a test that 404s for that reason is testing the wrong thing.
+  for (const [action, reason] of [
+    ['verify', 'Checked the details against the source.'],
+    ['approve', 'Published in the directory.'],
+  ]) {
+    const step = await ctx.server.inject({
+      method: 'POST',
+      url: `/api/v1/admin/businesses/${business.id}/verification`,
+      headers: auth,
+      payload: { action, reason },
+    })
+    assert.equal(step.statusCode, 200, step.body)
+  }
 
   const contact = await ctx.server.inject({
     method: 'POST',
@@ -298,8 +364,8 @@ test('an imported queue can be worked through in batches', async (t) => {
   const category = leafCategory(ctx.app)
   const district = ctx.app.locations.byKind('district')[0]
 
-  // What an import leaves behind: active, unverified, and with a phone number
-  // that is not public because nobody confirmed the shop wants it listed.
+  // What an import leaves behind: active, waiting for review, and with a phone
+  // number that is not public because nobody confirmed the shop wants it listed.
   const created = []
   for (const [name, phone] of [
     ['Nakawa Kiosk', '0772000001'],
@@ -328,7 +394,7 @@ test('an imported queue can be worked through in batches', async (t) => {
   // four requests.
   const queue = await ctx.server.inject({
     method: 'GET',
-    url: '/api/v1/admin/businesses?verificationState=unverified&sort=newest',
+    url: '/api/v1/admin/businesses?verificationState=pending_review&sort=newest',
     headers,
   })
   assert.equal(queue.statusCode, 200)
@@ -338,6 +404,10 @@ test('an imported queue can be worked through in batches', async (t) => {
   assert.equal(rows[0].publicContactCount, 0, 'an imported number is not public yet')
   assert.ok(rows.every((row) => row.contacts.length === 1))
 
+  // Nothing in the queue is public yet, and the public surfaces have to agree.
+  const publicBefore = await ctx.server.inject({ method: 'GET', url: '/api/v1/businesses' })
+  assert.deepEqual(publicBefore.json().data, [])
+
   const ids = created.map((row) => row.id)
   const decision = await ctx.server.inject({
     method: 'POST',
@@ -345,24 +415,24 @@ test('an imported queue can be worked through in batches', async (t) => {
     headers,
     payload: {
       ids: [...ids, '00000000-0000-4000-8000-000000000000'],
-      verificationState: 'verified',
+      action: 'verify',
       reason: 'Surveyed in person on 2026-09-25; every shop confirmed it trades here.',
     },
   })
   assert.equal(decision.statusCode, 200, decision.body)
-  assert.deepEqual(decision.json().data.counts, { updated: 3, unchanged: 0, missing: 1 })
+  assert.deepEqual(decision.json().data.counts, { updated: 3, unchanged: 0, refused: 0, missing: 1 })
   assert.equal(decision.json().data.rows.find((row) => row.outcome === 'missing').id,
     '00000000-0000-4000-8000-000000000000')
 
-  // Verified, and the listing is public. The phone number is still not, which
-  // is the point: publishing a listing is not the same decision as publishing
-  // a number somebody typed off a shopfront.
-  const publicProfile = await ctx.server.inject({
+  // Verified is not published. The listing is checked but nobody has agreed to
+  // put it in the directory, and the public endpoints have to reflect that.
+  const stillHidden = await ctx.server.inject({ method: 'GET', url: '/api/v1/businesses' })
+  assert.deepEqual(stillHidden.json().data, [])
+  const verifiedProfile = await ctx.server.inject({
     method: 'GET',
     url: `/api/v1/businesses/${created[0].slug}`,
   })
-  assert.equal(publicProfile.statusCode, 200)
-  assert.ok(!JSON.stringify(publicProfile.json()).includes('0772000001'))
+  assert.equal(verifiedProfile.statusCode, 404, 'a verified-but-unapproved listing is not public')
 
   // Every decision says why, in the log, against the entity.
   for (const business of created) {
@@ -382,11 +452,11 @@ test('an imported queue can be worked through in batches', async (t) => {
     headers,
     payload: {
       ids,
-      verificationState: 'verified',
+      action: 'verify',
       reason: 'Surveyed in person on 2026-09-25; every shop confirmed it trades here.',
     },
   })
-  assert.deepEqual(retry.json().data.counts, { updated: 0, unchanged: 3, missing: 0 })
+  assert.deepEqual(retry.json().data.counts, { updated: 0, unchanged: 3, refused: 0, missing: 0 })
   assert.equal(
     ctx.app.audit
       .forEntity('business', created[0].id)
@@ -401,7 +471,7 @@ test('an imported queue can be worked through in batches', async (t) => {
     method: 'POST',
     url: '/api/v1/admin/businesses/verification',
     headers,
-    payload: { ids, verificationState: 'rejected' },
+    payload: { ids, action: 'reject' },
   })
   assert.equal(noReason.statusCode, 400, noReason.body)
 
@@ -412,7 +482,7 @@ test('an imported queue can be worked through in batches', async (t) => {
     headers,
     payload: {
       ids: Array.from({ length: 101 }, () => ids[0]),
-      verificationState: 'verified',
+      action: 'verify',
       reason: 'x'.repeat(4),
     },
   })
@@ -427,9 +497,59 @@ test('an imported queue can be worked through in batches', async (t) => {
     method: 'POST',
     url: '/api/v1/admin/businesses/verification',
     headers: { authorization: `Bearer ${viewerToken}` },
-    payload: { ids, verificationState: 'verified', reason: 'because' },
+    payload: { ids, action: 'verify', reason: 'because' },
   })
   assert.equal(refused.statusCode, 403)
+
+  // Checking a listing and publishing it are different decisions, so they are
+  // different capabilities. An editor can do the first and is refused the second,
+  // and the refusal is a permission error rather than a validation error, so the
+  // client can tell the operator why.
+  const editorPublish = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses/verification',
+    headers,
+    payload: { ids, action: 'approve', reason: 'The editor believes these are real.' },
+  })
+  assert.equal(editorPublish.statusCode, 403, editorPublish.body)
+  assert.equal(editorPublish.json().error.code, 'forbidden')
+
+  // An administrator can, and publishing is what makes the listings visible.
+  const { token: adminToken } = await signIn(ctx, { email: 'owner@kampala.test' })
+  const approved = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses/verification',
+    headers: { authorization: `Bearer ${adminToken}` },
+    payload: { ids, action: 'approve', reason: 'Reviewed and approved for the directory.' },
+  })
+  assert.equal(approved.statusCode, 200, approved.body)
+  assert.deepEqual(approved.json().data.counts, { updated: 3, unchanged: 0, refused: 0, missing: 0 })
+
+  const publicAfter = await ctx.server.inject({ method: 'GET', url: '/api/v1/businesses' })
+  assert.equal(publicAfter.json().data.length, 3)
+  const profile = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/businesses/${created[0].slug}`,
+  })
+  assert.equal(profile.statusCode, 200)
+  // Publishing the listing is still not publishing the number typed off a
+  // shopfront, so the number stays out of the public payload.
+  assert.ok(!JSON.stringify(profile.json()).includes('0772000001'))
+
+  // And each listing carries the decisions that got it there, in order. Verifying
+  // something nobody had claimed is not refused: it implies the claim, and both
+  // are written, so the history says a reviewer picked it up rather than leaving
+  // a gap between "queued" and "checked".
+  const events = ctx.app.catalogue.eventsFor(created[0].id)
+  assert.deepEqual(events.map((event) => event.action), ['claim', 'verify', 'approve'])
+  assert.deepEqual(
+    events.map((event) => [event.fromState, event.toState]),
+    [
+      ['pending_review', 'under_review'],
+      ['under_review', 'verified'],
+      ['verified', 'approved'],
+    ],
+  )
 })
 
 test('a capability that the role does not hold is refused, and a missing session is 401', async (t) => {
@@ -492,6 +612,61 @@ test('a bad sign-in cannot be used to find out which addresses exist', async (t)
   assert.equal(unknownAddress.statusCode, 401)
   assert.equal(wrongPassword.json().error.message, unknownAddress.json().error.message)
   assert.equal(wrongPassword.headers['set-cookie'], undefined)
+})
+
+test('every signed-in route refuses an anonymous caller, however it declares the check', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  // Table driven on purpose. `preHandler` is a route option, not part of the
+  // schema, and Fastify ignores an unknown key inside `schema` without a word.
+  // A check written in the wrong place therefore looks present in review, shows
+  // up in the openapi document as ordinary metadata, and protects nothing. This
+  // test is the only thing that notices.
+  const signedInOnly = [
+    { method: 'GET', url: '/api/v1/auth/me' },
+    { method: 'GET', url: '/api/v1/auth/roles' },
+    { method: 'POST', url: '/api/v1/auth/logout' },
+    {
+      method: 'POST',
+      url: '/api/v1/auth/change-password',
+      payload: { currentPassword: PASSWORD, newPassword: 'Kampala-New-2026' },
+    },
+  ]
+
+  for (const route of signedInOnly) {
+    const response = await ctx.server.inject(route)
+    assert.equal(response.statusCode, 401, `${route.method} ${route.url} answered ${response.statusCode}`)
+    assert.equal(response.json().error.code, 'unauthenticated', route.url)
+  }
+
+  // And with a session the same routes work, so the refusals above are the
+  // check and not a route that is simply broken.
+  const { headers } = await signIn(ctx, { email: 'operator@kampala.test' })
+  const me = await ctx.server.inject({ method: 'GET', url: '/api/v1/auth/me', headers })
+  assert.equal(me.statusCode, 200)
+  assert.equal(me.json().data.user.email, 'operator@kampala.test')
+  assert.ok(me.json().data.session.expiresAt, 'the session expiry travels with the identity')
+})
+
+test('a bug in our own code is reported as a 500, not as the caller being wrong', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  ctx.server.get('/test/unexpected', async () => {
+    throw new TypeError("Cannot read properties of null (reading 'expiresAt')")
+  })
+  const response = await ctx.server.inject({ method: 'GET', url: '/test/unexpected' })
+
+  // A thrown TypeError carries no domain code. It used to fall through to 400,
+  // which told the caller their request was malformed, kept it out of the branch
+  // that logs a stack, and hid a missing auth check for months behind an
+  // `internal_error` that read like a bad request.
+  assert.equal(response.statusCode, 500)
+  assert.equal(response.json().error.code, 'internal_error')
+  assert.equal(response.json().error.message, 'The request could not be completed.')
+  // A crash must not carry our internals to the caller.
+  assert.ok(!response.body.includes('TypeError'))
 })
 
 test('a search is recorded as a demand signal, and other queries are not', async (t) => {
@@ -680,4 +855,128 @@ test('an unknown route and a schema violation both answer with the error envelop
   assert.equal(malformed.statusCode, 400)
   assert.equal(malformed.json().error.code, 'request_invalid')
   assert.ok(Array.isArray(malformed.json().error.details.issues))
+})
+
+test('the catalogue is administered over http, and trust is a decision', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const { token } = await signIn(ctx, { email: 'curator@kampala.test' })
+  const headers = { authorization: `Bearer ${token}` }
+
+  // Registering a source. The key is derived from the name, and the counts come
+  // back zero because nothing has come through it yet.
+  const created = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/catalogue/sources',
+    headers,
+    payload: {
+      name: 'Uganda Business Registry',
+      type: 'api',
+      trustLevel: 'controlled',
+      uri: 'https://example.invalid/registry',
+    },
+  })
+  assert.equal(created.statusCode, 201, created.body)
+  const source = created.json().data
+  assert.equal(source.key, 'uganda-business-registry')
+  assert.equal(source.recordCount, 0)
+  assert.equal(source.pendingCount, 0)
+
+  // The same name twice returns the same source, because the seed runs on every
+  // start and a register that grows a "-2" on each launch is not a register.
+  const again = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/catalogue/sources',
+    headers,
+    payload: { name: 'Uganda Business Registry', type: 'api' },
+  })
+  assert.equal(again.statusCode, 201)
+  assert.equal(again.json().data.id, source.id)
+  assert.equal(
+    (await ctx.server.inject({ method: 'GET', url: '/api/v1/admin/catalogue/sources', headers }))
+      .json()
+      .meta.total,
+    // The migration seeds `legacy-directory`, so this is never 1.
+    ctx.app.catalogue.allSources().length,
+  )
+
+  // A source whose trust level is not a level the platform knows is refused at
+  // the edge, before anything is written.
+  const nonsense = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/catalogue/sources',
+    headers,
+    payload: { name: 'A Rumour', type: 'community', trustLevel: 'trusts-me' },
+  })
+  assert.equal(nonsense.statusCode, 400)
+  assert.equal(nonsense.json().error.code, 'request_invalid')
+
+  // An editor can run an import and therefore needs to see where a record came
+  // from, but registering a new source is a statement about the whole directory's
+  // facts and is not theirs to make.
+  const { token: editorToken } = await signIn(ctx, { email: 'editor2@kampala.test', role: 'editor' })
+  const editorHeaders = { authorization: `Bearer ${editorToken}` }
+  assert.equal(
+    (await ctx.server.inject({ method: 'GET', url: '/api/v1/admin/catalogue/sources', headers: editorHeaders }))
+      .statusCode,
+    200,
+  )
+  const editorWrite = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/catalogue/sources',
+    headers: editorHeaders,
+    payload: { name: 'Editor Source', type: 'manual' },
+  })
+  assert.equal(editorWrite.statusCode, 403)
+  assert.equal(ctx.app.catalogue.findSourceByKey('editor-source'), null)
+
+  // The queue reports every *open* step with a zero, because a queue of a
+  // thousand waiting and nothing verified reads as a healthy pipeline until
+  // somebody notices the public count has not moved.
+  const queue = await ctx.server.inject({ method: 'GET', url: '/api/v1/admin/catalogue/queue', headers })
+  assert.equal(queue.statusCode, 200, queue.body)
+  assert.equal(queue.json().meta.total, 0)
+  assert.deepEqual(queue.json().meta.counts, {
+    imported: 0,
+    pending_review: 0,
+    under_review: 0,
+    verified: 0,
+  })
+  // `approved` and `rejected` are outcomes, not work waiting, so they are not
+  // backlog. A queue of four hundred approved listings is not a queue of four
+  // hundred problems.
+  assert.equal('approved' in queue.json().meta.counts, false)
+
+  // A record that arrived with nothing saying where it came from is listed, not
+  // hidden. This is the honest report of the gap the migration left behind.
+  const createdBusiness = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses',
+    headers,
+    payload: {
+      name: 'Unproven Co',
+      categoryId: leafCategory(ctx.app).id,
+      locationId: ctx.app.locations.byKind('district')[0].id,
+    },
+  })
+  assert.equal(createdBusiness.statusCode, 201, createdBusiness.body)
+  const orphans = await ctx.server.inject({ method: 'GET', url: '/api/v1/admin/catalogue/orphans', headers })
+  assert.equal(orphans.json().meta.total, 1)
+  assert.equal(orphans.json().data[0].id, createdBusiness.json().data.id)
+
+  // Retiring stops the source supplying records but leaves it readable, because
+  // the records it brought in still have to say where they came from.
+  const retired = await ctx.server.inject({
+    method: 'DELETE',
+    url: `/api/v1/admin/catalogue/sources/${source.id}`,
+    headers,
+  })
+  assert.equal(retired.statusCode, 200, retired.body)
+  assert.equal(retired.json().data.isActive, false)
+  assert.equal(
+    (await ctx.server.inject({ method: 'GET', url: `/api/v1/admin/catalogue/sources/${source.id}`, headers }))
+      .statusCode,
+    200,
+  )
 })

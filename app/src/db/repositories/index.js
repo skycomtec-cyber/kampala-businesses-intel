@@ -3,6 +3,7 @@ import { createLocationsRepository } from './locations.js'
 import { createCategoriesRepository, createSkillsRepository } from './taxonomy.js'
 import { createSearchIndexRepository } from './searchIndex.js'
 import { createBusinessesRepository } from './businesses.js'
+import { createCatalogueRepository } from './catalogue.js'
 import { createDemandRepository } from './demand.js'
 import { createMarketplaceRepository } from './marketplace.js'
 import { createIntelligenceRepository } from './intelligence.js'
@@ -12,9 +13,11 @@ import { createIntelligenceRepository } from './intelligence.js'
  *
  * The order below is the dependency order and it matters: the search index needs
  * the database, businesses need the index (so a write reindexes in the same
- * transaction), and skills need nothing. Every repository is a plain object over
- * the same better-sqlite3 handle, which is why `createBusinessesRepository` can
- * call `skills.findOrCreate` without a module import cycle.
+ * transaction), the catalogue needs businesses (so an intake can write the record
+ * and its provenance together), and skills need nothing. Every repository is a
+ * plain object over the same better-sqlite3 handle, which is why
+ * `createBusinessesRepository` can call `skills.findOrCreate` without a module
+ * import cycle.
  *
  * Nothing above this line imports better-sqlite3, so swapping the engine means
  * replacing `db/driver.js` and reimplementing this folder's signatures.
@@ -29,6 +32,7 @@ export function createRepositories(db, config) {
   const skills = createSkillsRepository(db)
   const searchIndex = createSearchIndexRepository(db)
   const businesses = createBusinessesRepository(db, { searchIndex, skills, locations })
+  const catalogue = createCatalogueRepository(db, { businesses, audit })
   const demand = createDemandRepository(db, config)
   const marketplace = createMarketplaceRepository(db, config)
   const intelligence = createIntelligenceRepository(db, config)
@@ -44,6 +48,7 @@ export function createRepositories(db, config) {
     skills,
     searchIndex,
     businesses,
+    catalogue,
     demand,
     marketplace,
     intelligence,

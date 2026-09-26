@@ -18,6 +18,7 @@ import insightRoutes from './routes/insights.js'
 import adminBusinessRoutes from './routes/admin/businesses.js'
 import adminImportRoutes from './routes/admin/imports.js'
 import adminReferenceRoutes from './routes/admin/reference.js'
+import adminCatalogueRoutes from './routes/admin/catalogue.js'
 
 /**
  * The api layer's assembly.
@@ -72,6 +73,13 @@ export async function buildApi({ app, config, logger = true, web = true }) {
       // browser should not be answered with a 404 from a machine-generated link.
       ignoreTrailingSlash: true,
     },
+    // Fastify's default is to quietly delete any property a schema does not
+    // declare, which turns every `additionalProperties: false` in this codebase
+    // into decoration: a misspelled filter or a `role` sent to the sign-in
+    // endpoint was dropped rather than refused, and the caller was left
+    // believing it had been understood. Refusing is the honest answer, and it is
+    // what the schemas already say.
+    ajv: { customOptions: { removeAdditional: false } },
   })
 
   // The single object handlers reach for when they need configuration or a
@@ -98,9 +106,10 @@ export async function buildApi({ app, config, logger = true, web = true }) {
       await api.register(authRoutes, { config, app })
       await api.register(marketplaceRoutes, { app })
       await api.register(insightRoutes, { config, app })
-  await api.register(adminBusinessRoutes, { app })
-  await api.register(adminImportRoutes, { app })
-  await api.register(adminReferenceRoutes, { app })
+      await api.register(adminBusinessRoutes, { app })
+      await api.register(adminImportRoutes, { app })
+      await api.register(adminReferenceRoutes, { app })
+      await api.register(adminCatalogueRoutes, { app })
     },
     { prefix: config.api.prefix },
   )

@@ -151,6 +151,16 @@ export function loadConfig(overrides = {}) {
       // reference data, not synthetic content. Business content is never
       // seeded.
       reference: readBool('KIP_SEED_REFERENCE', true),
+      /**
+       * The one real organization, imported through the catalogue on every start.
+       *
+       * Separate from `reference` on purpose. The taxonomy is shared vocabulary
+       * and belongs in every install; this is a single business record, and an
+       * install that has outgrown the demonstration needs a switch that does not
+       * involve editing code. It arrives `pending_review` and is never published
+       * by the seed, so the only thing turning it off removes a queue item.
+       */
+      catalogueDemo: readBool('KIP_SEED_CATALOGUE_DEMO', true),
     },
   }
 

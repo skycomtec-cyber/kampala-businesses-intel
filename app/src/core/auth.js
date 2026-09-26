@@ -22,11 +22,16 @@ export const ROLES = Object.freeze(['admin', 'editor', 'analyst', 'viewer'])
  */
 export const CAPABILITIES = Object.freeze({
   admin: [
-    'business:read', 'business:write', 'business:verify',
+    'business:read', 'business:write', 'business:verify', 'business:publish',
     'request:read', 'request:write', 'request:moderate',
     'analytics:read', 'lab:read', 'lab:write',
     'user:read', 'user:write', 'import:read', 'import:write',
     'opportunity:read', 'opportunity:write',
+    // Registering a source and declaring how far it can be trusted is a statement
+    // about where the directory's facts come from, so it is admin only. Everyone
+    // who can see a listing needs to be able to see where it came from, which is
+    // why `source:read` travels more widely below.
+    'source:read', 'source:write',
     // Extending the reference trees is what makes a rejected import row
     // fixable, so it travels with import:write rather than sitting behind
     // user:write. The trees are shared vocabulary: a category or division added
@@ -34,16 +39,28 @@ export const CAPABILITIES = Object.freeze({
     'reference:write',
   ],
   editor: [
+    // No `business:publish`. Checking a listing's facts and agreeing to put the
+    // platform's name on it are different acts, and an editor who can do the
+    // first is not thereby trusted with the second. This is also what makes
+    // "somebody checked it, somebody else agreed to publish it" true in the
+    // audit log rather than merely in the schema.
     'business:read', 'business:write', 'business:verify',
     'request:read', 'request:write', 'request:moderate',
     'analytics:read', 'lab:read',
     'import:read', 'import:write',
     'opportunity:read',
+    // An editor runs imports and reviews what they bring in, so seeing which
+    // source a record came from and how much that source is trusted is part of
+    // the job. Registering a new one is not.
+    'source:read',
     'reference:write',
   ],
   analyst: [
     'business:read', 'request:read',
     'analytics:read', 'lab:read', 'opportunity:read',
+    // Read-only provenance, because a number that cannot be traced to a source
+    // is a number an analyst has to treat as a guess.
+    'source:read',
   ],
   viewer: ['business:read', 'analytics:read'],
 })
