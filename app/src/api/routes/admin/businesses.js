@@ -134,6 +134,7 @@ export default async function adminBusinessRoutes(fastify, { app }) {
           verificationState: request.query.verificationState ?? null,
           search: toText(request.query.search, { maxLength: 120 }),
           sort: request.query.sort ?? 'updated',
+          includeContacts: true,
           ...page,
         }),
         page,
@@ -251,10 +252,101 @@ export default async function adminBusinessRoutes(fastify, { app }) {
         action: 'business.verify',
         entityType: 'business',
         entityId: updated.id,
+        reason: request.body.reason ?? null,
         before,
         after: updated,
       })
       return single(updated)
+    },
+  )
+
+  /**
+   * The same decision, applied to a page of listings.
+   *
+   * An import is the only thing in this platform that creates listings in
+   * hundreds, and every one of them arrives unverified and private, because
+   * nobody has decided they are real. Reviewing them one POST at a time is the
+   * difference between finishing a survey in an afternoon and not finishing it,
+   * and the alternative is not care, it is operator fatigue, which is worse.
+   *
+   * Two deliberate limits. The reason is required, so a batch carries one claim
+   * in the log that says what was decided and why rather than a hundred entries
+   * with nothing in them. And the ids are capped, so one request cannot quietly
+   * decide the entire directory: the batch is a page of a queue, not the queue.
+   *
+   * Publishing a contact point stays a separate decision per contact. Verifying
+   * a listing makes the business visible; it does not make a phone number that
+   * somebody typed off a shopfront visible, and this route does not change that.
+   */
+  fastify.post(
+    '/admin/businesses/verification',
+    {
+      schema: {
+        summary: 'Record one verification decision for several listings.',
+        description:
+          'Applies the same state and reason to every id, and reports each outcome separately. An id that is already in that state is left alone rather than rewritten, so a retried request does not churn the audit log.',
+        tags: ['admin'],
+        body: {
+          type: 'object',
+          required: ['ids', 'verificationState', 'reason'],
+          properties: {
+            ids: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 100,
+              items: { type: 'string', pattern: uuidPattern },
+            },
+            verificationState: { type: 'string', enum: [...VERIFICATION_STATES] },
+            reason: { type: 'string', minLength: 3, maxLength: 500 },
+          },
+        },
+      },
+      preHandler: fastify.requireCapability('business:verify'),
+    },
+    async (request) => {
+      const { ids, verificationState, reason } = request.body
+
+      // The batch is one unit of work: every decision and every log entry it
+      // produces land together or not at all. A halfway-applied batch would
+      // leave listings whose state says one thing and whose history says
+      // nothing, which is the one outcome worse than refusing the batch.
+      const decide = app.db.transaction(() => {
+        const rows = []
+        const counts = { updated: 0, unchanged: 0, missing: 0 }
+
+        for (const id of ids) {
+          const existing = app.businesses.findById(id)
+          if (!existing) {
+            counts.missing += 1
+            rows.push({ id, outcome: 'missing' })
+            continue
+          }
+          if (existing.verificationState === verificationState) {
+            // Already decided this way. Saying so is more useful than reporting
+            // a change that did not happen.
+            counts.unchanged += 1
+            rows.push({ id, name: existing.name, outcome: 'unchanged' })
+            continue
+          }
+          const updated = app.businesses.setVerification(id, verificationState)
+          app.audit.record({
+            actorId: request.user.id,
+            actorRole: request.user.role,
+            action: 'business.verify',
+            entityType: 'business',
+            entityId: updated.id,
+            reason,
+            before: existing,
+            after: updated,
+          })
+          counts.updated += 1
+          rows.push({ id, name: updated.name, outcome: 'updated' })
+        }
+
+        return { counts, rows }
+      })
+
+      return single(decide(), { verificationState, reason })
     },
   )
 

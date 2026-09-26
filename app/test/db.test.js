@@ -84,7 +84,7 @@ test('migrations are idempotent and recorded', () => {
     // Re-running the migrator on an up-to-date database must be a no-op, or the
     // launcher would re-apply the schema on every start.
     const results = migrate(app.db)
-    assert.equal(results.length, 7)
+    assert.equal(results.length, 8)
     assert.ok(results.every((row) => row.status === 'skipped'))
 
     const ledger = app.db.prepare('SELECT id FROM schema_migration ORDER BY id').all()
@@ -98,6 +98,7 @@ test('migrations are idempotent and recorded', () => {
         '005_demand',
         '006_intelligence',
         '007_marketplace_access_tokens',
+        '008_audit_reason',
       ],
     )
   } finally {
@@ -884,6 +885,125 @@ test('audit log records before and after for an editorial change', () => {
     assert.equal(entries.length, 1)
     assert.equal(entries[0].action, 'business.verify')
     assert.equal(JSON.parse(entries[0].afterJson).verificationState, 'verified')
+  } finally {
+    cleanup()
+  }
+})
+
+test('a decision records why it was made, not only what changed', () => {
+  const { app, cleanup } = freshApp()
+  try {
+    const { city } = seedReference(app)
+    const category = app.categories.ensureRoots()[1]
+    const business = app.businesses.create({
+      name: 'Mukono Tailors',
+      categoryId: category.id,
+      locationId: city.id,
+      status: 'draft',
+    })
+
+    // A verification without a stated basis is indistinguishable from somebody
+    // pressing a button, and a directory that cannot say why a listing was
+    // published is a directory nobody can correct.
+    app.audit.record({
+      actorId: null,
+      actorRole: 'editor',
+      action: 'business.verify',
+      entityType: 'business',
+      entityId: business.id,
+      reason: 'Called the shop; the owner confirmed the listing.',
+      before: { verificationState: 'unverified' },
+      after: { verificationState: 'verified' },
+    })
+    const [entry] = app.audit.forEntity('business', business.id)
+    assert.equal(entry.reason, 'Called the shop; the owner confirmed the listing.')
+
+    // And an entry that is not a decision carries no reason at all.
+    app.audit.record({
+      actorId: null,
+      actorRole: 'editor',
+      action: 'business.update',
+      entityType: 'business',
+      entityId: business.id,
+      after: { name: 'Mukono Tailors Ltd' },
+    })
+    const all = app.audit.forEntity('business', business.id)
+    assert.equal(all.length, 2)
+    // Newest first, and the order does not depend on two rows having landed in
+    // different milliseconds.
+    assert.deepEqual(
+      all.map((row) => row.action),
+      ['business.update', 'business.verify'],
+    )
+    assert.equal(all[0].reason, null)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a reviewer sees the contact evidence, and a public listing does not', () => {
+  const { app, cleanup } = freshApp()
+  try {
+    const { city } = seedReference(app)
+    const category = app.categories.ensureRoots()[1]
+    const withPhone = app.businesses.create({
+      name: 'Nakawa Hair Studio',
+      categoryId: category.id,
+      locationId: city.id,
+      status: 'active',
+    })
+    const bare = app.businesses.create({
+      name: 'Kololo Bikes',
+      categoryId: category.id,
+      locationId: city.id,
+      status: 'active',
+    })
+    app.businesses.addContact(withPhone.id, { kind: 'phone', value: '0772111222' })
+    app.businesses.addContact(withPhone.id, { kind: 'email', value: 'hello@nakawa.ug' })
+
+    const { items } = app.businesses.list({
+      status: 'active',
+      sort: 'name',
+      includeContacts: true,
+    })
+
+    // One query for the page, not one per row: a queue of listings is reviewed
+    // by reading, and a row that hides its phone number until it is fetched
+    // separately cannot be read.
+    const studio = items.find((row) => row.id === withPhone.id)
+    assert.equal(studio.contactCount, 2)
+    assert.deepEqual(
+      studio.contacts.map((contact) => contact.kind).sort(),
+      ['email', 'phone'],
+    )
+    // Stored canonically, which is what makes the same number typed three
+    // ways one contact rather than three.
+    assert.equal(studio.contacts.find((contact) => contact.kind === 'phone').value, '+256772111222')
+    // A contact added by an editor is public from the start, because they typed
+    // it after speaking to somebody. An imported one arrives private, which is
+    // the whole reason the importer is safe. The queue has to show which is
+    // which, or a reviewer cannot tell whether publishing the listing would
+    // publish a phone number nobody confirmed.
+    assert.equal(studio.publicContactCount, 2)
+
+    const bikes = items.find((row) => row.id === bare.id)
+    assert.equal(bikes.contactCount, 0)
+    assert.deepEqual(bikes.contacts, [], 'the field is present and empty, not missing')
+
+    // The same repository serves the public directory, and a list row there
+    // carries no contact point at all — not the private ones, not the counts
+    // that hint at them. Absent rather than empty, so nobody reads an omitted
+    // field as "this listing has no way to be reached".
+    const publicPage = app.businesses.list({ status: 'active', sort: 'name' })
+    for (const row of publicPage.items) {
+      assert.equal(row.contacts, undefined)
+      assert.equal(row.contactCount, undefined)
+      assert.equal(row.publicContactCount, undefined)
+    }
+    assert.ok(
+      !JSON.stringify(publicPage).includes('+256772111222'),
+      'a public list page does not carry contact values',
+    )
   } finally {
     cleanup()
   }

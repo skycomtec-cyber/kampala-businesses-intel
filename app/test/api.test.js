@@ -81,7 +81,7 @@ test('health, meta and the reference endpoints answer without a session', async 
   const health = await ctx.server.inject({ method: 'GET', url: '/healthz' })
   assert.equal(health.statusCode, 200)
   assert.equal(health.json().data.status, 'ok')
-  assert.equal(health.json().data.migrationsApplied, 7)
+  assert.equal(health.json().data.migrationsApplied, 8)
 
   const meta = await ctx.server.inject({ method: 'GET', url: '/api/v1/meta' })
   assert.equal(meta.statusCode, 200)
@@ -257,6 +257,15 @@ test('a private contact point is unreachable from the public profile', async (t)
   assert.equal(publicProfile.statusCode, 200)
   assert.ok(!JSON.stringify(publicProfile.json()).includes('+256700000000'))
 
+  // The public listing page shares the repository with the admin queue, so it is
+  // the route most likely to inherit the contact evidence by accident. It gets
+  // no contact field at all rather than a filtered one.
+  const publicList = await ctx.server.inject({ method: 'GET', url: '/api/v1/businesses' })
+  assert.equal(publicList.statusCode, 200)
+  assert.ok(!JSON.stringify(publicList.json()).includes('+256700000000'))
+  assert.equal(publicList.json().data[0].contacts, undefined)
+  assert.equal(publicList.json().data[0].contactCount, undefined)
+
   // And the admin profile, which is the only route allowed to see it.
   const adminProfile = await ctx.server.inject({
     method: 'GET',
@@ -265,6 +274,162 @@ test('a private contact point is unreachable from the public profile', async (t)
   })
   assert.equal(adminProfile.statusCode, 200)
   assert.match(JSON.stringify(adminProfile.json()), /\+256700000000/)
+
+  // The admin queue carries the contact evidence per row, so a page of listings
+  // is reviewed without opening each one.
+  const adminList = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/admin/businesses',
+    headers: auth,
+  })
+  assert.equal(adminList.statusCode, 200)
+  const row = adminList.json().data.find((item) => item.id === business.id)
+  assert.equal(row.contactCount, 1)
+  assert.equal(row.publicContactCount, 0)
+  assert.match(row.contacts[0].value, /\+256700000000/)
+})
+
+test('an imported queue can be worked through in batches', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const { token } = await signIn(ctx, { email: 'editor@kampala.test', role: 'editor' })
+  const headers = { authorization: `Bearer ${token}` }
+  const category = leafCategory(ctx.app)
+  const district = ctx.app.locations.byKind('district')[0]
+
+  // What an import leaves behind: active, unverified, and with a phone number
+  // that is not public because nobody confirmed the shop wants it listed.
+  const created = []
+  for (const [name, phone] of [
+    ['Nakawa Kiosk', '0772000001'],
+    ['Kireka Salon', '0772000002'],
+    ['Ntinda Chemist', '0772000003'],
+  ]) {
+    const response = await ctx.server.inject({
+      method: 'POST',
+      url: '/api/v1/admin/businesses',
+      headers,
+      payload: { name, categoryId: category.id, locationId: district.id, status: 'active' },
+    })
+    assert.equal(response.statusCode, 201, response.body)
+    const business = response.json().data
+    await ctx.server.inject({
+      method: 'POST',
+      url: `/api/v1/admin/businesses/${business.id}/contacts`,
+      headers,
+      payload: { kind: 'phone', value: phone, isPublic: false },
+    })
+    created.push(business)
+  }
+
+  // The queue has to be readable in one call. A row that hides its phone number
+  // until it is fetched separately cannot be reviewed, and three listings is
+  // four requests.
+  const queue = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/admin/businesses?verificationState=unverified&sort=newest',
+    headers,
+  })
+  assert.equal(queue.statusCode, 200)
+  const rows = queue.json().data
+  assert.equal(rows.length, 3)
+  assert.equal(rows[0].contactCount, 1)
+  assert.equal(rows[0].publicContactCount, 0, 'an imported number is not public yet')
+  assert.ok(rows.every((row) => row.contacts.length === 1))
+
+  const ids = created.map((row) => row.id)
+  const decision = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses/verification',
+    headers,
+    payload: {
+      ids: [...ids, '00000000-0000-4000-8000-000000000000'],
+      verificationState: 'verified',
+      reason: 'Surveyed in person on 2026-09-25; every shop confirmed it trades here.',
+    },
+  })
+  assert.equal(decision.statusCode, 200, decision.body)
+  assert.deepEqual(decision.json().data.counts, { updated: 3, unchanged: 0, missing: 1 })
+  assert.equal(decision.json().data.rows.find((row) => row.outcome === 'missing').id,
+    '00000000-0000-4000-8000-000000000000')
+
+  // Verified, and the listing is public. The phone number is still not, which
+  // is the point: publishing a listing is not the same decision as publishing
+  // a number somebody typed off a shopfront.
+  const publicProfile = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/businesses/${created[0].slug}`,
+  })
+  assert.equal(publicProfile.statusCode, 200)
+  assert.ok(!JSON.stringify(publicProfile.json()).includes('0772000001'))
+
+  // Every decision says why, in the log, against the entity.
+  for (const business of created) {
+    const entries = ctx.app.audit.forEntity('business', business.id)
+    const verify = entries.find((entry) => entry.action === 'business.verify')
+    assert.equal(
+      verify.reason,
+      'Surveyed in person on 2026-09-25; every shop confirmed it trades here.',
+    )
+  }
+
+  // A retried request must not churn the log: an id already in that state is
+  // reported as unchanged, not rewritten a hundred times.
+  const retry = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses/verification',
+    headers,
+    payload: {
+      ids,
+      verificationState: 'verified',
+      reason: 'Surveyed in person on 2026-09-25; every shop confirmed it trades here.',
+    },
+  })
+  assert.deepEqual(retry.json().data.counts, { updated: 0, unchanged: 3, missing: 0 })
+  assert.equal(
+    ctx.app.audit
+      .forEntity('business', created[0].id)
+      .filter((entry) => entry.action === 'business.verify').length,
+    1,
+    'the retry decided nothing, so it wrote nothing',
+  )
+
+  // A decision without a reason is refused: "verified" with no stated basis is
+  // indistinguishable from somebody pressing a button.
+  const noReason = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses/verification',
+    headers,
+    payload: { ids, verificationState: 'rejected' },
+  })
+  assert.equal(noReason.statusCode, 400, noReason.body)
+
+  // And one request cannot decide the whole directory.
+  const tooMany = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses/verification',
+    headers,
+    payload: {
+      ids: Array.from({ length: 101 }, () => ids[0]),
+      verificationState: 'verified',
+      reason: 'x'.repeat(4),
+    },
+  })
+  assert.equal(tooMany.statusCode, 400)
+
+  // An editor may decide, a viewer may not.
+  const { token: viewerToken } = await signIn(ctx, {
+    email: 'viewer@kampala.test',
+    role: 'viewer',
+  })
+  const refused = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses/verification',
+    headers: { authorization: `Bearer ${viewerToken}` },
+    payload: { ids, verificationState: 'verified', reason: 'because' },
+  })
+  assert.equal(refused.statusCode, 403)
 })
 
 test('a capability that the role does not hold is refused, and a missing session is 401', async (t) => {

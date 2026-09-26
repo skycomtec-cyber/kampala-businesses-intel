@@ -364,21 +364,21 @@ export function createPasswordResetRepository(db, config) {
 export function createAuditRepository(db) {
   const insert = db.prepare(
     `INSERT INTO audit_log (
-       id, actor_id, actor_role, action, entity_type, entity_id, before_json, after_json
+       id, actor_id, actor_role, action, entity_type, entity_id, reason, before_json, after_json
      ) VALUES (
-       @id, @actorId, @actorRole, @action, @entityType, @entityId, @beforeJson, @afterJson
+       @id, @actorId, @actorRole, @action, @entityType, @entityId, @reason, @beforeJson, @afterJson
      )`,
   )
   const selectByEntity = db.prepare(
     `SELECT * FROM audit_log
       WHERE entity_type = ? AND entity_id = ?
-      ORDER BY created_at DESC LIMIT ?`,
+      ORDER BY created_at DESC, rowid DESC LIMIT ?`,
   )
   const selectRecent = db.prepare(
-    `SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?`,
+    `SELECT * FROM audit_log ORDER BY created_at DESC, rowid DESC LIMIT ?`,
   )
   const selectByActor = db.prepare(
-    `SELECT * FROM audit_log WHERE actor_id = ? ORDER BY created_at DESC LIMIT ?`,
+    `SELECT * FROM audit_log WHERE actor_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
   )
 
   return {
@@ -388,6 +388,7 @@ export function createAuditRepository(db) {
       action,
       entityType,
       entityId = null,
+      reason = null,
       before = null,
       after = null,
     }) {
@@ -398,6 +399,7 @@ export function createAuditRepository(db) {
         action,
         entityType,
         entityId: entityId ? String(entityId) : null,
+        reason: reason ? String(reason) : null,
         beforeJson: before ? JSON.stringify(before) : null,
         afterJson: after ? JSON.stringify(after) : null,
       })

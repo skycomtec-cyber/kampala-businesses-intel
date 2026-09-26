@@ -250,6 +250,40 @@ curl -sS -X POST http://127.0.0.1:4310/api/v1/admin/imports/businesses \
 `GET /api/v1/admin/imports/businesses/schema` returns the column contract as JSON, so a client does
 not have to parse this page.
 
+### Reviewing what a file imported
+
+An import is the only thing here that creates listings in hundreds, and every one of them arrives
+unverified and with its contact points private, because nobody has decided they are real. Reviewing
+them one request at a time is the difference between finishing a survey and abandoning it.
+
+The queue is one call, and each row carries the contact evidence the decision depends on:
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  'http://127.0.0.1:4310/api/v1/admin/businesses?verificationState=unverified&sort=newest&limit=25'
+# data[].contacts[], data[].contactCount, data[].publicContactCount
+```
+
+Then the same decision for the page. The `reason` is required, and it is written to the audit log
+against every listing, because "verified" with no stated basis is indistinguishable from "verified"
+because somebody pressed a button:
+
+```bash
+curl -sS -X POST http://127.0.0.1:4310/api/v1/admin/businesses/verification \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"ids":["..."],"verificationState":"verified","reason":"Walked Nakawa on 2026-09-25; every shop confirmed it."}'
+# {"counts":{"updated":24,"unchanged":1,"missing":0},"rows":[{"id":"...","name":"...","outcome":"updated"}]}
+```
+
+Three things it will not do. It caps the batch at 100 ids, so one request cannot quietly decide the
+whole directory. An id already in that state is reported as `unchanged` and not rewritten, so a retried
+request does not churn the log. And it does not publish contact points: verifying a listing makes the
+business visible, and the phone number somebody typed off a shopfront stays private until it is
+published on its own.
+
+The contact evidence on those rows is operator-only. `GET /api/v1/businesses` carries no `contacts`
+field and no counts, so a caller cannot read a private number out of a listing page by accident.
+
 ## API
 
 Base URL `http://127.0.0.1:4310`. Every response uses the same envelope:
@@ -304,6 +338,7 @@ API version is deployed to know whether the process is alive.
 | `POST` | `/api/v1/admin/businesses` | `business:write` |
 | `PATCH` | `/api/v1/admin/businesses/:id` | `business:write` |
 | `POST` | `/api/v1/admin/businesses/:id/verification` | `business:verify` |
+| `POST` | `/api/v1/admin/businesses/verification` | `business:verify` (one decision applied to up to 100 listings; `reason` required) |
 | `POST` | `/api/v1/admin/businesses/:id/status` | `business:write` |
 | `POST`/`PATCH`/`DELETE` | `/api/v1/admin/businesses/:id/services[/:serviceId]` | `business:write` |
 | `POST`/`PATCH`/`DELETE` | `/api/v1/admin/businesses/:id/products[/:productId]` | `business:write` |
@@ -495,7 +530,7 @@ cd app
 npm test
 ```
 
-74 tests, no network access, each against its own temporary database. The API tests mount the real
+77 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the response envelope, the k-anonymity floor, private contact

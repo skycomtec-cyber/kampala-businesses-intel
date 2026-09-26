@@ -145,6 +145,12 @@ export function createBusinessesRepository(db, deps = {}) {
     `SELECT id, business_id, kind, value, is_primary, is_public, created_at, updated_at
        FROM contact_point WHERE business_id = ? ORDER BY is_primary DESC, kind ASC`,
   )
+  const selectContactsForBusinesses = db.prepare(
+    `SELECT id, business_id, kind, value, is_primary, is_public
+       FROM contact_point
+      WHERE business_id IN (SELECT value FROM json_each(@ids))
+      ORDER BY business_id, is_primary DESC, kind ASC`,
+  )
   const selectPublicContacts = db.prepare(
     `SELECT id, business_id, kind, value, is_primary
        FROM contact_point WHERE business_id = ? AND is_public = 1
@@ -294,6 +300,47 @@ export function createBusinessesRepository(db, deps = {}) {
     const record = camelizeRow(row)
     record.isOpenSource = fromSqlBool(record.isOpenSource)
     return record
+  }
+
+  /**
+   * Gives a reviewer the contact evidence for a page of listings.
+   *
+   * A listing is reviewed on the strength of the details collected for it, so a
+   * row that hides its phone number until the caller fetches it one at a time
+   * turns a page of 25 listings into 26 requests and tells the reviewer nothing
+   * about whether the row is even worth opening. One query for the whole page,
+   * not one per row.
+   *
+   * Opt-in, and that is the privacy floor rather than a performance choice: this
+   * list is also the public directory, the values here include contact points
+   * that are unpublished on purpose, and a parameter a client can forget to send
+   * is how a private phone number ends up in a public payload. Absent means
+   * absent, so a caller cannot mistake an empty page for a page of listings with
+   * no contact details.
+   */
+  function attachContactSummaries(items) {
+    if (items.length === 0) return items
+    const rows = selectContactsForBusinesses.all({ ids: JSON.stringify(items.map((item) => item.id)) })
+    const byBusiness = new Map()
+    for (const row of camelizeRows(rows)) {
+      const contacts = byBusiness.get(row.businessId) ?? []
+      contacts.push({
+        ...row,
+        isPrimary: fromSqlBool(row.isPrimary),
+        isPublic: fromSqlBool(row.isPublic),
+      })
+      byBusiness.set(row.businessId, contacts)
+    }
+    for (const item of items) {
+      const contacts = byBusiness.get(item.id) ?? []
+      item.contacts = contacts
+      // Whether this listing could be published at all: a verified listing with
+      // no contact point is public but unreachable, which is worth seeing in the
+      // queue rather than discovering in the directory.
+      item.contactCount = contacts.length
+      item.publicContactCount = contacts.filter((contact) => contact.isPublic).length
+    }
+    return items
   }
 
   function skillIdsFor(businessId) {
@@ -556,6 +603,11 @@ export function createBusinessesRepository(db, deps = {}) {
      *
      * `sort` is resolved through an allowlist rather than interpolated, because
      * this is the one query whose every parameter comes from a request.
+     *
+     * `includeContacts` is what separates the two callers: the admin queue needs
+     * the contact points on each row to decide, and the public directory must
+     * not have them, because half of a survey's phone numbers are private until
+     * somebody confirms the business wants to be reachable.
      */
     list({
       status,
@@ -568,6 +620,7 @@ export function createBusinessesRepository(db, deps = {}) {
       sort = 'newest',
       limit,
       offset,
+      includeContacts = false,
     } = {}) {
       const page = normalisePagination({ limit, offset })
       const conditions = []
@@ -627,7 +680,9 @@ export function createBusinessesRepository(db, deps = {}) {
         .prepare(`SELECT COUNT(*) AS total FROM business b ${whereSql}`)
         .get(params).total
 
-      return { total, items: rows.map(businessRow) }
+      const items = rows.map(businessRow)
+      if (includeContacts) attachContactSummaries(items)
+      return { total, items }
     },
 
     update(id, patch) {
