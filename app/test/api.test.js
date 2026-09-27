@@ -268,6 +268,98 @@ test('every documented filter is honoured rather than quietly ignored', async (t
   assert.equal(misspelledInTheQueue.json().error.code, 'request_invalid')
 })
 
+test('browsing a category or an area means the whole branch, not just the node', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const { token } = await signIn(ctx, { email: 'browser@kampala.test' })
+  const auth = { authorization: `Bearer ${token}` }
+
+  /*
+   * A person picking "Second Life Electronics" from a menu is asking for the whole
+   * vertical, and a person picking a district is asking for every ward inside it.
+   * Both used to be answered by exact node match, so a branch with 30 listings
+   * underneath it reported zero and a district with anything in it reported
+   * nothing. That is the failure mode this test exists to prevent: not a crash,
+   * and not an error, just a directory that lies about being empty.
+   */
+  const branch = ctx.app.categories.ensureRoots().find((row) => row.slug === 'second-life-electronics')
+  const leaf = ctx.app.categories.children(branch.id)[0]
+  const [district] = ctx.app.locations.byKind('district')
+  const ward = ctx.app.locations.descendants(district.id).find((row) => row.kind === 'ward')
+    ?? ctx.app.locations.children(district.id)[0]
+
+  const publish = async (name, categoryId, locationId) => {
+    const created = await ctx.server.inject({
+      method: 'POST',
+      url: '/api/v1/admin/businesses',
+      headers: auth,
+      payload: { name, categoryId, locationId, status: 'active' },
+    })
+    assert.equal(created.statusCode, 201, created.body)
+    const id = created.json().data.id
+    for (const action of ['verify', 'approve']) {
+      const response = await ctx.server.inject({
+        method: 'POST',
+        url: `/api/v1/admin/businesses/${id}/verification`,
+        headers: auth,
+        payload: { action, reason: `Checked ${name} in the district.` },
+      })
+      assert.equal(response.statusCode, 200, response.body)
+    }
+    return id
+  }
+
+  const onBranch = await publish('Kibuli Screen Centre', branch.id, district.id)
+  const onLeaf = await publish('Nsambya Board Repair', leaf.id, ward.id)
+
+  /** Reads the list and asserts the total agrees with the page, which is the point. */
+  const browse = async (query) => {
+    const response = await ctx.server.inject({
+      method: 'GET',
+      url: `/api/v1/businesses?${query}`,
+    })
+    assert.equal(response.statusCode, 200, response.body)
+    const body = response.json()
+    assert.equal(body.meta.total, body.data.length, `${query}: total must match the page`)
+    return body
+  }
+
+  const byBranch = await browse(`categoryId=${branch.id}`)
+  assert.deepEqual(byBranch.data.map((row) => row.id).sort(), [onBranch, onLeaf].sort())
+
+  const byBranchExactly = await browse(`categoryId=${branch.id}&includeSubtree=false`)
+  assert.deepEqual(byBranchExactly.data.map((row) => row.id), [onBranch])
+
+  const byDistrict = await browse(`locationId=${district.id}`)
+  assert.deepEqual(byDistrict.data.map((row) => row.id).sort(), [onBranch, onLeaf].sort())
+
+  const byDistrictExactly = await browse(`locationId=${district.id}&includeSubtree=false`)
+  assert.deepEqual(byDistrictExactly.data.map((row) => row.id), [onBranch])
+
+  // Both axes at once, which is what the browse page actually sends.
+  const both = await browse(`categoryId=${branch.id}&locationId=${district.id}`)
+  assert.deepEqual(both.data.map((row) => row.id).sort(), [onBranch, onLeaf].sort())
+
+  // A leaf has no subtree, so the two answers must agree rather than one of them
+  // being the wider one by accident.
+  const byLeaf = await browse(`categoryId=${leaf.id}`)
+  const byLeafExactly = await browse(`categoryId=${leaf.id}&includeSubtree=false`)
+  assert.deepEqual(byLeaf.data.map((row) => row.id), [onLeaf])
+  assert.deepEqual(byLeafExactly.data.map((row) => row.id), [onLeaf])
+
+  // The repository default is still exact, so nothing that was not asking for a
+  // branch started receiving one: the review queue reads the same records.
+  assert.deepEqual(
+    ctx.app.businesses.list({ categoryId: branch.id }).items.map((row) => row.id),
+    [onBranch],
+  )
+  assert.deepEqual(
+    ctx.app.businesses.list({ locationId: district.id }).items.map((row) => row.id),
+    [onBranch],
+  )
+})
+
 test('a private contact point is unreachable from the public profile', async (t) => {
   const ctx = await freshServer()
   t.after(() => ctx.cleanup())

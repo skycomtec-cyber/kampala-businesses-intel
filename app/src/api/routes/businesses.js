@@ -1,4 +1,4 @@
-import { paged, single, toList, toPage, toText, uuidPattern } from '../lib/http.js'
+import { paged, single, toBoolean, toList, toPage, toText, uuidPattern } from '../lib/http.js'
 import { actorForRequest } from '../lib/actor.js'
 import { isPubliclyVisible } from '../../core/business.js'
 import { CAPABILITY_LEVELS } from '../../core/taxonomy.js'
@@ -11,7 +11,10 @@ import { NotFoundError } from '../../core/errors.js'
  * Two access rules, and they are different on purpose:
  *
  *   - `/businesses` is a filtered listing for browsing. It is rate limited, cache
- *     friendly, and only ever returns publicly visible records.
+ *     friendly, and only ever returns publicly visible records. Its category and
+ *     location filters cover the whole subtree by default, because a branch and a
+ *     district are the units a person browses by; `includeSubtree=false` asks for
+ *     the node itself.
  *   - `/search` is the same index, but it is a *demand signal* as well as a
  *     result set. It records the search, and a search that returns nothing in the
  *     area the person asked about is the platform's most valuable single piece of
@@ -32,6 +35,7 @@ const listQuerySchema = {
     capabilityLevel: { type: 'string', enum: [...CAPABILITY_LEVELS] },
     search: { type: 'string', maxLength: 120 },
     sort: { type: 'string', enum: ['newest', 'oldest', 'updated', 'name', 'name desc', 'status', 'verification'] },
+    includeSubtree: { type: 'boolean' },
     limit: { type: 'integer', minimum: 1, maximum: 100 },
     offset: { type: 'integer', minimum: 0 },
   },
@@ -68,6 +72,16 @@ export default async function businessRoutes(fastify, { app }) {
         // purpose: a public caller asking for a review state could only ever be
         // asking for records the public must not see.
         publishedOnly: true,
+        /**
+         * A category is a branch and a district contains wards, so the default here
+         * is the subtree, which is what "list what is in Nakawa Division" means to
+         * the person asking. It is still a parameter rather than a hardcoded
+         * behaviour, because the exact-node query is the correct one for a caller
+         * reconciling a single category against `/counts` without `includeSubtree`,
+         * and a route that could not be asked for that would push the difference
+         * onto every client.
+         */
+        includeSubtree: toBoolean(request.query.includeSubtree, 'includeSubtree') ?? true,
         ...page,
       })
       return paged(result, page)

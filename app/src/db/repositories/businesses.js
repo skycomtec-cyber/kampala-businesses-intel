@@ -747,6 +747,7 @@ export function createBusinessesRepository(db, deps = {}) {
       offset,
       includeContacts = false,
       publishedOnly = false,
+      includeSubtree = false,
     } = {}) {
       const page = normalisePagination({ limit, offset })
       const conditions = []
@@ -772,13 +773,38 @@ export function createBusinessesRepository(db, deps = {}) {
         params.capabilityLevel = assertCapabilityLevel(capabilityLevel)
       }
       if (categoryId) {
-        conditions.push('b.category_id = @categoryId')
+        // A category is a node in a tree, so "in this category" is a question with
+        // two defensible answers and the caller has to be able to ask either. The
+        // subtree test is the same one `count` already applies, and it is what a
+        // browse page needs: somebody who picks "Second Life Electronics" is
+        // asking for the whole vertical, and answering with only the listings
+        // filed directly against that node would report a covered market as empty.
+        // Off by default because a caller that wants the node itself — the
+        // reference check, a reconciliation against a count — must be able to say
+        // so, and because the admin queue wants the exact node it is looking at.
+        conditions.push(
+          `(b.category_id = @categoryId
+             OR (@includeSubtree = 1
+                 AND ('/' || c.path_slugs || '/') LIKE
+                     '%/' || (SELECT slug FROM category WHERE id = @categoryId) || '/%'))`,
+        )
         params.categoryId = categoryId
       }
       if (locationId) {
-        conditions.push('b.primary_location_id = @locationId')
+        // Same reasoning, and more of it: a ward usually holds nothing at all, so
+        // a location filter that only ever matched the node itself made every
+        // district look empty no matter how many listings were inside it.
+        conditions.push(
+          `(b.primary_location_id = @locationId
+             OR (@includeSubtree = 1
+                 AND ('/' || l.path_ids || '/') LIKE '%/' || @locationId || '/%'))`,
+        )
         params.locationId = locationId
       }
+      // One flag for both axes, deliberately, so `list` and `count` cannot answer
+      // the same question two different ways. The route layer is where a browse
+      // page's answer and a reference check's answer are told apart.
+      params.includeSubtree = includeSubtree ? 1 : 0
       if (skillId) {
         // EXISTS rather than a join: a business with three of the requested
         // skills must appear once, not three times, or the page total and the
@@ -795,6 +821,16 @@ export function createBusinessesRepository(db, deps = {}) {
         params.search = likeParam(search)
       }
 
+      // One FROM for both queries below. The page and its total have to be asking
+      // the database the same question, and the cheapest way to guarantee that is
+      // for there to be only one place the joins are written down: a total
+      // computed without the subtree joins would report "12 in this district"
+      // above a list of 40, which reads as a broken directory rather than a bug.
+      // Both joins are safe to make unconditional because `business` declares
+      // both columns NOT NULL with a RESTRICT foreign key, so neither can dangle.
+      const fromSql = `FROM business b
+            JOIN location l ON l.id = b.primary_location_id
+            JOIN category c ON c.id = b.category_id`
       const whereSql = where(conditions)
       // The id tiebreak keeps pagination stable: without it, rows with an equal
       // sort key can be returned in a different order per page and one of them
@@ -802,7 +838,7 @@ export function createBusinessesRepository(db, deps = {}) {
       const order = resolveOrder(sort, LIST_SORTS, LIST_SORTS.newest)
       const rows = db
         .prepare(
-          `SELECT ${BUSINESS_COLUMNS} FROM business b
+          `SELECT ${BUSINESS_COLUMNS} ${fromSql}
             ${whereSql}
             ORDER BY ${order}, b.id ASC
             LIMIT @limit OFFSET @offset`,
@@ -810,7 +846,7 @@ export function createBusinessesRepository(db, deps = {}) {
         .all({ ...params, limit: page.limit, offset: page.offset })
 
       const total = db
-        .prepare(`SELECT COUNT(*) AS total FROM business b ${whereSql}`)
+        .prepare(`SELECT COUNT(*) AS total ${fromSql} ${whereSql}`)
         .get(params).total
 
       const items = rows.map(businessRow)
