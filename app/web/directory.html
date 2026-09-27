@@ -1,0 +1,1587 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Directory &middot; Kampala Intelligence Platform</title>
+    <meta
+      name="description"
+      content="Browse and search verified businesses, services and products in Kampala and the districts around it."
+    />
+    <style>
+      /*
+       * The public directory.
+       *
+       * Same palette, same type stack and the same argument from the other two
+       * pages, because it is the same product seen from the outside. What changes
+       * is the posture: this is the page a stranger lands on, so it has to work
+       * before anybody has decided to trust it. That is why the search box is the
+       * first thing in the document rather than a link in a corner, and why every
+       * result states where it is rather than asking to be trusted.
+       *
+       * There is no build step and no dependency. The server hands this folder out
+       * as static files, so anything this page needs it has to bring with it.
+       */
+      :root {
+        --ink: #0d2a30;
+        --ink-soft: #163e46;
+        --gold: #f0b740;
+        --paper: #f7f4ee;
+        --card: #fffdf8;
+        /*
+         * Darkened from the #6d7f83 the other three pages use, and the only token
+         * here that is not shared with them.
+         *
+         * Measured off the rendered page rather than judged by eye: the old value
+         * gave 3.82:1 on `--paper` and 4.12:1 on `--card`, both under the 4.5:1 that
+         * WCAG AA asks of text at this size. It was carrying the count line, the
+         * pager, the search hint and the category on every card — real information,
+         * at 13–14px, which is exactly where a low-contrast grey does most damage.
+         *
+         * This clears 4.5:1 on both backgrounds (4.95 and 5.35) and keeps the same
+         * desaturated blue-grey, so it still reads as "quieter than the ink" rather
+         * than as a second text colour. The other three pages carry the same defect
+         * at the same value and want the same one-line change.
+         */
+        --muted: #5a6d72;
+        --line: #dcd6c9;
+        --danger: #c0453b;
+        --radius: 10px;
+
+        /*
+         * The type scale, stated once.
+         *
+         * This page had fourteen font sizes in it, seven of them inside a band of
+         * 0.22rem — 0.78, 0.82, 0.84, 0.86, 0.88, 0.9, 0.93. Nobody perceives a
+         * difference of 0.02rem; the effect is not hierarchy, it is the sense that
+         * every size was chosen by accident and none on purpose. Five steps with
+         * 0.11rem or more between neighbours is the smallest set that actually reads
+         * as different, so that is what this is.
+         *
+         * There is no display face separate from the body face. The server hands
+         * out a folder of static files with no build step and no network fetch, so
+         * a webfont would be a dependency the page cannot have, and faking
+         * personality with letter-spacing on a system sans is worse than not trying.
+         * The voice is carried by weight, size and placement instead.
+         */
+        --t-display: 1.6rem; /* the page's own name */
+        --t-lead: 1.12rem; /* the things a reader scans for: a listing's name, a heading */
+        --t-body: 1rem; /* anything being read as a sentence */
+        --t-meta: 0.875rem; /* supporting facts: place, category, counts, hints */
+        --t-label: 0.8125rem; /* names of fields, and badges */
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0 1.5rem 6rem;
+        background: var(--paper);
+        color: var(--ink);
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+
+      .shell {
+        max-width: 68rem;
+        margin: 0 auto;
+      }
+
+      /* A masthead you can see from the back of a room: the name, and the one
+         thing the page is for. */
+      .masthead {
+        padding: 1.9rem 0 1.35rem;
+        border-bottom: 2px solid var(--ink);
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1rem 1.5rem;
+        flex-wrap: wrap;
+      }
+
+      .masthead h1 {
+        margin: 0;
+        font-size: var(--t-display);
+        letter-spacing: -0.02em;
+      }
+
+      .masthead .sub {
+        margin: 0.2rem 0 0;
+        color: var(--muted);
+        font-size: var(--t-meta);
+      }
+
+      .masthead nav {
+        display: flex;
+        gap: 1.1rem;
+        font-size: var(--t-meta);
+      }
+
+      .masthead nav a {
+        color: var(--ink-soft);
+        text-decoration: none;
+        border-bottom: 1px solid var(--gold);
+      }
+
+      .masthead nav a:hover,
+      .masthead nav a:focus-visible {
+        background: var(--gold);
+      }
+
+      /*
+       * The search. It is a form, and submitting it is a deliberate act, because
+       * every search this platform serves is recorded as a demand signal and there
+       * is no debounce that makes typing into this box honest. See the note at the
+       * top of the script.
+       */
+      .search {
+        margin: 1.75rem 0 0;
+      }
+
+      .search .field {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+      }
+
+      .search input[type='search'] {
+        flex: 1 1 22rem;
+        padding: 0.8rem 0.9rem;
+        font: inherit;
+        font-size: var(--t-lead);
+        color: var(--ink);
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+
+      .search input[type='search']::placeholder {
+        color: #9aa8aa;
+      }
+
+      button {
+        font: inherit;
+        cursor: pointer;
+        border-radius: 8px;
+        border: 1px solid var(--ink);
+        background: var(--ink);
+        color: var(--paper);
+        padding: 0.8rem 1.4rem;
+      }
+
+      button:hover {
+        background: var(--ink-soft);
+      }
+
+      button.quiet {
+        background: transparent;
+        color: var(--ink-soft);
+        border-color: var(--line);
+        padding: 0.45rem 0.8rem;
+        font-size: var(--t-meta);
+      }
+
+      button.quiet:hover {
+        background: #fff;
+        border-color: var(--ink-soft);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
+      button:disabled:hover {
+        background: var(--ink);
+      }
+
+      /*
+       * Disabled form controls, which is where the whole "switch the control off
+       * rather than ignore it" approach lives or dies.
+       *
+       * `button:disabled` alone covered the only disabled element the page had, and
+       * a greyed-out `<select>` looked identical to a live one: no default browser
+       * styling applies to a disabled select, so the order and maturity controls
+       * went dead while still reading as adjustable. If the control is going to be
+       * refused, it has to look refused.
+       */
+      input:disabled,
+      select:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+        background: var(--paper-sunk, #f2efe8);
+      }
+
+      input:disabled + button,
+      select:disabled {
+        border-color: var(--line, #ddd7cb);
+      }
+
+      /*
+       * Present to a screen reader, absent from the page.
+       *
+       * `hidden` was the wrong tool for the search box's label: it takes the
+       * element out of the accessibility tree as well as out of the layout, which
+       * left the search input with no accessible name and nothing but a
+       * placeholder to announce. Clipping keeps the label in the tree.
+       */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      input:focus-visible,
+      select:focus-visible,
+      button:focus-visible,
+      a:focus-visible {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
+      }
+
+      /*
+       * The focus ring on a card is drawn around the card, not around its name.
+       *
+       * The name is the only focusable thing in a card, but it is not what you hit:
+       * the whole card is the target. A ring drawn round six millimetres of
+       * underlined text while the pointer activates the whole rectangle tells a
+       * keyboard user the target is much smaller than it is, and makes them guess
+       * whether the edges are live. `:focus-within` moves the ring to the thing
+       * that is actually clickable, and the name's own ring is dropped so the card
+       * is not outlined twice.
+       */
+      .card:focus-within {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
+      }
+
+      .card .name a:focus-visible {
+        outline: none;
+      }
+
+      .search .hint {
+        margin: 0.5rem 0 0;
+        font-size: var(--t-meta);
+        color: var(--muted);
+      }
+
+      /*
+       * Filters. A row of selects, not a sidebar: the reference sets are small, a
+       * sidebar would push the results off the fold on a phone, and every control
+       * here is optional, so a page with none of them filled in is a complete page.
+       */
+      .filters {
+        margin: 1.6rem 0 0;
+        padding: 1rem 1.1rem;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+        gap: 0.9rem 1.1rem;
+        align-items: end;
+      }
+
+      /*
+       * Field names, in sentence case.
+       *
+       * These were tracked-out capitals at 0.78rem, which is the single most
+       * template-looking thing on the page — and here it was worse than usual,
+       * because each one sits directly above a sentence-case option ("KIND OF
+       * BUSINESS" over "Everything"), so the two halves of the same control were
+       * set in different cases. Set like the options they label, and in
+       * `--ink-soft` rather than `--muted` so the label is legible without being
+       * louder than the control it names. The control is now the larger of the
+       * two, which is the right way round.
+       */
+      .filters label {
+        display: block;
+        font-size: var(--t-label);
+        color: var(--ink-soft);
+      }
+
+      .filters select,
+      .filters input[type='text'] {
+        display: block;
+        width: 100%;
+        margin-top: 0.3rem;
+        padding: 0.5rem 0.55rem;
+        font: inherit;
+        font-size: var(--t-body);
+        color: var(--ink);
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+
+      /*
+       * The skill box is a text input rather than a select because the vocabulary
+       * is open and a person does not know what it contains. What they type is
+       * resolved to a real skill and shown back as a chip, so a filter is never
+       * silently applied to a string that matched nothing.
+       */
+      .skill {
+        grid-column: span 2;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-top: 0.4rem;
+        padding: 0.15rem 0.3rem 0.15rem 0.55rem;
+        font-size: var(--t-meta);
+        background: #fff;
+        border: 1px solid var(--ink-soft);
+        border-radius: 999px;
+      }
+
+      .chip button {
+        all: unset;
+        cursor: pointer;
+        font-size: 1rem;
+        line-height: 1;
+        padding: 0 0.25rem;
+        color: var(--muted);
+      }
+
+      .chip button:hover,
+      .chip button:focus-visible {
+        color: var(--danger);
+        outline: 2px solid var(--danger);
+        outline-offset: 1px;
+        border-radius: 4px;
+      }
+
+      .chip.unresolved {
+        border-color: var(--line);
+        color: var(--muted);
+        border-radius: 6px;
+        padding: 0.2rem 0.5rem;
+      }
+
+      .filters .clear {
+        align-self: end;
+      }
+
+      /* What is on screen right now, in words, above the results. */
+      .summary {
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem 1rem;
+        flex-wrap: wrap;
+        margin: 2rem 0 0.9rem;
+        padding-bottom: 0.7rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .summary h2 {
+        margin: 0;
+        font-size: var(--t-lead);
+      }
+
+      .summary p {
+        margin: 0;
+        font-size: var(--t-meta);
+        color: var(--muted);
+      }
+
+      .summary .spacer {
+        flex: 1 1 auto;
+      }
+
+      .summary .problem {
+        color: var(--danger);
+      }
+
+      .summary .problem:empty {
+        display: none;
+      }
+
+      /*
+       * Results. Cards, because a listing is a small object with several kinds of
+       * fact on it, and a table would be read as a spreadsheet of the platform
+       * rather than as a place somebody works.
+       */
+      .results {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+        gap: 0.9rem;
+      }
+
+      .card {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        padding: 1rem 1.1rem 1.1rem;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+
+      .card .name {
+        margin: 0;
+        font-size: var(--t-lead);
+        font-weight: 600;
+      }
+
+      .card .name a {
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      /*
+       * The name is the link, and it gets the underline on hover rather than all
+       * the time: a screen of permanently underlined blue stops reading as text
+       * and starts reading as a list of buttons.
+       */
+      .card .name a:hover,
+      .card .name a:focus-visible {
+        text-decoration: underline;
+        text-decoration-color: var(--gold);
+        text-decoration-thickness: 2px;
+      }
+
+      /*
+       * The whole card is the target.
+       *
+       * Nearly every reason to be on this page ends in opening one listing, and
+       * asking for a 6mm-high underlined word to be hit is a small way of making
+       * that feel harder than it is. The name's own link is stretched over the
+       * card with a pseudo-element, so the accessible name stays the business's
+       * name — a screen reader is not told about a rectangle — while a pointer can
+       * land anywhere on it.
+       *
+       * Nothing else in a card is a link, which is what makes this safe. The
+       * search card used to carry a second "See the business offering it" pointing
+       * at the same place; with the card clickable that was a duplicate link to one
+       * destination under two different names, so it is gone. The kind badge above
+       * already says the hit is a service or a product rather than a business.
+       */
+      .card .name a::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+      }
+
+      .card {
+        position: relative;
+      }
+
+      .card .blurb {
+        margin: 0;
+        font-size: var(--t-body);
+        color: var(--ink-soft);
+      }
+
+      .card .blurb:empty {
+        display: none;
+      }
+
+      /*
+       * Where it is.
+       *
+       * This is the one line the whole page is organised around, and it used to be
+       * third in a wrapping meta line at 0.82rem muted, behind the category and
+       * divided from it by a decorative rule — which quietly contradicted the
+       * header's own claim that every result states where it is. A person scanning
+       * this grid is deciding whether a business is somewhere they can walk to, so
+       * the place gets its own line, at body size, in `--ink-soft` rather than
+       * `--muted`, directly under the name.
+       *
+       * The gold rule down its left edge is the one mark on the card that is
+       * decoration in the strict sense, and it earns its place: it is what makes a
+       * column of cards read as a column of addresses rather than as a column of
+       * paragraphs, and it repeats on every card so it encodes nothing about any
+       * one of them. It is not a status colour and it is not per-listing.
+       */
+      .where {
+        margin: 0;
+        padding-left: 0.6rem;
+        border-left: 2px solid var(--gold);
+        font-size: var(--t-body);
+        color: var(--ink-soft);
+      }
+
+      .where.absent {
+        color: var(--muted);
+        font-style: italic;
+        border-left-color: var(--line);
+      }
+
+      /*
+       * Everything else the card knows, on one quiet line under the address.
+       *
+       * The 1px vertical rules that used to separate these facts are gone. They
+       * encoded nothing, and in a wrapping flex container they stranded themselves
+       * at the end of a line and opened the next one, so a category could be
+       * preceded by a floating tick with nothing to divide it from. Space between
+       * facts is enough now that they are no longer competing with the place.
+       */
+      .meta {
+        margin: 0.15rem 0 0;
+        display: flex;
+        align-items: center;
+        gap: 0.15rem 0.6rem;
+        flex-wrap: wrap;
+        font-size: var(--t-meta);
+        color: var(--muted);
+      }
+
+      .meta .absent {
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      .tag {
+        font-size: var(--t-label);
+        padding: 0.05rem 0.4rem;
+        border-radius: 4px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      /* The kind of thing a search hit is. Filled, because unlike the review
+         states on the operator page this is the reader's own answer to "what am
+         I looking at", not a badge about the listing. */
+      .tag.kind {
+        border-color: var(--ink-soft);
+        color: var(--ink-soft);
+        text-transform: capitalize;
+      }
+
+      .empty {
+        margin: 0;
+        padding: 1.75rem 1.25rem;
+        background: #fff;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        border-radius: var(--radius);
+        color: var(--ink-soft);
+      }
+
+      .empty strong {
+        display: block;
+        margin-bottom: 0.4rem;
+        font-size: var(--t-lead);
+      }
+
+      .empty p {
+        margin: 0 0 0.6rem;
+        max-width: 42rem;
+        font-size: var(--t-body);
+      }
+
+      .empty p:last-child {
+        margin-bottom: 0;
+      }
+
+      .pager {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        margin: 1.6rem 0 0;
+        font-size: var(--t-meta);
+        color: var(--muted);
+      }
+
+      .pager .spacer {
+        flex: 1 1 auto;
+      }
+
+      .note {
+        margin: 2.5rem 0 0;
+        padding: 0.95rem 1.1rem;
+        background: #fff;
+        border-left: 3px solid var(--gold);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        font-size: var(--t-body);
+        color: var(--ink-soft);
+        max-width: 46rem;
+      }
+
+      .note a,
+      .empty a {
+        color: var(--ink);
+        border-bottom: 2px solid var(--gold);
+        text-decoration: none;
+      }
+
+      .note a:hover,
+      .empty a:hover {
+        background: var(--gold);
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      @media (max-width: 34rem) {
+        .skill {
+          grid-column: span 1;
+        }
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        /*
+         * The card is a link now, so it owes the pointer an answer — a stretched
+         * link with no response at all is a well-known way to lose a click. The
+         * movement is two pixels and the border darkens, which together read as
+         * "this whole thing lifts", and the name's gold underline arrives with it
+         * so the thing that is actually focusable is the thing that looks pressed.
+         *
+         * Gated on `prefers-reduced-motion` because a card that rises on hover is
+         * exactly the kind of incidental movement that setting exists to suppress,
+         * and because the border change alone still carries the affordance for
+         * anyone who does not want it moving.
+         */
+        .card {
+          transition:
+            border-color 120ms ease,
+            transform 120ms ease,
+            box-shadow 120ms ease;
+        }
+
+        .card:hover {
+          border-color: var(--ink-soft);
+          transform: translateY(-2px);
+          box-shadow: 0 2px 10px rgb(13 42 48 / 8%);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <div>
+          <h1>The directory</h1>
+          <p class="sub">Businesses in Kampala and the districts around it, and what they do.</p>
+        </div>
+        <nav>
+          <a href="/">Engine</a>
+          <a href="/operator.html">Verification queue</a>
+        </nav>
+      </header>
+
+      <form class="search" id="search-form" role="search">
+        <div class="field">
+          <label for="q" class="sr-only">Search the directory</label>
+          <input
+            type="search"
+            id="q"
+            name="q"
+            maxlength="200"
+            autocomplete="off"
+            placeholder="Laptop screen replacement, Nakawa, phone repair&hellip;"
+          />
+          <button type="submit">Search</button>
+        </div>
+        <p class="hint">
+          A search covers businesses, the services they offer and the products they sell. A
+          question this directory cannot answer is the most useful thing anybody can ask it.
+        </p>
+      </form>
+
+      <form class="filters" id="filters">
+        <label>
+          Kind of business
+          <select id="category">
+            <option value="">Everything</option>
+          </select>
+        </label>
+
+        <label>
+          Area
+          <select id="location">
+            <option value="">Everywhere</option>
+          </select>
+        </label>
+
+        <label class="skill">
+          Skill
+          <input
+            type="text"
+            id="skill-input"
+            list="skill-options"
+            maxlength="80"
+            autocomplete="off"
+            placeholder="Start typing a skill, e.g. solar"
+          />
+          <datalist id="skill-options"></datalist>
+          <span id="skill-chip-holder"></span>
+        </label>
+
+        <label>
+          Maturity
+          <select id="capability">
+            <option value="">Any</option>
+            <option value="claimed">Claims to offer it</option>
+            <option value="documented">Documented</option>
+            <option value="operating">Operating</option>
+            <option value="established">Established</option>
+          </select>
+        </label>
+
+        <label>
+          Order
+          <select id="sort">
+            <option value="name">A to Z</option>
+            <option value="name desc">Z to A</option>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="updated">Recently updated</option>
+          </select>
+        </label>
+
+        <button type="button" class="quiet clear" id="clear">Clear filters</button>
+      </form>
+
+      <div class="summary">
+        <h2 id="heading">Everything</h2>
+        <p id="count" role="status" aria-live="polite"></p>
+        <span class="spacer"></span>
+        <p class="problem" id="problem" role="alert"></p>
+      </div>
+
+      <ul class="results" id="results"></ul>
+
+      <p class="empty" id="empty" hidden></p>
+
+      <div class="pager" id="pager" hidden>
+        <button type="button" class="quiet" id="previous">Previous</button>
+        <span id="range"></span>
+        <button type="button" class="quiet" id="next">Next</button>
+        <span class="spacer"></span>
+      </div>
+
+      <p class="note">
+        Every listing here has been checked by somebody who went and looked. Records that are
+        still in the <a href="/operator.html">verification queue</a> are not in this directory and
+        are not counted anywhere the public can see.
+      </p>
+    </div>
+
+    <script>
+      /*
+       * Two endpoints, and the difference between them is the whole design of this
+       * page.
+       *
+       * With no words in the box, this is browsing: GET /businesses, a filtered
+       * listing of published records. It costs nothing and returns everything.
+       *
+       * With words in the box, this is GET /search, and that endpoint records an
+       * anonymised demand signal on every call. Not "records the first call of a
+       * session" — every call, with the query and the result count, and it counts
+       * toward the gap engine's evidence about where the directory is thin. A
+       * debounced live-search box would therefore write one signal per keystroke
+       * and fill the platform's most valuable dataset with the abandoned prefixes
+       * of words. So the search runs when the form is submitted, which is also
+       * what somebody pressing Enter on a phone expects.
+       *
+       * Nothing here writes with innerHTML. A business name is operator-typed text
+       * from a spreadsheet, and the same rule the operator page follows applies: a
+       * string from the database becomes a text node, never markup.
+       */
+      const API = '/api/v1'
+      const PAGE_SIZE = 24
+      /** How long the skill box waits before asking the vocabulary about a word. */
+      const SKILL_DEBOUNCE_MS = 220
+
+      const els = {
+        form: document.getElementById('search-form'),
+        q: document.getElementById('q'),
+        category: document.getElementById('category'),
+        location: document.getElementById('location'),
+        skillInput: document.getElementById('skill-input'),
+        skillOptions: document.getElementById('skill-options'),
+        skillChip: document.getElementById('skill-chip-holder'),
+        capability: document.getElementById('capability'),
+        sort: document.getElementById('sort'),
+        clear: document.getElementById('clear'),
+        heading: document.getElementById('heading'),
+        count: document.getElementById('count'),
+        problem: document.getElementById('problem'),
+        results: document.getElementById('results'),
+        empty: document.getElementById('empty'),
+        pager: document.getElementById('pager'),
+        previous: document.getElementById('previous'),
+        next: document.getElementById('next'),
+        range: document.getElementById('range'),
+      }
+
+      /**
+       * Everything on screen, and the only thing allowed to decide what is on
+       * screen. The url is the fourth source of truth: it is read on load, written
+       * on every change, and it is what makes a filtered directory shareable.
+       */
+      const state = {
+        q: '',
+        categoryId: '',
+        locationId: '',
+        skillId: '',
+        capabilityLevel: '',
+        sort: 'name',
+        offset: 0,
+        total: 0,
+        /** id -> name, for the two reference trees. */
+        categoryNames: new Map(),
+        locationPaths: new Map(),
+        skillName: null,
+        loading: false,
+        /**
+         * The last listing request could not be made. Kept apart from the message
+         * on screen because the next request clears that message, and a directory
+         * that has lost its filters has not suddenly got them back.
+         */
+        failed: false,
+        /**
+         * The reference data could not be loaded at all. Held for the same reason:
+         * `run` resets the problem line on every call, so without this the warning
+         * survives exactly long enough to be read and is then erased by the very
+         * request that was supposed to be reporting it.
+         */
+        referenceProblem: '',
+      }
+
+      /** One request helper, so every call agrees on errors. */
+      async function api(path) {
+        const response = await fetch(path, {
+          credentials: 'same-origin',
+          headers: { accept: 'application/json' },
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(payload?.error?.message ?? 'The directory could not be reached.')
+          error.status = response.status
+          throw error
+        }
+        return payload
+      }
+
+      const say = (element, message) => {
+        element.textContent = message ?? ''
+      }
+
+      /* --- reference data -------------------------------------------------- */
+
+      /**
+       * The heading for one level of the location tree.
+       *
+       * The reference data has nine kinds, and three of them do not take a plain
+       * `s`: a select containing "citys", "countrys" and "subcountys" is the sort of
+       * detail that costs a reader their trust in everything else on the page. Any
+       * kind the reference data grows later falls through to the plain plural, which
+       * is right often enough not to be worth a general rule.
+       */
+      const KIND_LABELS = Object.freeze({
+        country: 'countries',
+        city: 'cities',
+        subcounty: 'subcounties',
+      })
+      const groupLabel = (kind) => KIND_LABELS[kind] ?? `${kind}s`
+
+      /**
+       * The two vocabularies every other record is expressed in.
+       *
+       * A listing row carries a category id and a location id, and an id is not
+       * something a person can decide anything from, so the names are resolved
+       * once here rather than by a join on every page. 32 locations and 90
+       * categories, both public, both cacheable, and one request each beats thirty.
+       *
+       * The skills are deliberately not in this batch. `/skills` requires a `q`, so
+       * there is no route that hands over the vocabulary, and the two ways round
+       * that are both worse than not having it: ninety `/categories/:id` calls to
+       * collect skills per branch, or a guessed one-letter `q` that enumerates
+       * whichever skills happen to contain that letter. The skill box fills its
+       * own datalist from the lookup it already makes, which is the one place the
+       * vocabulary is genuinely known to be relevant.
+       */
+      async function loadReference() {
+        const [categories, locations] = await Promise.all([
+          api(`${API}/categories`),
+          api(`${API}/locations?limit=500`),
+        ])
+
+        const fillCategorySelect = (nodes, depth) => {
+          for (const node of nodes ?? []) {
+            state.categoryNames.set(node.id, node.name)
+            // The indentation is the only cue that these are levels of one tree,
+            // and it is enough: a group this deep is a person's own reading of
+            // where their need sits, so it should not be flattened.
+            const option = document.createElement('option')
+            option.value = node.id
+            option.textContent = `${'— '.repeat(depth)}${node.name}`
+            els.category.append(option)
+            fillCategorySelect(node.children, depth + 1)
+          }
+        }
+        fillCategorySelect(categories.data, 0)
+
+        for (const location of locations.data ?? []) {
+          state.locationPaths.set(location.id, location.pathNames ?? location.name)
+        }
+
+        /*
+         * The select, grouped by level so a 32-row list can be read.
+         *
+         * Opening a new optgroup every time the kind changes does not work on this
+         * data, because `city` and `town` sit at the same depth and interleave by
+         * name: the api hands back district, town, city, town, city… and a
+         * per-change group produced a select with five separate "towns" headers
+         * scattered down it. So the rows are collected by kind first and written
+         * out one group at a time, which reads Uganda, the four regions, the eight
+         * districts, the cities, the towns, the divisions.
+         *
+         * The order comes from the data rather than from a list of kinds written
+         * here, so a kind added to the reference data later shows up without this
+         * file being edited. Depth decides the order; within one depth, first
+         * appearance wins, because `sort` is stable and that is the only tiebreak
+         * available that cannot go stale.
+         */
+        const byKind = new Map()
+        for (const location of locations.data ?? []) {
+          if (!byKind.has(location.kind)) byKind.set(location.kind, [])
+          byKind.get(location.kind).push(location)
+        }
+        for (const [kind, rows] of [...byKind].sort((a, b) => a[1][0].depth - b[1][0].depth)) {
+          const group = document.createElement('optgroup')
+          group.label = groupLabel(kind)
+          for (const location of rows) {
+            const option = document.createElement('option')
+            option.value = location.id
+            option.textContent = location.pathNames ?? location.name
+            group.append(option)
+          }
+          els.location.append(group)
+        }
+      }
+
+      /* --- the url --------------------------------------------------------- */
+
+      function readUrl() {
+        const params = new URLSearchParams(window.location.search)
+        state.q = params.get('q') ?? ''
+        state.categoryId = params.get('category') ?? ''
+        state.locationId = params.get('location') ?? ''
+        state.skillId = params.get('skill') ?? ''
+        state.capabilityLevel = params.get('capability') ?? ''
+        // `sort` is the one control with a non-empty default, so it is only put in
+        // the url when it is something other than that default. A shared link that
+        // says `&sort=name` is noise.
+        const sort = params.get('sort') ?? ''
+        state.sort = sort || 'name'
+        const offset = Number.parseInt(params.get('offset') ?? '0', 10)
+        state.offset = Number.isInteger(offset) && offset > 0 ? offset : 0
+      }
+
+      /**
+       * Writes the state back to the url with replaceState, not pushState.
+       *
+       * A directory is a place a person settles into and clicks around, and
+       * pushing every filter change would make the back button walk backwards
+       * through their own exploration instead of out of the page. A submitted
+       * search is worth a history entry, so that one is a push.
+       */
+      function writeUrl({ push = false } = {}) {
+        const params = new URLSearchParams()
+        if (state.q) params.set('q', state.q)
+        if (state.categoryId) params.set('category', state.categoryId)
+        if (state.locationId) params.set('location', state.locationId)
+        if (state.skillId) params.set('skill', state.skillId)
+        if (state.capabilityLevel) params.set('capability', state.capabilityLevel)
+        if (state.sort !== 'name') params.set('sort', state.sort)
+        if (state.offset > 0) params.set('offset', String(state.offset))
+        const url = params.toString() ? `?${params}` : window.location.pathname
+        if (push) window.history.pushState({}, '', url)
+        else window.history.replaceState({}, '', url)
+      }
+
+      /* --- filters --------------------------------------------------------- */
+
+      function writeControls() {
+        els.q.value = state.q
+        els.category.value = state.categoryId
+        els.location.value = state.locationId
+        els.capability.value = state.capabilityLevel
+        els.sort.value = state.sort
+        writeModeControls()
+        renderSkillChip()
+      }
+
+      /**
+       * The two controls the current mode cannot honour.
+       *
+       * `/search` is a full-text index and takes neither of them. It returns
+       * documents in relevance order, and nothing in the index records how far
+       * along a business is, so there is no `capabilityLevel` to filter by — a
+       * maturity filter set and then carried into a search was accepted by the
+       * control, kept in the url, and never sent, so the page reported results
+       * that had nothing to do with it.
+       *
+       * Both therefore go dead while a search is on, and both say why. One
+       * function, because the rule is the same and so is the mistake: `sort` was
+       * disabled when the query arrived in the url and left live when it was typed
+       * into the box, and `capability` was never wired to the mode at all. A
+       * control that is on screen and does nothing is worse than a control that is
+       * not there, so these are greyed out rather than quietly ignored.
+       *
+       * The chosen level is kept in the state and in the url either way, so
+       * clearing the search brings it back and a shared link reproduces the page
+       * as the sender saw it — a control visibly switched off, rather than a
+       * filter that appears to be applied and is not.
+       */
+      function writeModeControls() {
+        const searching = Boolean(state.q)
+        els.sort.disabled = searching
+        els.sort.title = searching ? 'Search results are ordered by relevance.' : ''
+        els.capability.disabled = searching
+        els.capability.title = searching
+          ? 'Search does not filter by maturity. Clear the search to use it.'
+          : ''
+      }
+
+      /** Whether anything has narrowed the listing. Decides how the empty state reads. */
+      function hasFilters() {
+        return Boolean(
+          state.q || state.categoryId || state.locationId || state.skillId || state.capabilityLevel,
+        )
+      }
+
+      /** Describes the search in the heading, so the page says what it is showing. */
+      function describe() {
+        if (state.q) return `Results for “${state.q}”`
+        const category = state.categoryId ? state.categoryNames.get(state.categoryId) : null
+        if (category) return category
+        const place = state.locationId ? state.locationPaths.get(state.locationId) : null
+        if (place) return place
+        return 'Everything'
+      }
+
+      function renderSkillChip() {
+        els.skillChip.replaceChildren()
+        if (!state.skillId) return
+        const chip = document.createElement('span')
+        chip.className = 'chip'
+        const name = state.skillName ?? 'this skill'
+        chip.append(document.createTextNode(name))
+        const drop = document.createElement('button')
+        drop.type = 'button'
+        drop.setAttribute('aria-label', `Remove the ${name} filter`)
+        drop.textContent = '×'
+        drop.addEventListener('click', () => {
+          state.skillId = ''
+          state.skillName = null
+          els.skillInput.value = ''
+          els.skillChip.replaceChildren()
+          state.offset = 0
+          run({ push: true })
+        })
+        chip.append(drop)
+        els.skillChip.append(chip)
+      }
+
+      /**
+       * Resolves what somebody typed into a real skill, or into nothing.
+       *
+       * `/skills` searches names and synonyms, which is what lets a person who
+       * types "fridge" reach "refrigerator repair". It is a `read` endpoint and it
+       * records no signal, so asking it on a pause in typing costs nothing that
+       * matters — unlike the search box, which is why that one waits for a submit.
+       *
+       * And the same rule decides whether the resolved skill re-runs the listing:
+       * browsing is free to re-run, searching is not, because a re-run is another
+       * recorded demand event. So a resolved skill applies itself while browsing
+       * and waits for the next submit while searching.
+       */
+      /**
+       * Fills the datalist the skill box points at.
+       *
+       * The box carries `list="skill-options"`, so with the datalist never written
+       * to the browser has nothing to offer and the control reads as a plain text
+       * field that happens to sit in a filter panel. Filled from the same `/skills`
+       * answer the filter itself is resolved out of, so it costs no second request
+       * and it can never suggest a skill the resolution did not also consider.
+       */
+      function renderSkillOptions(skills) {
+        els.skillOptions.replaceChildren()
+        for (const skill of skills) {
+          const option = document.createElement('option')
+          option.value = skill.name
+          // A datalist entry is drawn from its `label`, or from its text when there
+          // is no label. Setting `value` sets neither, so the skill box offered a
+          // short list of blank rows and the control still looked broken.
+          option.label = skill.name
+          option.textContent = skill.name
+          els.skillOptions.append(option)
+        }
+      }
+
+      let skillTimer = null
+      els.skillInput.addEventListener('input', () => {
+        window.clearTimeout(skillTimer)
+        const term = els.skillInput.value.trim()
+        if (term.length < 2) {
+          state.skillId = ''
+          state.skillName = null
+          els.skillChip.replaceChildren()
+          return
+        }
+        skillTimer = window.setTimeout(async () => {
+          try {
+            const response = await api(`${API}/skills?q=${encodeURIComponent(term)}&limit=8`)
+            renderSkillOptions(response.data ?? [])
+            const [first] = response.data ?? []
+            if (!first) {
+              state.skillId = ''
+              state.skillName = null
+              showUnresolvedSkill(term)
+              return
+            }
+            const changed = state.skillId !== first.id
+            state.skillId = first.id
+            state.skillName = first.name
+            renderSkillChip()
+            if (changed && !state.q) {
+              state.offset = 0
+              run()
+            }
+          } catch {
+            // A vocabulary lookup failing is not a reason to lose the search box.
+          }
+        }, SKILL_DEBOUNCE_MS)
+      })
+
+      /**
+       * The filter panel is a form so the controls are real form controls, and a
+       * form inside a page with a search box must not be allowed to navigate on
+       * Enter: that would reload the page with `skill-input=…` in the query string
+       * and lose the state this file keeps in memory.
+       */
+      document.getElementById('filters').addEventListener('submit', (event) => {
+        event.preventDefault()
+      })
+
+      /** Says so when a word matched no skill, rather than filtering by nothing. */
+      function showUnresolvedSkill(term) {
+        els.skillChip.replaceChildren()
+        const note = document.createElement('span')
+        note.className = 'chip unresolved'
+        note.textContent = `No skill called “${term}” — searching by text instead.`
+        els.skillChip.append(note)
+      }
+
+      /* --- loading --------------------------------------------------------- */
+
+      async function run({ push = false } = {}) {
+        state.loading = true
+        state.failed = false
+        writeUrl({ push })
+        say(els.problem, state.referenceProblem)
+        render()
+        let page = { data: [], meta: {} }
+        let failure = null
+        try {
+          page = state.q ? await search() : await browse()
+        } catch (error) {
+          failure = error
+        }
+        /*
+         * The flag is cleared before the rows are drawn rather than in a `finally`
+         * after them, and that ordering is the whole point of this function.
+         *
+         * Both the count line and the empty panel read `state.loading` to decide
+         * what to say about themselves, so a render issued while the flag is still
+         * true draws a page that is still loading — forever, because nothing runs
+         * after it. An empty directory was therefore permanently captioned
+         * "Loading…" with no empty panel underneath it, which is the one state
+         * this page exists to explain, and the explanation never appeared.
+         */
+        state.loading = false
+        state.failed = failure !== null
+        state.total = page.meta?.total ?? 0
+        if (failure) {
+          say(
+            els.problem,
+            state.referenceProblem
+              ? `${state.referenceProblem} — ${failure.message}`
+              : failure.message,
+          )
+        }
+        render(page.data)
+        renderPager()
+      }
+
+      function browse() {
+        const params = new URLSearchParams({
+          limit: String(PAGE_SIZE),
+          offset: String(state.offset),
+          sort: state.sort,
+        })
+        if (state.categoryId) params.set('categoryId', state.categoryId)
+        if (state.locationId) params.set('locationId', state.locationId)
+        if (state.skillId) params.set('skillId', state.skillId)
+        if (state.capabilityLevel) params.set('capabilityLevel', state.capabilityLevel)
+        return api(`${API}/businesses?${params}`)
+      }
+
+      function search() {
+        const params = new URLSearchParams({
+          q: state.q,
+          limit: String(PAGE_SIZE),
+          offset: String(state.offset),
+          // `web` is the surface the demand engine distinguishes real market
+          // demand from internal traffic by, so it is declared rather than left to
+          // the default. Everything on this page is the web.
+          surface: 'web',
+        })
+        if (state.locationId) params.set('locationId', state.locationId)
+        if (state.categoryId) params.set('categoryId', state.categoryId)
+        if (state.skillId) params.set('skillId', state.skillId)
+        return api(`${API}/search?${params}`)
+      }
+
+      /* --- rendering ------------------------------------------------------- */
+
+      function render(rows) {
+        els.heading.textContent = describe()
+        say(els.count, countPhrase(rows ? rows.length : 0))
+        els.results.replaceChildren()
+        for (const row of rows ?? []) {
+          els.results.append(state.q ? searchCard(row) : businessCard(row))
+        }
+        renderEmpty(rows)
+      }
+
+      function countPhrase(shown) {
+        if (state.loading) return 'Loading…'
+        if (state.total === 0) return ''
+        if (state.total <= shown) return `${state.total} listing${state.total === 1 ? '' : 's'}`
+        return `Showing ${state.offset + 1}–${state.offset + shown} of ${state.total}`
+      }
+
+      function renderEmpty(rows) {
+        els.empty.replaceChildren()
+        const nothing = (rows ?? []).length === 0
+        // A request that failed is not an empty directory. The problem line above
+        // already says what went wrong, and an empty panel printed under it would
+        // claim this district has never been surveyed when the truth is that the
+        // page was never able to ask.
+        els.empty.hidden = !nothing || state.loading || state.failed
+        if (els.empty.hidden) return
+
+        const lead = document.createElement('strong')
+        const body = document.createElement('p')
+        const close = document.createElement('p')
+
+        if (state.q) {
+          /*
+           * A search with no results is not a failure of this page, it is the
+           * platform's most valuable single piece of data: somebody has asked for
+           * something in an area and it is not there. So the empty state says what
+           * happened to the question rather than apologising for the result.
+           */
+          lead.textContent = `Nothing here for “${state.q}” yet.`
+          body.textContent =
+            'That question has just been recorded, and a question the directory cannot answer is exactly what it exists to surface. Listings arrive when somebody walks the area and enters what is there.'
+          const here = document.createElement('a')
+          here.href = window.location.pathname
+          here.textContent = 'Clear the search and browse everything instead'
+          close.append(here, '.')
+        } else {
+          lead.textContent = 'Nothing published here yet.'
+          body.textContent = hasFilters()
+            ? 'No published listing matches this combination. A district or a branch is usually the filter that is too narrow rather than the whole directory being empty.'
+            : 'The directory starts empty on purpose. A listing only appears once somebody has been there and checked it, so an empty result means the area has not been surveyed, not that there is nothing there.'
+          const here = document.createElement('a')
+          here.href = window.location.pathname
+          here.textContent = 'Show everything'
+          close.append(here, '.')
+        }
+
+        els.empty.append(lead, body, close)
+      }
+
+      function businessCard(business) {
+        const card = document.createElement('li')
+        card.className = 'card'
+
+        const name = document.createElement('p')
+        name.className = 'name'
+        const link = document.createElement('a')
+        link.href = `/business.html?b=${encodeURIComponent(business.slug ?? business.id)}`
+        link.textContent = business.name
+        name.append(link)
+        card.append(name)
+
+        /*
+         * The address, on its own line and above the blurb.
+         *
+         * A person reads a card in one of two directions. "What is it" is answered
+         * by the name, and then either the description justifies the name or the
+         * address decides whether they can go. Putting the place second and the
+         * description third serves the second reader, and the first one can skip a
+         * line far more easily than they can un-see it.
+         */
+        card.append(where(state.locationPaths.get(business.primaryLocationId)))
+
+        const blurb = document.createElement('p')
+        blurb.className = 'blurb'
+        // The description is a person's own words about their business, and it is
+        // the only field here that says anything the name does not.
+        blurb.textContent = business.description ? business.description.slice(0, 160) : ''
+        if (business.description && business.description.length > 160) {
+          blurb.append(document.createTextNode('…'))
+        }
+        card.append(blurb)
+
+        // The place is no longer repeated down here; this line is what is left.
+        card.append(meta([
+          { text: state.categoryNames.get(business.categoryId) ?? 'Unfiled category', absent: !state.categoryNames.has(business.categoryId) },
+        ]))
+
+        const tags = document.createElement('span')
+        tags.className = 'meta'
+        if (business.capabilityLevel && business.capabilityLevel !== 'unverified') {
+          tags.append(tag(business.capabilityLevel))
+        }
+        card.append(tags)
+
+        return card
+      }
+
+      /**
+       * A search hit is a document, not a business: a hit can be one service or
+       * one product of a business with forty, which is the whole reason the
+       * directory searches services and products separately. Each hit therefore
+       * says what kind of thing it is, and the whole card goes to the business it
+       * belongs to.
+       */
+      function searchCard(hit) {
+        const card = document.createElement('li')
+        card.className = 'card'
+
+        const name = document.createElement('p')
+        name.className = 'name'
+        const link = document.createElement('a')
+        link.href = `/business.html?b=${slugFrom(hit.path)}`
+        link.textContent = hit.title
+        name.append(link)
+        card.append(name)
+
+        // Same order as a browse card: the address decides whether it is worth
+        // reading the rest of the card.
+        if (hit.locationId && state.locationPaths.has(hit.locationId)) {
+          card.append(where(state.locationPaths.get(hit.locationId)))
+        } else if (hit.locationPath) {
+          card.append(where(hit.locationPath))
+        } else {
+          /*
+           * The same answer a browse card gives an unrecorded place.
+           *
+           * The header comment on this file claims every result states where it is,
+           * and a hit with no location used to break that claim by saying nothing at
+           * all — which on a card reads as "this business is everywhere" rather than
+           * "nobody recorded a place". `location_path` is a nullable column on the
+           * search document, so a hit without one is a real shape, not a theory.
+           */
+          card.append(where(null))
+        }
+
+        if (hit.summary) {
+          const blurb = document.createElement('p')
+          blurb.className = 'blurb'
+          blurb.textContent = hit.summary
+          card.append(blurb)
+        }
+
+        const facts = document.createElement('p')
+        facts.className = 'meta'
+        const badge = document.createElement('span')
+        badge.className = 'tag kind'
+        // The one thing that tells a reader a hit is a fragment of something
+        // bigger. It used to be joined by a "See the business offering it" link
+        // pointing at the same url under a second name, which was a duplicate
+        // destination dressed up as a second choice; the stretched name link makes
+        // it worse, not better, so the link went and the badge stayed.
+        badge.textContent = hit.sourceType
+        facts.append(badge)
+        if (hit.categoryId && state.categoryNames.has(hit.categoryId)) {
+          /*
+           * A real space, not just the flex `gap`.
+           *
+           * `gap` is a layout property: it moves the two spans apart on screen and
+           * puts nothing at all between them in the text, so the line read
+           * "businessDevice Repair" to anything reading text rather than looking at
+           * it. A whitespace-only text node is not turned into a flex item, so this
+           * separates the words without adding a gap the layout then has to absorb.
+           */
+          facts.append(document.createTextNode(' '), text(state.categoryNames.get(hit.categoryId)))
+        }
+        card.append(facts)
+
+        return card
+      }
+
+      /** `/business/<slug>#service-<slug>` is a path inside the api, not a page here. */
+      function slugFrom(path) {
+        return String(path ?? '').split('#')[0].split('/').filter(Boolean).pop() ?? ''
+      }
+
+      /**
+       * The address line, and the only place on a card that admits to a gap.
+       *
+       * `null` is the honest rendering of a listing nobody has recorded a place
+       * for, and it is styled as a gap — italic, muted, and with the gold edge
+       * dropped to a grey one — so a card that is missing its address is visibly
+       * missing it rather than quietly shorter than its neighbours. A grid of equal
+       * boxes hides omissions; the mark is what makes the omission legible.
+       */
+      function where(place) {
+        const line = document.createElement('p')
+        if (place) {
+          line.className = 'where'
+          line.textContent = place
+        } else {
+          line.className = 'where absent'
+          line.textContent = 'Place not recorded'
+        }
+        return line
+      }
+
+      function meta(bits) {
+        const line = document.createElement('p')
+        line.className = 'meta'
+        for (const bit of bits) {
+          const span = document.createElement('span')
+          if (bit.absent) span.className = 'absent'
+          span.textContent = bit.text
+          line.append(span)
+        }
+        return line
+      }
+
+      function text(value) {
+        const span = document.createElement('span')
+        span.textContent = value
+        return span
+      }
+
+      function tag(value) {
+        const span = document.createElement('span')
+        span.className = 'tag'
+        span.textContent = value
+        return span
+      }
+
+      function renderPager() {
+        const hasMore = state.offset + PAGE_SIZE < state.total
+        // A pager with both buttons greyed out, sitting under a page that already
+        // shows everything there is, is a control that cannot be used. It appears
+        // once there is a second page to reach, and stays for the rest of the walk
+        // through them, including the last page where only Previous works.
+        els.pager.hidden = state.total === 0 || (state.offset === 0 && !hasMore)
+        els.previous.disabled = state.loading || state.offset === 0
+        els.next.disabled = state.loading || !hasMore
+        const first = state.total === 0 ? 0 : state.offset + 1
+        const last = Math.min(state.offset + PAGE_SIZE, state.total)
+        say(els.range, state.total === 0 ? '' : `${first}–${last} of ${state.total}`)
+      }
+
+      /* --- events ---------------------------------------------------------- */
+
+      els.form.addEventListener('submit', (event) => {
+        event.preventDefault()
+        state.q = els.q.value.trim()
+        // A new question starts at the first page. Paging to offset 24 of a search
+        // that has just changed is a page of an answer nobody asked for.
+        state.offset = 0
+        // The whole of `writeControls` is not called here on purpose: it would write
+        // `state.q` back over the search box, which is the one thing the person who
+        // just pressed Search is still looking at. Only the controls that depend on
+        // the mode having changed need re-applying.
+        writeModeControls()
+        run({ push: true })
+      })
+
+      for (const control of [els.category, els.location, els.capability, els.sort]) {
+        control.addEventListener('change', () => {
+          state.categoryId = els.category.value
+          state.locationId = els.location.value
+          state.capabilityLevel = els.capability.value
+          state.sort = els.sort.value
+          state.offset = 0
+          run()
+        })
+      }
+
+      els.clear.addEventListener('click', () => {
+        state.q = ''
+        state.categoryId = ''
+        state.locationId = ''
+        state.skillId = ''
+        state.skillName = null
+        state.capabilityLevel = ''
+        state.sort = 'name'
+        state.offset = 0
+        writeControls()
+        run()
+      })
+
+      els.previous.addEventListener('click', () => {
+        state.offset = Math.max(0, state.offset - PAGE_SIZE)
+        run()
+      })
+
+      els.next.addEventListener('click', () => {
+        state.offset += PAGE_SIZE
+        run()
+      })
+
+      // A shared link, or a back button, is a set of controls to apply rather than
+      // a page to reload, so the same code answers both.
+      window.addEventListener('popstate', () => {
+        readUrl()
+        writeControls()
+        run()
+      })
+
+      /* --- start ----------------------------------------------------------- */
+
+      loadReference()
+        .then(() => {
+          readUrl()
+          writeControls()
+          return run()
+        })
+        .catch((error) => {
+          /*
+           * The reference data failing is not fatal. Every result can still be
+           * drawn, and it is drawn without category and place names rather than not
+           * at all — a directory that shows the businesses and admits it cannot
+           * name the ward is far more use than a page that says the server is down.
+           *
+           * The reason it is recorded on the state rather than written straight to
+           * the problem line is that the `run` below resets that line on its first
+           * statement. Set directly, the warning was wiped by the request it was
+           * warning about, and the page then claimed no filters and quietly showed
+           * an unlabelled list of everything.
+           */
+          state.referenceProblem = `Filters unavailable: ${error.message}`
+          readUrl()
+          writeControls()
+          return run()
+        })
+    </script>
+  </body>
+</html>

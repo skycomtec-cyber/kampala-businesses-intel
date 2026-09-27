@@ -191,12 +191,25 @@
         <span id="status">Checking the engine&hellip;</span>
       </div>
 
+      <h2>Use it</h2>
+      <ul class="endpoints">
+        <li>
+          <a href="/directory.html">/directory.html</a>
+          <em>Browse and search the public directory</em>
+        </li>
+        <li>
+          <a href="/operator.html">/operator.html</a>
+          <em>Sign in to the verification queue</em>
+        </li>
+      </ul>
+
       <h2>Reference data</h2>
       <div class="counts" id="counts">
         <div class="count"><b>&mdash;</b><span>Locations</span></div>
         <div class="count"><b>&mdash;</b><span>Categories</span></div>
         <div class="count"><b>&mdash;</b><span>Skills</span></div>
-        <div class="count"><b>&mdash;</b><span>Businesses</span></div>
+        <div class="count"><b>&mdash;</b><span>Listed businesses</span></div>
+        <div class="count"><b>&mdash;</b><span>Awaiting review</span></div>
       </div>
 
       <h2>Endpoints</h2>
@@ -262,11 +275,18 @@
         .then((body) => {
           const meta = body.data
           const locations = Object.values(meta.counts.locations).reduce((a, b) => a + b, 0)
+          // `publishedBusinesses`, not a count of every active row. The field was
+          // renamed when the review pipeline arrived precisely because the old one
+          // counted the queue as well as the directory, and this page reads
+          // `activeBusinesses` — a name the api has not published for a while, so
+          // the whole block below used to throw and the page answered "Counts
+          // unavailable" on a perfectly healthy engine.
           const figures = [
             [locations.toLocaleString(), 'Locations'],
             [meta.counts.categories.toLocaleString(), 'Categories'],
             [meta.counts.skills.toLocaleString(), 'Skills'],
-            [meta.counts.activeBusinesses.toLocaleString(), 'Businesses'],
+            [meta.counts.publishedBusinesses.toLocaleString(), 'Listed businesses'],
+            [meta.counts.businessesInReview.toLocaleString(), 'Awaiting review'],
           ]
           document.getElementById('counts').innerHTML = figures
             .map(([value, label]) => `<div class="count"><b>${value}</b><span>${label}</span></div>`)

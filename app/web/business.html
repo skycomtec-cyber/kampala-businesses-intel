@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Listing &middot; Kampala Intelligence Platform</title>
+    <style>
+      /*
+       * One listing, read by somebody who has probably just been told a name and a
+       * place and wants to know whether they can turn up.
+       *
+       * So the page is ordered by what that person needs in order: what it is,
+       * where it is, how to reach it, and then everything it offers. The operator
+       * page can afford a masthead and a decision bar; this one cannot afford to
+       * make a phone number the fourth thing on the page.
+       *
+       * One static file, no build step, addressed by `?b=<id or slug>`. The api
+       * takes either, so a link copied out of a search result and a link with an id
+       * pasted from the admin screen both work, and the page does not have to
+       * resolve one before it can render the other.
+       */
+      :root {
+        --ink: #0d2a30;
+        --ink-soft: #163e46;
+        --gold: #f0b740;
+        --paper: #f7f4ee;
+        --card: #fffdf8;
+        --muted: #6d7f83;
+        --line: #dcd6c9;
+        --danger: #c0453b;
+        --radius: 10px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0 1.5rem 5rem;
+        background: var(--paper);
+        color: var(--ink);
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+
+      .shell {
+        max-width: 48rem;
+        margin: 0 auto;
+      }
+
+      .masthead {
+        padding: 1.9rem 0 1.35rem;
+        border-bottom: 2px solid var(--ink);
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1rem 1.5rem;
+        flex-wrap: wrap;
+      }
+
+      .masthead h1 {
+        margin: 0;
+        font-size: 1.45rem;
+        letter-spacing: -0.02em;
+      }
+
+      .masthead .sub {
+        margin: 0.2rem 0 0;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      .masthead nav {
+        display: flex;
+        gap: 1.1rem;
+        font-size: 0.86rem;
+      }
+
+      .masthead nav a {
+        color: var(--ink-soft);
+        text-decoration: none;
+        border-bottom: 1px solid var(--gold);
+      }
+
+      .masthead nav a:hover,
+      .masthead nav a:focus-visible {
+        background: var(--gold);
+      }
+
+      a:focus-visible {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
+      }
+
+      /* Where it is, in the words a Kampala local would use. */
+      .where {
+        margin: 0.9rem 0 0;
+        font-size: 0.95rem;
+        color: var(--ink-soft);
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+      }
+
+      .where .rule {
+        width: 1px;
+        height: 0.9em;
+        background: var(--line);
+      }
+
+      .where .absent {
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      .tag {
+        font-size: 0.72rem;
+        padding: 0.05rem 0.4rem;
+        border-radius: 4px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .lede {
+        margin: 1.4rem 0 0;
+        font-size: 1.03rem;
+        color: var(--ink-soft);
+        max-width: 40rem;
+      }
+
+      .lede:empty {
+        display: none;
+      }
+
+      /*
+       * How to reach it. The most useful block on the page and the reason the
+       * contact points exist at all, so it is a panel rather than a list of links
+       * in the footer: a phone number, an address and a website are the three ways
+       * a person tries to find a business they have been told about.
+       *
+       * The api only ever sends published contacts on this route. That is not a
+       * decision this page makes and it is not one it can make, so an operator who
+       * has not released a phone number simply sees none, and the page says so
+       * rather than implying the business has none.
+       */
+      .reach {
+        margin: 1.75rem 0 0;
+        padding: 1.1rem 1.25rem;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-top: 3px solid var(--gold);
+        border-radius: var(--radius);
+      }
+
+      .reach h2 {
+        margin: 0 0 0.7rem;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+      }
+
+      .reach ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .reach li {
+        display: flex;
+        align-items: baseline;
+        gap: 0.7rem;
+        padding: 0.3rem 0;
+        flex-wrap: wrap;
+      }
+
+      .reach .kind {
+        flex: none;
+        min-width: 5.5rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+
+      .reach a,
+      .reach .value {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.95rem;
+        color: var(--ink);
+        text-decoration: none;
+        border-bottom: 1px solid var(--gold);
+        word-break: break-word;
+      }
+
+      .reach a:hover,
+      .reach a:focus-visible {
+        background: var(--gold);
+      }
+
+      .reach .unreachable {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      /* Everything the business offers. */
+      h2.section {
+        margin: 2.5rem 0 0.25rem;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+      }
+
+      h2.section + .count {
+        margin: 0 0 0.9rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .offers {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .offer {
+        padding: 0.95rem 0.2rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .offer .name {
+        margin: 0;
+        font-size: 1.02rem;
+        font-weight: 600;
+      }
+
+      .offer .detail {
+        margin: 0.2rem 0 0;
+        font-size: 0.9rem;
+        color: var(--ink-soft);
+      }
+
+      .offer .detail:empty {
+        display: none;
+      }
+
+      .offer .price {
+        margin: 0.25rem 0 0;
+        font-size: 0.88rem;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /*
+       * A price is shown exactly as it was recorded, and never reformatted into a
+       * currency the business did not ask for. "From 15,000" and "15000-45000
+       * UGX" are both things an owner typed, and normalising them here would put
+       * a claim on this page that nobody made.
+       */
+      .skills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .skills li {
+        font-size: 0.88rem;
+        padding: 0.2rem 0.6rem;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--ink-soft);
+      }
+
+      /* The primary skill is the trade, and the rest are what else the owner can
+         do, so it is marked rather than listed first and left to be guessed. */
+      .skills li.primary {
+        border-color: var(--ink-soft);
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .skills li .marker {
+        color: var(--muted);
+        font-weight: 400;
+        font-size: 0.78rem;
+        margin-left: 0.3rem;
+      }
+
+      .facts {
+        margin: 0.9rem 0 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .facts div {
+        display: flex;
+        gap: 0.7rem;
+        padding: 0.55rem 0.2rem;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.92rem;
+      }
+
+      .facts dt {
+        flex: none;
+        min-width: 8.5rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .facts dd {
+        margin: 0;
+        color: var(--ink-soft);
+      }
+
+      .facts dd a {
+        color: var(--ink);
+        text-decoration: none;
+        border-bottom: 1px solid var(--gold);
+        word-break: break-word;
+      }
+
+      .facts dd a:hover,
+      .facts dd a:focus-visible {
+        background: var(--gold);
+      }
+
+      .none {
+        margin: 0.5rem 0 0;
+        font-size: 0.88rem;
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      .note {
+        margin: 2.5rem 0 0;
+        padding: 0.95rem 1.1rem;
+        background: #fff;
+        border-left: 3px solid var(--gold);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        font-size: 0.9rem;
+        color: var(--ink-soft);
+      }
+
+      .note a {
+        color: var(--ink);
+        border-bottom: 2px solid var(--gold);
+        text-decoration: none;
+      }
+
+      .note a:hover {
+        background: var(--gold);
+      }
+
+      /* Not found, or the engine is down. One panel, and it says what to do next
+         rather than leaving a dead page. */
+      .missing {
+        margin: 3rem 0 0;
+        padding: 1.6rem 1.4rem;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--danger);
+        border-radius: 0 var(--radius) var(--radius) 0;
+      }
+
+      .missing h2 {
+        margin: 0 0 0.45rem;
+        font-size: 1.1rem;
+      }
+
+      .missing p {
+        margin: 0 0 0.8rem;
+        color: var(--ink-soft);
+        font-size: 0.94rem;
+      }
+
+      .missing a {
+        color: var(--ink);
+        border-bottom: 2px solid var(--gold);
+        text-decoration: none;
+      }
+
+      .missing a:hover {
+        background: var(--gold);
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .offer {
+          transition: background-color 120ms ease;
+        }
+
+        .offer:hover {
+          background: #fbf8f1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <div>
+          <h1 id="name">Loading&hellip;</h1>
+          <p class="sub">Kampala Intelligence Platform</p>
+        </div>
+        <nav>
+          <a href="/directory.html">Directory</a>
+          <a href="/">Engine</a>
+        </nav>
+      </header>
+
+      <p class="where" id="where" hidden></p>
+      <p class="lede" id="lede" hidden></p>
+
+      <section class="reach" id="reach" hidden>
+        <h2>How to reach them</h2>
+        <ul id="contacts"></ul>
+        <p class="unreachable" id="no-contacts" hidden>
+          This listing has not released a contact point. The business is public here, but nobody
+          has decided the details on this page may be shown.
+        </p>
+      </section>
+
+      <section id="services-section" hidden>
+        <h2 class="section">What they do</h2>
+        <p class="count" id="services-count"></p>
+        <ul class="offers" id="services"></ul>
+      </section>
+
+      <section id="products-section" hidden>
+        <h2 class="section">What they sell</h2>
+        <p class="count" id="products-count"></p>
+        <ul class="offers" id="products"></ul>
+      </section>
+
+      <section id="skills-section" hidden>
+        <h2 class="section">Skills claimed</h2>
+        <ul class="skills" id="skills"></ul>
+      </section>
+
+      <section id="facts-section" hidden>
+        <h2 class="section">Listing details</h2>
+        <dl class="facts" id="facts"></dl>
+      </section>
+
+      <p class="none" id="bare" hidden>
+        This listing is live and approved, and it carries no services, products or skills yet. It
+        is in the directory because somebody confirmed the business is there, not because its
+        offering has been written down.
+      </p>
+
+      <p class="note" id="note" hidden>
+        A listing only appears here once a person has checked the facts and a second decision has
+        published it. A business that is not here may be unverified, withdrawn, or simply never
+        surveyed &mdash; the directory does not distinguish those from the outside, on purpose.
+      </p>
+
+      <section class="missing" id="missing" hidden>
+        <h2 id="missing-title">This listing is not here</h2>
+        <p id="missing-body"></p>
+        <a href="/directory.html">Back to the directory</a>
+      </section>
+    </div>
+
+    <script>
+      /*
+       * Everything below is a rendering of one `GET /businesses/:idOrSlug`.
+       *
+       * Two rules govern what this file is allowed to do with the answer:
+       *
+       *   1. Nothing is written with innerHTML. A business name, a service
+       *      description and a phone number are all operator-typed text that
+       *      arrived from a spreadsheet. They become text nodes, always.
+       *   2. The page never asks for anything the public route will not give it.
+       *      There is no parameter here that could widen what the profile shows,
+       *      because the api does not accept one: `includePrivateContacts` is not
+       *      a query parameter, it is an argument only the admin routes pass.
+       *      A page that looked like it could reach a private phone number would
+       *      be a much worse thing to ship than one that cannot.
+       */
+      const API = '/api/v1'
+
+      const els = {
+        name: document.getElementById('name'),
+        where: document.getElementById('where'),
+        lede: document.getElementById('lede'),
+        reach: document.getElementById('reach'),
+        contacts: document.getElementById('contacts'),
+        noContacts: document.getElementById('no-contacts'),
+        servicesSection: document.getElementById('services-section'),
+        servicesCount: document.getElementById('services-count'),
+        services: document.getElementById('services'),
+        productsSection: document.getElementById('products-section'),
+        productsCount: document.getElementById('products-count'),
+        products: document.getElementById('products'),
+        skillsSection: document.getElementById('skills-section'),
+        skills: document.getElementById('skills'),
+        factsSection: document.getElementById('facts-section'),
+        facts: document.getElementById('facts'),
+        bare: document.getElementById('bare'),
+        note: document.getElementById('note'),
+        missing: document.getElementById('missing'),
+        missingTitle: document.getElementById('missing-title'),
+        missingBody: document.getElementById('missing-body'),
+      }
+
+      const CONTACT_LABELS = {
+        phone: 'Phone',
+        whatsapp: 'WhatsApp',
+        email: 'Email',
+        website: 'Website',
+        facebook: 'Facebook',
+        tiktok: 'TikTok',
+        physical: 'Address',
+      }
+
+      const CONDITIONS = {
+        new: 'new',
+        refurbished: 'refurbished',
+        used_good: 'used, good',
+        used_fair: 'used, fair',
+        for_parts: 'for parts',
+        unknown: 'condition not recorded',
+      }
+
+      /**
+       * How a contact should be reached, or null when it should only be read.
+       *
+       * A link is built from a scheme the page chooses, never from the stored
+       * value: `javascript:` is the reason. The value came from a spreadsheet, and
+       * putting it straight into an href is the one place a listing could execute
+       * something in the browser of whoever opened it.
+       */
+      function contactHref(contact) {
+        switch (contact.kind) {
+          case 'phone':
+            return `tel:${String(contact.value).replace(/[^\d+]/g, '')}`
+          case 'whatsapp':
+            return `https://wa.me/${String(contact.value).replace(/[^\d]/g, '')}`
+          case 'email':
+            return `mailto:${contact.value}`
+          default:
+            // Websites, Facebook and TikTok are all absolute http(s) urls by the
+            // time they are stored, because normaliseUrl refused anything else on
+            // the way in. The check is repeated here because a record written
+            // before that rule, or by a direct database edit, must still not be
+            // able to become a link.
+            return /^https?:\/\//i.test(contact.value) ? contact.value : null
+        }
+      }
+
+      async function api(path) {
+        const response = await fetch(path, {
+          credentials: 'same-origin',
+          headers: { accept: 'application/json' },
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(payload?.error?.message ?? 'The listing could not be reached.')
+          error.status = response.status
+          throw error
+        }
+        return payload
+      }
+
+      const say = (element, message) => {
+        element.textContent = message ?? ''
+      }
+
+      function span(className, value) {
+        const node = document.createElement('span')
+        if (className) node.className = className
+        node.textContent = value
+        return node
+      }
+
+      function rule() {
+        const node = document.createElement('span')
+        node.className = 'rule'
+        node.setAttribute('aria-hidden', 'true')
+        return node
+      }
+
+      /* --- the two reference names a profile needs ------------------------ */
+
+      /**
+       * The category name and the full path of the place.
+       *
+       * A profile row carries ids, and a person reading a listing cannot be shown
+       * an id. Fetching the whole tree and the whole location set is two requests
+       * and it is the same approach the operator page takes, for the same reason:
+       * the alternative is a join on a page that has exactly one row in it.
+       */
+      async function loadNames() {
+        const [category, location] = await Promise.all([
+          api(`${API}/categories`).then((body) => flattenCategories(body.data)),
+          api(`${API}/locations?limit=500`).then(indexLocationPaths),
+        ])
+        return { category, location }
+      }
+
+      function flattenCategories(nodes, into = new Map()) {
+        for (const node of nodes ?? []) {
+          into.set(node.id, node.name)
+          flattenCategories(node.children, into)
+        }
+        return into
+      }
+
+      function indexLocationPaths(body) {
+        const into = new Map()
+        for (const row of body.data ?? []) {
+          into.set(row.id, row.pathNames ?? row.name)
+        }
+        return into
+      }
+
+      /* --- rendering ------------------------------------------------------- */
+
+      function showMissing(title, body) {
+        els.missingTitle.textContent = title
+        say(els.missingBody, body)
+        els.missing.hidden = false
+        els.reach.hidden = true
+        els.note.hidden = true
+        document.title = `${title} · Kampala Intelligence Platform`
+      }
+
+      function renderWhere(business, names) {
+        const bits = []
+        const category = names.category.get(business.categoryId)
+        bits.push(
+          category
+            ? { text: category }
+            : { text: 'Not filed under a category', absent: true },
+        )
+        const place = names.location.get(business.primaryLocationId)
+        bits.push(
+          place ? { text: place } : { text: 'Place not recorded', absent: true },
+        )
+        if (business.capabilityLevel && business.capabilityLevel !== 'unverified') {
+          bits.push({ text: business.capabilityLevel, tag: true })
+        }
+
+        els.where.replaceChildren()
+        bits.forEach((bit, index) => {
+          if (index > 0) els.where.append(rule())
+          els.where.append(bit.tag ? span('tag', bit.text) : span(bit.absent ? 'absent' : null, bit.text))
+        })
+        els.where.hidden = false
+      }
+
+      function renderContacts(contacts) {
+        els.contacts.replaceChildren()
+        for (const contact of contacts) {
+          const item = document.createElement('li')
+          item.append(span('kind', CONTACT_LABELS[contact.kind] ?? contact.kind))
+          const href = contactHref(contact)
+          if (href) {
+            const link = document.createElement('a')
+            link.href = href
+            link.textContent = contact.value
+            item.append(link)
+          } else {
+            // A facebook or tiktok handle rather than a url, or an address: there
+            // is nothing to click, so it is shown rather than dressed up as a link
+            // that would go nowhere.
+            item.append(span('value', contact.value))
+          }
+          els.contacts.append(item)
+        }
+        // An approved listing with no published contact is public but unreachable,
+        // which is a different thing from a business with no contact at all. The
+        // api cannot tell them apart and should not: the answer is the same to
+        // everybody outside the review queue.
+        els.noContacts.hidden = contacts.length > 0
+        els.reach.hidden = false
+      }
+
+      function renderServices(services) {
+        els.servicesSection.hidden = services.length === 0
+        if (services.length === 0) return
+        say(els.servicesCount, plural(services.length, 'service'))
+        els.services.replaceChildren()
+        for (const service of services) {
+          els.services.append(
+            offer({
+              id: `service-${service.slug ?? service.id}`,
+              name: service.name,
+              detail: service.description,
+              price: priceLine(service),
+            }),
+          )
+        }
+      }
+
+      function renderProducts(products) {
+        els.productsSection.hidden = products.length === 0
+        if (products.length === 0) return
+        say(els.productsCount, plural(products.length, 'product'))
+        els.products.replaceChildren()
+        for (const product of products) {
+          const bits = [CONDITIONS[product.condition] ?? null]
+          if (Number.isInteger(product.quantity)) {
+            bits.push(`${product.quantity} available`)
+          }
+          if (product.isRecyclable) bits.push('parts recoverable')
+          els.products.append(
+            offer({
+              id: `product-${product.slug ?? product.id}`,
+              name: product.name,
+              detail: product.description,
+              price: priceLine(product),
+              // The condition and the quantity are the two facts that decide
+              // whether a used thing is worth travelling for, so they sit with the
+              // price rather than behind a label.
+              footnote: bits.filter(Boolean).join(' · '),
+            }),
+          )
+        }
+      }
+
+      /** A price as it was recorded, with a range kept as a range. */
+      function priceLine(record) {
+        const hasMin = Number.isFinite(record.priceMin)
+        const hasMax = Number.isFinite(record.priceMax) && record.priceMax !== record.priceMin
+        if (!hasMin && !hasMax) return null
+        const currency = record.currency ? ` ${record.currency}` : ''
+        if (hasMin && hasMax) {
+          return `${record.priceMin.toLocaleString()}–${record.priceMax.toLocaleString()}${currency}${
+            record.priceUnit ? ` per ${record.priceUnit}` : ''
+          }`
+        }
+        const only = hasMin ? record.priceMin : record.priceMax
+        return `From ${only.toLocaleString()}${currency}${
+          record.priceUnit ? ` per ${record.priceUnit}` : ''
+        }`
+      }
+
+      function offer({ id, name, detail, price, footnote }) {
+        const item = document.createElement('li')
+        item.className = 'offer'
+        // The ids exist because a search result for a service links to
+        // `#service-<slug>`, so a hit has to land on the right line of the profile
+        // rather than at the top of the page.
+        item.id = id
+        const heading = document.createElement('p')
+        heading.className = 'name'
+        heading.textContent = name
+        item.append(heading)
+        if (detail) item.append(span('detail', detail))
+        if (price) item.append(span('price', price))
+        if (footnote) item.append(span('detail', footnote))
+        return item
+      }
+
+      function renderSkills(skills) {
+        els.skillsSection.hidden = skills.length === 0
+        els.skills.replaceChildren()
+        for (const skill of skills) {
+          const item = document.createElement('li')
+          if (skill.isPrimary) item.className = 'primary'
+          item.append(document.createTextNode(skill.name))
+          if (skill.isPrimary) item.append(span('marker', 'main trade'))
+          els.skills.append(item)
+        }
+      }
+
+      function renderFacts(business) {
+        const rows = [
+          ['Addressed as', business.slug],
+          ['Status', `${business.status}, ${String(business.verificationState).replace(/_/g, ' ')}`],
+        ]
+        if (business.website && /^https?:\/\//i.test(business.website)) {
+          rows.push(['Website', business.website, business.website])
+        }
+        if (Number.isInteger(business.foundedYear)) {
+          rows.push(['Established', String(business.foundedYear)])
+        }
+        if (business.lastConfirmedAt) {
+          rows.push(['Last confirmed', String(business.lastConfirmedAt).slice(0, 10)])
+        }
+        if (business.createdAt) {
+          rows.push(['Listed', String(business.createdAt).slice(0, 10)])
+        }
+
+        els.facts.replaceChildren()
+        for (const [term, value, href] of rows) {
+          if (!value) continue
+          const row = document.createElement('div')
+          // Real dt and dd rather than spans with classes: a description list is
+          // what this is, and the pairing is what lets a screen reader read
+          // "Status: active, approved" rather than two unconnected strings.
+          const label = document.createElement('dt')
+          label.textContent = term
+          const value_ = document.createElement('dd')
+          if (href) {
+            const link = document.createElement('a')
+            link.href = href
+            link.textContent = value
+            value_.append(link)
+          } else {
+            value_.textContent = value
+          }
+          row.append(label, value_)
+          els.facts.append(row)
+        }
+        els.factsSection.hidden = rows.length === 0
+      }
+
+      function plural(count, word) {
+        return `${count} ${word}${count === 1 ? '' : 's'} listed`
+      }
+
+      /* --- start ----------------------------------------------------------- */
+
+      async function start() {
+        const target = new URLSearchParams(window.location.search).get('b')
+        if (!target) {
+          showMissing(
+            'No listing named',
+            'This page reads one listing, addressed by its slug. Open it from the directory, or add ?b= followed by a business slug or id.',
+          )
+          els.name.textContent = 'Listing'
+          return
+        }
+
+        // The reference names are needed for every branch below, including the one
+        // that says the listing does not exist, because a person who followed a
+        // dead link should still be able to click their way back to somewhere
+        // useful. So they load in parallel with the profile rather than after it.
+        const [names, body] = await Promise.all([
+          loadNames().catch(() => ({ category: new Map(), location: new Map() })),
+          api(`${API}/businesses/${encodeURIComponent(target)}`).catch((error) => error),
+        ])
+
+        if (body instanceof Error) {
+          els.name.textContent = 'Listing'
+          if (body.status === 404) {
+            // The api answers 404 rather than 403 for a listing that is not public,
+            // on purpose, so this page cannot be used to find out which businesses
+            // are in the review queue. The message says nothing that would undo
+            // that.
+            showMissing(
+              'This listing is not here',
+              'Either it was never added, or it has not been published. A listing that is still being checked is deliberately indistinguishable from one that does not exist.',
+            )
+            return
+          }
+          showMissing('The directory is not answering', body.message)
+          return
+        }
+
+        const business = body.data
+        els.name.textContent = business.name
+        document.title = `${business.name} · Kampala Intelligence Platform`
+        renderWhere(business, names)
+        if (business.description) {
+          say(els.lede, business.description)
+          els.lede.hidden = false
+        }
+
+        renderContacts(business.contacts ?? [])
+        renderServices(business.services ?? [])
+        renderProducts(business.products ?? [])
+        renderSkills(business.skills ?? [])
+        renderFacts(business)
+
+        // The empty case is stated rather than left as a blank page: a live,
+        // published listing with nothing on it is a real state of this platform,
+        // and it means the business exists but nobody has written down what it
+        // offers yet.
+        const bare =
+          (business.services ?? []).length === 0 &&
+          (business.products ?? []).length === 0 &&
+          (business.skills ?? []).length === 0
+        els.bare.hidden = !bare
+        els.note.hidden = false
+
+        // A link from a search result for a service or a product carries the
+        // anchor. Scrolling to it is the difference between landing on the
+        // business and landing on the thing that was searched for.
+        if (window.location.hash) {
+          const anchor = document.getElementById(window.location.hash.slice(1))
+          if (anchor) anchor.scrollIntoView({ block: 'center' })
+        }
+      }
+
+      start().catch((error) => {
+        showMissing('The directory is not answering', error.message)
+      })
+    </script>
+  </body>
+</html>
