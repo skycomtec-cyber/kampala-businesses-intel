@@ -166,7 +166,7 @@ export function createUsersRepository(db, config) {
       }
       assertPasswordStrength(nextPassword, config.auth.minPasswordLength)
       updatePassword.run({
-        userId,
+        id: userId,
         passwordHash: hashPassword(nextPassword, SCRYPT_PARAMS),
         now: nowIso(),
       })
@@ -186,7 +186,7 @@ export function createUsersRepository(db, config) {
       if (!row) throw new NotFoundError('User', userId)
       assertPasswordStrength(password, config.auth.minPasswordLength)
       updatePassword.run({
-        userId,
+        id: userId,
         passwordHash: hashPassword(password, SCRYPT_PARAMS),
         now: nowIso(),
       })
