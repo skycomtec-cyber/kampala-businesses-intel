@@ -166,7 +166,12 @@ export function createCategoriesRepository(db) {
       for (const row of flat) {
         const node = camelizeRow(row)
         node.children = []
-        node.businessCount = 0
+        // null, not 0. The count is opt-in, and a zero here is a claim: it says
+        // this category has nothing in it, which is exactly what a category that
+        // was never counted also used to say. A client that renders this field
+        // without asking for counts would show a confident "0" beside a covered
+        // market. Absent information has to look absent.
+        node.businessCount = null
         nodes.set(row.id, node)
       }
       const roots = []
@@ -176,7 +181,7 @@ export function createCategoriesRepository(db) {
         if (parent) parent.children.push(node)
         else roots.push(node)
       }
-      if (includeCounts) this._attachCounts(nodes, roots)
+      if (includeCounts) this._attachCounts(roots)
       return roots
     },
 
@@ -190,7 +195,7 @@ export function createCategoriesRepository(db) {
      * who wants the queue size asks the review queue, which is a different
      * question and lives at a different path.
      */
-    _attachCounts(nodes, roots) {
+    _attachCounts(roots) {
       const rows = db
         .prepare(
           `SELECT category_id, COUNT(*) AS total FROM business
@@ -198,12 +203,12 @@ export function createCategoriesRepository(db) {
             GROUP BY category_id`,
         )
         .all()
-      for (const row of rows) {
-        const node = nodes.get(row.category_id)
-        if (node) node.businessCount = row.total
-      }
+      const direct = new Map(rows.map((row) => [row.category_id, row.total]))
+      // A node with no row of its own counts as zero here rather than staying
+      // null, because at this point the count really is being computed and a
+      // leaf with nothing against it is genuinely empty.
       const addUp = (node) => {
-        let total = node.businessCount
+        let total = direct.get(node.id) ?? 0
         for (const child of node.children) total += addUp(child)
         node.businessCount = total
         return total

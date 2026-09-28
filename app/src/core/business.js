@@ -50,6 +50,27 @@ export const PRODUCT_CONDITIONS = Object.freeze([
   'unknown',
 ])
 
+/**
+ * The units a service price can be quoted in.
+ *
+ * This list has to stay identical to the CHECK constraint on
+ * `service.price_unit` in 003_supply.sql, because until now it was the *only*
+ * place the rule existed. That made the database the validator: an operator who
+ * typed "per hour" got a 500 from a CHECK violation instead of the 400 that every
+ * other validation failure in this platform returns, and nothing in the codebase
+ * could enumerate the units for a form because no JavaScript knew them.
+ * Declaring the vocabulary here is what lets the error name its field, and what
+ * lets a client build the list.
+ */
+export const PRICE_UNITS = Object.freeze([
+  'hour',
+  'job',
+  'item',
+  'day',
+  'month',
+  'quote',
+])
+
 export const CONTACT_KINDS = Object.freeze([
   'phone',
   'whatsapp',
@@ -80,6 +101,35 @@ export function assertProductCondition(condition) {
     })
   }
   return condition
+}
+
+/**
+ * Normalises a price unit, or refuses it.
+ *
+ * `null` and `undefined` pass, because a service is allowed to quote a range
+ * with no unit at all, and so does a blank string, because an operator who
+ * cleared a field should not get told off for it. Anything else has to be one
+ * of PRICE_UNITS — including a number, which is refused rather than dropped: a
+ * client that sent 5 was wrong about the field, and silently storing null would
+ * hide that from both sides.
+ */
+export function assertPriceUnit(unit) {
+  if (unit === null || unit === undefined) return null
+  if (typeof unit !== 'string') {
+    throw new ValidationError(`Price unit must be a string, got ${typeof unit}.`, {
+      field: 'priceUnit',
+      allowed: PRICE_UNITS,
+    })
+  }
+  const value = unit.trim()
+  if (value === '') return null
+  if (!PRICE_UNITS.includes(value)) {
+    throw new ValidationError(`Unknown price unit "${unit}".`, {
+      field: 'priceUnit',
+      allowed: PRICE_UNITS,
+    })
+  }
+  return value
 }
 
 /**

@@ -408,6 +408,41 @@ Roles, from `GET /api/v1/auth/roles`:
 A missing session is `401 unauthenticated`. A session without the capability is `403 forbidden`, so
 a client can always tell "sign in" from "you may not".
 
+### Validation vocabularies
+
+Some fields are closed sets. Sending a value outside one of them is `400 validation_failed` with
+`error.details.allowed` listing what was accepted, and `error.details.field` naming the input where
+the rule knows which field it came from, so a form can render the problem against the box the
+operator actually typed into.
+
+| Field | Values |
+| --- | --- |
+| `status` on a business | `draft`, `active`, `suspended`, `closed` |
+| `verificationState` | `imported`, `pending_review`, `under_review`, `verified`, `approved`, `rejected`, `archived` |
+| `capabilityLevel` | `unverified`, `claimed`, `documented`, `operating`, `established` |
+| `condition` on a product | `new`, `refurbished`, `used_good`, `used_fair`, `for_parts`, `unknown` |
+| `priceUnit` on a service | `hour`, `job`, `item`, `day`, `month`, `quote`, or absent |
+| `kind` on a contact | `phone`, `whatsapp`, `email`, `website`, `facebook`, `tiktok`, `physical` |
+
+Only `approved` is public, and a business also has to be `active`; a record can be approved and
+suspended at the same time, and then the public sees nothing. The review transitions are a pipeline
+rather than a free set: `POST /api/v1/admin/catalogue/records/:id/review` refuses any move the state
+graph does not allow, and no state reaches `approved` except through `verified`, because "somebody
+checked it" and "we will publish it" are separate claims.
+
+`priceUnit` is the vocabulary the database has always enforced, so a wrong value used to arrive as a
+`500` from a SQLite `CHECK` violation rather than a validation error. It is checked in JavaScript now
+and mirrors the constraint in `app/src/db/migrations/003_supply.sql`; change one and change the other.
+
+One response field is `null` rather than `0` when nothing was computed, because a zero is a claim
+that a market is empty and a client cannot tell that from a real count:
+
+- `businessCount` on a category from `GET /api/v1/categories`, unless `?includeCounts=true` was sent.
+  With it, every node carries a number rolled up the tree from its own active, approved records.
+
+The daily supply series is the exception, and deliberately: `supply_metric_daily` rows only exist
+because a measurement was taken, so a `0` in one of those columns is the measurement.
+
 ### Rate limits
 
 Fixed windows, in process memory, keyed by account when signed in and by address when not.
@@ -554,7 +589,7 @@ print(created.json()["data"]["slug"])
 │   │   ├── api/              plugins, routes, response envelope
 │   │   └── server.js         the process
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin, import
-│   ├── test/                 89 tests, no network, temporary folders only
+│   ├── test/                 96 tests, no network, temporary folders only
 │   └── web/                  the four pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
@@ -584,7 +619,7 @@ cd app
 npm test
 ```
 
-89 tests, no network access, each against its own temporary database. The API tests mount the real
+96 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule

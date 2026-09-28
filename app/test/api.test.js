@@ -1072,3 +1072,196 @@ test('the catalogue is administered over http, and trust is a decision', async (
     200,
   )
 })
+
+/**
+ * The password paths, which had no coverage at all.
+ *
+ * `changePassword` and `setPassword` both bound `@id` in their UPDATE while the
+ * caller passed `userId`, so every password change in the platform threw on a
+ * missing parameter and nobody could change their own password. Ninety tests
+ * passed the whole time, because nothing here was reached. The regression that
+ * matters is not the fixed bug, it is that this file existed without touching
+ * either function.
+ *
+ * Both endpoints are asserted end to end through the router, because a named
+ * parameter mismatch only shows up when a prepared statement actually runs.
+ */
+test('changing a password works, and signs the account out everywhere', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const email = 'changer@example.test'
+  const { headers } = await signIn(ctx, { email })
+
+  const changed = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/change-password',
+    headers,
+    payload: { currentPassword: PASSWORD, newPassword: 'Kampala-Nakawa-2027' },
+  })
+  assert.equal(changed.statusCode, 200, changed.body)
+  assert.equal(changed.json().data.changed, true)
+  assert.equal(changed.json().data.signedOutEverywhere, true)
+
+  // The old password is dead and the new one is not.
+  const stale = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    payload: { email, password: PASSWORD },
+  })
+  assert.equal(stale.statusCode, 401, stale.body)
+
+  const fresh = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    payload: { email, password: 'Kampala-Nakawa-2027' },
+  })
+  assert.equal(fresh.statusCode, 200, fresh.body)
+})
+
+test('the current password has to be the current one', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const { headers } = await signIn(ctx, { email: 'wrongcurrent@example.test' })
+  const refused = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/change-password',
+    headers,
+    payload: { currentPassword: 'not-the-password', newPassword: 'Kampala-Nakawa-2027' },
+  })
+  // 400, not 401. The session was fine; the body was not, so this is a validation
+  // failure naming currentPassword. Asserting the status as well as the code
+  // because a change here would decide whether the platform tells a caller it
+  // has the wrong password or the wrong credentials, and those are different
+  // claims.
+  assert.equal(refused.statusCode, 400, refused.body)
+  assert.equal(refused.json().error.code, 'validation_failed')
+  assert.equal(refused.json().error.details.field, 'currentPassword')
+})
+
+test('a password reset token sets a working password exactly once', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const email = 'resetter@example.test'
+  await signIn(ctx, { email })
+
+  // Not production, so the token comes back in the body. That is the only way
+  // this test can reach the confirm endpoint at all.
+  const requested = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/password-reset',
+    payload: { email },
+  })
+  assert.equal(requested.statusCode, 202, requested.body)
+  const token = requested.json().data.token
+  assert.ok(token, 'a development reset request should return its token')
+
+  const confirmed = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/password-reset/confirm',
+    payload: { token, newPassword: 'Kampala-Mukono-2027' },
+  })
+  assert.equal(confirmed.statusCode, 200, confirmed.body)
+  assert.equal(confirmed.json().data.reset, true)
+
+  const signedIn = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    payload: { email, password: 'Kampala-Mukono-2027' },
+  })
+  assert.equal(signedIn.statusCode, 200, signedIn.body)
+
+  // Single use. A replayed token must not reset the account a second time.
+  const replayed = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/password-reset/confirm',
+    payload: { token, newPassword: 'Kampala-Attacked-2027' },
+  })
+  assert.equal(replayed.statusCode, 401, replayed.body)
+
+  const stillMine = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    payload: { email, password: 'Kampala-Mukono-2027' },
+  })
+  assert.equal(stillMine.statusCode, 200, stillMine.body)
+})
+
+test('a reset request for an unknown address looks exactly like a known one', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const unknown = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/auth/password-reset',
+    payload: { email: 'nobody@example.test' },
+  })
+  assert.equal(unknown.statusCode, 202, unknown.body)
+  assert.equal(unknown.json().data.accepted, true)
+  assert.equal(unknown.json().data.token, undefined, 'a reset must not confirm who exists')
+})
+
+test('a price unit outside the vocabulary is refused as a validation error', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const { headers } = await signIn(ctx, { email: 'prices@example.test' })
+  const category = leafCategory(ctx.app)
+  const district = ctx.app.locations.byKind('district')[0]
+
+  const created = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/businesses',
+    headers,
+    payload: { name: 'Nakawa Mobile Repair', categoryId: category.id, locationId: district.id, status: 'active' },
+  })
+  assert.equal(created.statusCode, 201, created.body)
+
+  const bad = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/admin/businesses/${created.json().data.id}/services`,
+    headers,
+    payload: { name: 'Screen replacement', priceUnit: 'per hour' },
+  })
+  // The CHECK constraint used to be the only validator, so this arrived as a 500
+  // from SQLite. 400 is this platform's validation_failed; what matters is that
+  // the error now names the field and lists the vocabulary.
+  assert.equal(bad.statusCode, 400, bad.body)
+  assert.equal(bad.json().error.code, 'validation_failed')
+  assert.equal(bad.json().error.details.field, 'priceUnit')
+  assert.ok(bad.json().error.details.allowed.includes('hour'))
+
+  const good = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/admin/businesses/${created.json().data.id}/services`,
+    headers,
+    payload: { name: 'Screen replacement', priceUnit: 'hour' },
+  })
+  assert.equal(good.statusCode, 201, good.body)
+  assert.equal(good.json().data.priceUnit, 'hour')
+})
+
+test('a category count is null until somebody asks for it', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  // Every node, counted. A zero here used to be indistinguishable from a
+  // category that genuinely holds nothing, which is how a client ends up
+  // showing a covered market as bare.
+  const without = await ctx.server.inject({ method: 'GET', url: '/api/v1/categories' })
+  assert.equal(without.statusCode, 200, without.body)
+  for (const root of without.json().data) {
+    assert.equal(root.businessCount, null, `${root.name} should not claim a count it never computed`)
+  }
+
+  const with_ = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/categories?includeCounts=true',
+  })
+  assert.equal(with_.statusCode, 200, with_.body)
+  for (const root of with_.json().data) {
+    assert.equal(typeof root.businessCount, 'number', `${root.name} should carry a real count when asked`)
+  }
+})

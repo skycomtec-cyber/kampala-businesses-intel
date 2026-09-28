@@ -9,6 +9,7 @@ import {
   assertBusinessStatus,
   assertVerificationState,
   assertProductCondition,
+  assertPriceUnit,
   PHONE_KINDS,
 } from '../../core/business.js'
 import {
@@ -1237,7 +1238,7 @@ export function createBusinessesRepository(db, deps = {}) {
           description: input.description ?? null,
           priceMin: numberOrNull(input.priceMin),
           priceMax: numberOrNull(input.priceMax),
-          priceUnit: input.priceUnit ?? null,
+          priceUnit: assertPriceUnit(input.priceUnit),
         })
         for (const skillName of input.skills ?? []) {
           const skill = skills.findOrCreate(skillName)
@@ -1271,7 +1272,9 @@ export function createBusinessesRepository(db, deps = {}) {
             patch.priceMin === undefined ? current.price_min : numberOrNull(patch.priceMin),
           priceMax:
             patch.priceMax === undefined ? current.price_max : numberOrNull(patch.priceMax),
-          priceUnit: patch.priceUnit === undefined ? current.price_unit : patch.priceUnit,
+          priceUnit: assertPriceUnit(
+            patch.priceUnit === undefined ? current.price_unit : patch.priceUnit,
+          ),
           isActive:
             patch.isActive === undefined ? current.is_active : patch.isActive ? 1 : 0,
           now: nowIso(),
