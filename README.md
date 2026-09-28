@@ -359,6 +359,75 @@ works. `sheet.js` is the one confirmation box, shared so the operator queue and 
 disagree about what a box means. The fonts are self-hosted (`fonts.css` and `fonts/`), so the app has
 no runtime CDN dependency.
 
+### What the colour is for
+
+Both long lists on this site — public results and the review queue — are rows that all look alike, and
+on both of them the row's own attribute is the thing being judged. A result card is filed under a
+category; a queue row is at some point in a review. Colouring a row by anything else would be
+decoration, so exactly one thing is coloured, and it is that.
+
+One attribute, one rule, three surfaces:
+
+| Attribute | Set on | Reads as |
+| --- | --- | --- |
+| `data-branch` | a result card, from the branch its category sits under | which of the five top-level categories this is |
+| `data-state` | a queue row, from `verificationState` | how far through review it is |
+| `data-tone` | a dialog, an outcome line, a decision pill | what the action it offers does |
+
+All three resolve to the same two variables, `--branch` and `--branch-wash`, and one rule paints the
+bar and the fill. That is the whole mechanism, and it is why the pill offering "Reject" and the box
+asking about it cannot drift into two different reds: they are named by the same attribute and read
+from the same rules.
+
+**The bar is the hue, the fill is the wash.** The bar is what survives on a page where one row's wash
+sits next to another row's wash, and the wash is what makes a long list scannable. Neither carries
+meaning alone — the branch name and the state label are both printed on the record — so nothing here is
+decidable by colour. A record with no attribute keeps the plain card surface and no bar at all, which
+is the same gap the "no address recorded" line already admits to. A state the stylesheet has not heard
+of falls through to the same plain ink, so a new state in the state machine appears uncoloured rather
+than wrong.
+
+**The branch hues are not the signal palette.** `--good`, `--gap` and `--warn` already mean "published",
+"refused" and "look again", and a category wearing one of them would be making a claim it has not
+earned. The five roots get five hues of their own, indexed by the root's position in the editorial sort
+the api returns (`sort_weight`, then name) rather than by anything derived from the data, so adding a
+sixth root does not recolour the five already on screen. A card is coloured by the **branch**, not by
+its own category: there are ninety categories and five branches, and tinting a card by which leaf it is
+would produce ninety colours nobody can hold in their head.
+
+**The queue reads by state, and archive is deliberately quiet.**
+
+| `verificationState` | Wears | Why |
+| --- | --- | --- |
+| `imported`, `pending_review` | plain ink on the neutral wash | nobody has looked at it yet, so it has no opinion |
+| `under_review` | `--info` | a colleague has taken it. Blue is the one signal on this site that is not a verdict |
+| `verified`, `approved` | `--good` | the facts are checked and it is published |
+| `rejected` | `--gap` | closed, and closed as a refusal |
+| `archived` | plain ink | out of the way, and not itself a judgement on the listing. The grey of a closed drawer is not the grey of a record somebody should still look at |
+
+**The decision pills wear the tone their box will open in,** which is what `ACTION_TONES` in
+`operator.html` is for. It is one map feeding both surfaces, so the press and the confirmation cannot
+disagree. The four consequential actions are all distinct: `approve` is `--good`, `unapprove` is
+`--warn`, `reject` is `--gap`, and `archive` is plain ink. Archive used to share the amber with
+withdraw, which put the two decisions an operator is most likely to reach for next to each other in the
+same colour. The five steps inside a review — `verify`, `claim`, `submit`, `reopen`, `restore` — are
+bookkeeping, and wear plain ink for the same reason.
+
+The one thing a pill does **not** wear is the tone, and that is measured. At 13px the label is the
+smallest text on the page, and after the washes were strengthened a tone ink is no longer a text pair
+on its own wash: `--warn` sits at 3.77:1 and `--good` at 4.43:1. Darkening the inks was the other
+option and it is the wrong one — `--warn` is already only ΔE 23 from `--gap` and ΔE 26 from
+`--gold-ink`, and those two separations are what keep "look again" and "refused" from being the same
+sentence. So the tone stays on the wash, the border, the ring and the tick, and the word is read in the
+page's own ink. Measured the other way, every branch ink clears 4.5:1 on its own wash in both themes
+(5.13 to 8.23) and 6.8:1 or better on `--card`, so the one place a tint did cost contrast — the
+"not recorded" line, which is the last thing on a card that should be hard to read — borrows its own
+branch's ink rather than the grey.
+
+A hover bends towards the row rather than the other way round. An attributed record that reverted to
+plain `--card` under the pointer would lose its colour at the exact moment somebody is reading it, so
+it deepens towards its own hue instead, and only a record with no attribute gets the card white.
+
 ## API
 
 Base URL `http://127.0.0.1:4310`. Every response uses the same envelope:
@@ -675,4 +744,14 @@ The operator page has no build step and therefore no unit tests, so it is driven
 says anything: a real Chromium against a real server on a throwaway database, signing in, working a
 batch, and reading the rows back. That pass is what caught `preHandler` being written inside a
 `schema` object, where Fastify ignored it and four routes answered anonymous callers.
+
+The colour is checked the same way, and the check is over computed values rather than over the hex in
+the stylesheet: every element carrying text on all four pages, in both themes, with the background it
+actually paints against resolved through the ancestors rather than read off its own rule. The states
+the signed-in pages render are injected with the attributes the real page gives them, which measures the
+same computed values without needing an account — the styling is attribute-driven, so that is not a
+weaker claim than signing in. 400 text nodes, none under 4.5:1. Asserting against a literal
+`rgb(230, 243, 236)` instead would look like an assertion about meaning and would be an assertion about
+one particular palette; it fails the next time a wash is retuned, which is exactly what happened when
+these were strengthened.
 

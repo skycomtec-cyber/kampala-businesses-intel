@@ -269,6 +269,8 @@
         /** id -> name, for the two reference trees. */
         categoryNames: new Map(),
         locationPaths: new Map(),
+        /** id -> the branch index of that category's top-level ancestor. */
+        categoryBranch: new Map(),
         skillName: null,
         loading: false,
         /**
@@ -345,8 +347,17 @@
           api(`${API}/locations?limit=500`),
         ])
 
-        const fillCategorySelect = (nodes, depth) => {
+        let branches = 0
+        const fillCategorySelect = (nodes, depth, branch) => {
           for (const node of nodes ?? []) {
+            // A card takes its colour from the branch its category sits under, not
+            // from the category itself: there are ninety categories and five
+            // branches, and tinting a card by which leaf it is would produce
+            // ninety colours that nobody can hold in their head. `branch` is null
+            // only at the top of the tree, which is where the next index is spent,
+            // so the numbering follows the api's own editorial order.
+            const hue = branch ?? ++branches
+            state.categoryBranch.set(node.id, hue)
             state.categoryNames.set(node.id, node.name)
             // The indentation is the only cue that these are levels of one tree,
             // and it is enough: a group this deep is a person's own reading of
@@ -355,10 +366,10 @@
             option.value = node.id
             option.textContent = `${'— '.repeat(depth)}${node.name}`
             els.category.append(option)
-            fillCategorySelect(node.children, depth + 1)
+            fillCategorySelect(node.children, depth + 1, hue)
           }
         }
-        fillCategorySelect(categories.data, 0)
+        fillCategorySelect(categories.data, 0, null)
 
         for (const location of locations.data ?? []) {
           state.locationPaths.set(location.id, location.pathNames ?? location.name)
@@ -744,9 +755,22 @@
         els.empty.append(lead, body, close)
       }
 
+      /**
+       * The branch a card is coloured by, or null when the record is not filed
+       * under a category the reference data knows. Null is not an error: an
+       * unfiled card keeps the plain surface and the "Unfiled category" line it
+       * already prints, which is the same gap the address line admits to.
+       */
+      function branchOf(categoryId) {
+        const branch = categoryId ? state.categoryBranch.get(categoryId) : undefined
+        return branch ? String(branch) : null
+      }
+
       function businessCard(business) {
         const card = document.createElement('li')
         card.className = 'card'
+        const branch = branchOf(business.categoryId)
+        if (branch) card.dataset.branch = branch
 
         const name = document.createElement('p')
         name.className = 'name'
@@ -802,6 +826,8 @@
       function searchCard(hit) {
         const card = document.createElement('li')
         card.className = 'card'
+        const branch = branchOf(hit.categoryId)
+        if (branch) card.dataset.branch = branch
 
         const name = document.createElement('p')
         name.className = 'name'

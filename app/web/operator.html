@@ -171,6 +171,10 @@
       /* The same four tones the dialog boxes use, for the line that stays on
          screen afterwards. It borrows the signal rather than inventing one, so
          a result read here and the same result read in a box look alike. */
+      .outcome[data-tone='neutral'] {
+        color: var(--ink-3);
+      }
+
       .outcome[data-tone='success'] {
         color: var(--good);
       }
@@ -181,6 +185,104 @@
 
       .outcome[data-tone='danger'] {
         color: var(--gap);
+      }
+
+      /*
+       * A queue row, coloured by how far through review it is.
+       *
+       * The four states an operator acts on get the four signals: something
+       * arrived and nobody has looked at it yet (plain ink), a colleague has
+       * taken it (the informational blue, which is the only signal on this site
+       * that is not a verdict), the facts are checked and published (green), and
+       * it was closed as rejected (red). Archived is deliberately left in plain
+       * ink on the card surface: it is out of the way, and the grey of a closed
+       * drawer is not the grey of a record somebody should still look at.
+       *
+       * A state this file has not heard of falls through to the plain ink that
+       * theme.css gives every unattributed row, so a new state in the state
+       * machine shows up uncoloured rather than wrong.
+       */
+      .row[data-state='imported'],
+      .row[data-state='pending_review'] {
+        --branch: var(--ink-3);
+        --branch-wash: var(--card-2);
+      }
+
+      .row[data-state='under_review'] {
+        --branch: var(--info);
+        --branch-wash: var(--info-wash);
+      }
+
+      .row[data-state='verified'],
+      .row[data-state='approved'] {
+        --branch: var(--good);
+        --branch-wash: var(--good-wash);
+      }
+
+      .row[data-state='rejected'] {
+        --branch: var(--gap);
+        --branch-wash: var(--gap-wash);
+      }
+
+      /*
+       * The decision controls, worn in the tone their box will open in.
+       *
+       * These were four unstyled radio labels sitting in a row, which meant the
+       * operator picked a decision off its wording alone and only learned its
+       * colour inside a modal. As pills they carry the same two variables the
+       * box does, so the four are told apart before the press as well as after.
+       * The radio itself stays visible and first in reading order: the tone is a
+       * second cue, and the one that survives a monochrome screen is the tick.
+       *
+       * The label is the one thing here that is not wearing the tone, and that is
+       * measured rather than taste. At 13px it is the smallest text on the page,
+       * and a tone ink on its own wash is not a text pair: the strengthened
+       * washes put --warn at 3.77:1 and --good at 4.43:1, both under 4.5 on
+       * white-adjacent surfaces. Darkening the inks was the other option and it
+       * is the wrong one -- --warn is already only dE 23 from --gap and dE 26
+       * from --gold-ink, and the two promises that keep those apart are worth
+       * more than a green label. So the tone stays on the wash, the border, the
+       * ring and the tick, which is three cues, and the word itself is read in
+       * the page's own ink.
+       */
+      .pick {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--s2);
+        padding: var(--s2) var(--s3);
+        border: 1px solid var(--branch);
+        border-radius: 999px;
+        background: var(--branch-wash);
+        color: var(--ink);
+        font-size: 0.8125rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color 120ms ease;
+      }
+
+      .pick input {
+        margin: 0;
+        accent-color: var(--branch);
+      }
+
+      .pick:hover {
+        background: color-mix(in srgb, var(--branch-wash) 55%, var(--card));
+      }
+
+      .pick:has(:checked) {
+        box-shadow: 0 0 0 2px var(--branch);
+      }
+
+      .pick:has(:focus-visible) {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      #actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--s2);
+        align-items: center;
       }
     </style>
   </head>
@@ -344,16 +446,34 @@
       }
 
       /**
-       * The colour a confirmation wears, which is decided by what the action
-       * does rather than by how the button was labelled. Approving is the good
-       * outcome, withdrawing and archiving are the two that need another look,
-       * and rejecting is the one that closes a record.
+       * The colour an action wears, decided by what it does rather than by how
+       * the button was labelled. This one map feeds both surfaces the decision
+       * appears on -- the pill in the command bar and the box that asks about it
+       * -- so the two can never drift into disagreeing about what a press means.
+       *
+       * The four decisions that change what the public can see are all distinct.
+       * Approving is the good outcome, withdrawing is the one that takes
+       * something back off the public site, rejecting is the one that closes a
+       * record, and archiving is quiet filing: reversible, and not itself a
+       * judgement on the listing. Archive used to share the amber with withdraw,
+       * which put the two decisions an operator is most likely to reach for next
+       * to each other in the same colour.
+       *
+       * The rest are bookkeeping the queue does not ask a box about, and they
+       * wear the plain ink: taking a record, sending it back, reopening and
+       * restoring all move a record between shelves, and none of them is a
+       * verdict on it.
        */
       const ACTION_TONES = {
+        claim: 'neutral',
+        verify: 'success',
         approve: 'success',
         unapprove: 'warning',
         reject: 'danger',
-        archive: 'warning',
+        submit: 'neutral',
+        reopen: 'neutral',
+        archive: 'neutral',
+        restore: 'neutral',
       }
 
       /**
@@ -570,6 +690,10 @@
       function buildRow(item) {
         const row = document.createElement('li')
         row.className = 'row'
+        // theme.css colours the row from this one attribute. The state label is
+        // already printed on the row, so the colour is a second reading of a fact
+        // that is there in words, never the only way of telling two rows apart.
+        row.dataset.state = item.verificationState
 
         const box = document.createElement('input')
         box.type = 'checkbox'
@@ -685,7 +809,16 @@
         const chosen = chosenAction()
         holder.replaceChildren()
         for (const action of availableActions()) {
+          // The pill wears the same tone the box will open in, so the colour an
+          // operator is about to be asked to confirm is on the control that led
+          // there rather than only appearing once they have already committed to
+          // reading it. The tone name is passed through as data-tone, which is the
+          // same attribute the dialog carries, so theme.css resolves both from one
+          // set of rules.
           const label = document.createElement('label')
+          label.className = 'pick'
+          label.dataset.action = action
+          label.dataset.tone = ACTION_TONES[action] ?? 'neutral'
           const input = document.createElement('input')
           input.type = 'radio'
           input.name = 'action'

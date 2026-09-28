@@ -44,7 +44,7 @@
   /* Ground and surfaces. Cool, so the gold has something to sit against. */
   --paper: #f3f6f6;
   --card: #ffffff;
-  --card-2: #fafcfc;
+  --card-2: #9feaf4;
   --line: #d7e0e1;
   --line-2: #b9c8ca;
   /* Stands between facts in a record, so it has to be visible as a divider
@@ -52,29 +52,56 @@
   --rule: #7d8e92;
 
   /* Secondary text. Darkened from the old grey, which measured 3.8:1. */
-  --muted: #566a6f;
-  --faint: #5f7075;
+  --muted: #455a5f;
+  --faint: #4e6166;
 
   /* Gold. --gold is a fill, --gold-ink is the same hue made readable as text. */
   --gold: #e0a42a;
   --gold-ink: #7a5200;
-  --gold-wash: #fdf4e0;
+  --gold-wash: #eee581;
 
   /* Signals. The product is about demand met and demand unmet, so these two
      carry meaning rather than decorating. */
   --good: #17734a;
-  --good-wash: #e6f3ec;
+  --good-wash: #9af4a8;
   --gap: #ad3729;
-  --gap-wash: #fbeceb;
+  --gap-wash: #f8d6d4;
   --info: #1f5f8b;
-  --info-wash: #e9f1f7;
+  --info-wash: #b1e8f6;
   /* Warning is a burnt orange, not the gold. Gold already means one thing on
      this site, "checked by somebody", and a warning wearing it would be saying
      the opposite. It is also kept apart from --gap, because "look again" and
-     "refused" are different sentences. 4.53:1 on its own wash, which is the
-     tightest text pair in this file and still clears 4.5. */
+     "refused" are different sentences.
+
+     Those two promises are why --warn is a fill, a border and a mark, and never
+     text on its own wash. The washes were strengthened after this comment was
+     written, which left the ink at 3.77:1 on --warn-wash; reaching 4.5 means
+     darkening it to about #954709, and that drops the separation from --gap to
+     dE 21 and from --gold-ink to dE 19. It was 23 and 26. So the ink stays
+     where it is, the two that would have had to move are the ones that did not
+     have a legibility claim, and the only text that ever sat on a warning wash
+     -- a 13px pill label -- is read in --ink instead. */
   --warn: #b1540b;
-  --warn-wash: #fdf0e5;
+  --warn-wash: #f8d8c3;
+
+  /* Top-level branch hues. Deliberately not the signal palette: --good, --gap
+     and --warn already mean "published", "refused" and "look again", and a
+     category wearing one of them would be making a claim it has not earned.
+     These say only which branch a record sits in. Five roots, five hues, and
+     the index is the root's position in the editorial sort the api returns
+     (sort_weight, then name) rather than anything derived from the data, so
+     adding a sixth root does not recolour the five already on screen. Every
+     ink here clears 4.5:1 on its own wash and 3:1 on --card. */
+  --branch-1: #7a5200;
+  --branch-1-wash: #eee581;
+  --branch-2: #1f5f8b;
+  --branch-2-wash: #b1e8f6;
+  --branch-3: #5b3d94;
+  --branch-3-wash: #ead6fa;
+  --branch-4: #0d5f63;
+  --branch-4-wash: #83f1da;
+  --branch-5: #8a2f5e;
+  --branch-5-wash: #f8d3ed;
 
   --focus: #0f6fb5;
 
@@ -113,7 +140,7 @@
 
     --paper: #0a1b1f;
     --card: #10262b;
-    --card-2: #143036;
+    --card-2: #0a1315;
     --line: #21424a;
     --line-2: #2f5860;
   --rule: #56838c;
@@ -123,16 +150,27 @@
 
     --gold: #e8b64a;
     --gold-ink: #e8b64a;
-    --gold-wash: #2a2415;
+    --gold-wash: #3b1d03;
 
     --good: #4cc38d;
-    --good-wash: #102c22;
+    --good-wash: #022c09;
     --gap: #f08a7c;
-    --gap-wash: #2e1a18;
+    --gap-wash: #4e0804;
     --info: #74b3e0;
-    --info-wash: #12242f;
+    --info-wash: #06205b;
     --warn: #f0a45c;
-    --warn-wash: #2e2114;
+    --warn-wash: #3e1b04;
+
+    --branch-1: #e8b64a;
+    --branch-1-wash: #3b1d03;
+    --branch-2: #74b3e0;
+    --branch-2-wash: #06205b;
+    --branch-3: #b6a3f0;
+    --branch-3-wash: #330d59;
+    --branch-4: #6fc9cd;
+    --branch-4-wash: #022820;
+    --branch-5: #f0a0c4;
+    --branch-5-wash: #4e0414;
 
     --focus: #63b4f0;
 
@@ -149,25 +187,35 @@
   --ink-3: #1d5c67;
   --paper: #f3f6f6;
   --card: #ffffff;
-  --card-2: #fafcfc;
+  --card-2: #9feaf4;
   --line: #d7e0e1;
   --line-2: #b9c8ca;
   /* Stands between facts in a record, so it has to be visible as a divider
      (3:1) where --line-2 is only ever a border. */
   --rule: #7d8e92;
-  --muted: #566a6f;
-  --faint: #5f7075;
+  --muted: #455a5f;
+  --faint: #4e6166;
   --gold: #e0a42a;
   --gold-ink: #7a5200;
-  --gold-wash: #fdf4e0;
+  --gold-wash: #eee581;
   --good: #17734a;
-  --good-wash: #e6f3ec;
+  --good-wash: #9af4a8;
   --gap: #ad3729;
-  --gap-wash: #fbeceb;
+  --gap-wash: #f8d6d4;
   --info: #1f5f8b;
-  --info-wash: #e9f1f7;
+  --info-wash: #b1e8f6;
   --warn: #b1540b;
-  --warn-wash: #fdf0e5;
+  --warn-wash: #f8d8c3;
+  --branch-1: #7a5200;
+  --branch-1-wash: #eee581;
+  --branch-2: #1f5f8b;
+  --branch-2-wash: #b1e8f6;
+  --branch-3: #5b3d94;
+  --branch-3-wash: #ead6fa;
+  --branch-4: #0d5f63;
+  --branch-4-wash: #83f1da;
+  --branch-5: #8a2f5e;
+  --branch-5-wash: #f8d3ed;
   --focus: #0f6fb5;
   --shadow-pop: 0 1px 2px rgb(11 42 48 / 6%), 0 12px 32px -8px rgb(11 42 48 / 18%);
   --veil: rgb(11 42 48 / 48%);
@@ -180,7 +228,7 @@
   --ink-3: #8fb3b8;
   --paper: #0a1b1f;
   --card: #10262b;
-  --card-2: #143036;
+  --card-2: #0a1315;
   --line: #21424a;
   --line-2: #2f5860;
   --rule: #56838c;
@@ -188,15 +236,25 @@
   --faint: #7d9498;
   --gold: #e8b64a;
   --gold-ink: #e8b64a;
-  --gold-wash: #2a2415;
+  --gold-wash: #3b1d03;
   --good: #4cc38d;
-  --good-wash: #102c22;
+  --good-wash: #022c09;
   --gap: #f08a7c;
-  --gap-wash: #2e1a18;
+  --gap-wash: #4e0804;
   --info: #74b3e0;
-  --info-wash: #12242f;
+  --info-wash: #06205b;
   --warn: #f0a45c;
-  --warn-wash: #2e2114;
+  --warn-wash: #3e1b04;
+  --branch-1: #e8b64a;
+  --branch-1-wash: #3b1d03;
+  --branch-2: #74b3e0;
+  --branch-2-wash: #06205b;
+  --branch-3: #b6a3f0;
+  --branch-3-wash: #330d59;
+  --branch-4: #6fc9cd;
+  --branch-4-wash: #022820;
+  --branch-5: #f0a0c4;
+  --branch-5-wash: #4e0414;
   --focus: #63b4f0;
   --shadow-pop: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -8px rgb(0 0 0 / 60%);
   --veil: rgb(0 0 0 / 66%);
@@ -717,6 +775,99 @@ label > select {
   box-shadow: 0 0 0 8px var(--card);
 }
 
+/*
+ * A record that knows what it is, wearing that fact.
+ *
+ * A directory page of results and a review queue are both lists of rows that all
+ * look alike, and on both the row's own attribute is the thing being judged: which
+ * branch this business is in, or how far through review it is. Colouring by
+ * anything else would be decoration, so it is one attribute -- data-branch for a
+ * category root, data-state for a review state -- resolving to the same two
+ * variables, and one rule doing the work for all three surfaces.
+ *
+ * The bar is the strong hue and the fill the wash. The bar is what survives on a
+ * page where the wash of one row is next to the wash of another; the wash is what
+ * makes a scanned page readable at a glance. Neither carries meaning on its own:
+ * the branch name and the state label are both already printed on the record.
+ */
+[data-branch],
+[data-state],
+.pick {
+  --branch: var(--ink-3);
+  --branch-wash: var(--card-2);
+}
+
+/*
+ * The four tones, by the attribute that already names them everywhere else: the
+ * dialog's data-tone, the command bar pill's data-tone, and the outcome line's.
+ * Keying the resolution on that name rather than restating it per surface is what
+ * keeps the pill that offers "Reject" and the box that asks about it from
+ * drifting into two different reds, which is the sort of thing nobody notices
+ * until the day an operator trusts the wrong one.
+ */
+[data-tone='success'] {
+  --branch: var(--good);
+  --branch-wash: var(--good-wash);
+}
+
+[data-tone='warning'] {
+  --branch: var(--warn);
+  --branch-wash: var(--warn-wash);
+}
+
+[data-tone='danger'] {
+  --branch: var(--gap);
+  --branch-wash: var(--gap-wash);
+}
+
+[data-branch='1'] { --branch: var(--branch-1); --branch-wash: var(--branch-1-wash); }
+[data-branch='2'] { --branch: var(--branch-2); --branch-wash: var(--branch-2-wash); }
+[data-branch='3'] { --branch: var(--branch-3); --branch-wash: var(--branch-3-wash); }
+[data-branch='4'] { --branch: var(--branch-4); --branch-wash: var(--branch-4-wash); }
+[data-branch='5'] { --branch: var(--branch-5); --branch-wash: var(--branch-5-wash); }
+
+.card[data-branch],
+.row[data-state] {
+  background: var(--branch-wash);
+  border-left: 3px solid var(--branch);
+  padding-left: var(--s4);
+}
+
+/*
+ * The one place a tint costs contrast, and it is worth being exact about.
+ *
+ * --faint is the grey that admits to a gap, and it was tuned against a white
+ * card. On the three palest branch washes it lands at 4.40, 4.45 and 4.45:1 --
+ * just under 4.5, on the line that says "place not recorded", which is the last
+ * thing on a card that should be hard to read. --muted still clears 4.5 on all
+ * five, so it is left alone and the hierarchy between the two is preserved.
+ *
+ * The branch's own ink measures 5.99 to 7.04 on its own wash, so borrowing it
+ * here is not a compromise. The operator rows need none of this: their washes
+ * are the signal washes, which the greys already clear comfortably.
+ */
+.card[data-branch] {
+  --faint: var(--branch);
+}
+
+/*
+ * The hover fill has to bend to the row rather than the other way round. An
+ * attributed record that reverted to --card under the pointer would lose the
+ * colour exactly when somebody is reading it, so it deepens towards its own hue
+ * instead, and only a record with no attribute gets the plain card white.
+ */
+.card:not([data-branch]):hover,
+.row:not([data-state]):hover {
+  background: var(--card);
+  box-shadow: 0 0 0 8px var(--card);
+}
+
+.card[data-branch]:hover,
+.row[data-state]:hover {
+  background: color-mix(in srgb, var(--branch-wash) 55%, var(--card));
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--branch-wash) 55%, var(--card));
+}
+
 .name {
   font-size: 1.0625rem;
   font-weight: 650;
@@ -980,6 +1131,17 @@ a.row:hover .name {
 .note strong {
   color: var(--ink);
   font-weight: 650;
+}
+
+/* The photo credit. Quieter than the note above it on purpose: it has to be
+   present and readable to satisfy CC BY 4.0, but it is not an invitation, and
+   --faint is the token for text that is present without being read first. */
+.credit {
+  margin-top: var(--s5);
+  max-width: 46rem;
+  font-size: 0.8125rem;
+  color: var(--faint);
+  text-wrap: pretty;
 }
 
 /* --------------------------------------------------------------- dialogs -- */
