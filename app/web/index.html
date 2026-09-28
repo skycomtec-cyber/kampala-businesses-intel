@@ -4,247 +4,235 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Kampala Intelligence Platform</title>
+    <meta
+      name="description"
+      content="A reference directory of businesses in Kampala and the districts around it, where a listing only exists once somebody visited the premises. It also tracks what Kampala cannot find."
+    />
+
+    <!--
+      Read the saved appearance before the stylesheets, so a dark-mode visitor
+      never gets a white flash. Kept inline and tiny on purpose; the rest of
+      theme.js only handles the button.
+    -->
+    <script>
+      try {
+        var t = localStorage.getItem('kip-theme')
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/theme.css" />
     <style>
-      :root {
-        --ink: #0d2a30;
-        --ink-soft: #163e46;
-        --gold: #f0b740;
-        --paper: #f7f4ee;
-        --muted: #6d7f83;
-        --line: #dcd6c9;
-        --radius: 10px;
-      }
+      /* Page-specific only. Everything shared lives in theme.css. */
 
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 3rem 1.5rem 5rem;
-        background: var(--paper);
-        color: var(--ink);
-        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      }
-
-      main {
-        max-width: 46rem;
-        margin: 0 auto;
-      }
-
-      header {
-        border-bottom: 2px solid var(--ink);
-        padding-bottom: 1.5rem;
-        margin-bottom: 2rem;
-      }
-
-      h1 {
-        margin: 0 0 0.25rem;
-        font-size: 1.9rem;
-        letter-spacing: -0.02em;
-      }
-
-      .lede {
-        margin: 0;
-        color: var(--muted);
-        max-width: 38rem;
-      }
-
-      h2 {
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.14em;
-        color: var(--muted);
-        margin: 2.5rem 0 0.75rem;
-      }
-
-      .status {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        padding: 0.9rem 1.1rem;
-        background: #fff;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-      }
-
-      .dot {
-        width: 0.7rem;
-        height: 0.7rem;
-        border-radius: 50%;
-        background: var(--muted);
-        flex: none;
-      }
-
-      .dot.up {
-        background: #2f9e63;
-      }
-
-      .dot.down {
-        background: #c0453b;
-      }
-
-      .counts {
+      /* How a listing gets in. This is a genuine sequence, so it gets a flow
+         with ordered steps rather than a set of feature cards. */
+      .steps {
+        counter-reset: step;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
-        gap: 1px;
-        background: var(--line);
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        overflow: hidden;
-      }
-
-      .count {
-        background: #fff;
-        padding: 0.9rem 1rem;
-      }
-
-      .count b {
-        display: block;
-        font-size: 1.5rem;
-        letter-spacing: -0.02em;
-      }
-
-      .count span {
-        font-size: 0.78rem;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-      }
-
-      ul.endpoints {
-        list-style: none;
-        padding: 0;
-        margin: 0;
+        gap: 0;
         border-top: 1px solid var(--line);
+        max-width: 46rem;
       }
 
-      ul.endpoints li {
+      .steps li {
+        counter-increment: step;
+        display: grid;
+        grid-template-columns: 2.5rem 1fr;
+        gap: var(--s4);
+        padding: var(--s4) 0;
         border-bottom: 1px solid var(--line);
-        padding: 0.7rem 0;
-        display: flex;
-        gap: 1rem;
         align-items: baseline;
-        flex-wrap: wrap;
       }
 
-      ul.endpoints a {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 0.9rem;
-        color: var(--ink);
-        text-decoration: none;
-        border-bottom: 1px solid var(--gold);
+      .steps li::before {
+        content: counter(step);
+        font-family: var(--mono);
+        font-size: 0.8125rem;
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
       }
 
-      ul.endpoints a:hover {
-        background: var(--gold);
+      .steps b {
+        display: block;
+        font-weight: 650;
+        letter-spacing: -0.01em;
       }
 
-      ul.endpoints em {
-        font-style: normal;
+      .steps span {
+        display: block;
         color: var(--muted);
-        font-size: 0.88rem;
+        font-size: 0.9375rem;
+        margin-top: 2px;
+        text-wrap: pretty;
       }
 
-      .note {
-        margin-top: 2.5rem;
-        padding: 1rem 1.1rem;
-        background: #fff;
-        border-left: 3px solid var(--gold);
-        border-radius: 0 var(--radius) var(--radius) 0;
-        font-size: 0.92rem;
-        color: var(--ink-soft);
+      .section {
+        margin-top: var(--s7);
       }
 
-      code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 0.88em;
-      }
-
-      .note a {
-        color: var(--ink);
-        border-bottom: 2px solid var(--gold);
-        text-decoration: none;
-      }
-
-      .note a:hover,
-      .note a:focus-visible {
-        background: var(--gold);
+      .section > h2 {
+        margin-bottom: var(--s4);
       }
     </style>
   </head>
+
   <body>
-    <main>
-      <header>
-        <h1>Kampala Intelligence Platform</h1>
-        <p class="lede">
-          A reference directory of businesses in Kampala and the districts around it, and the
-          demand engine that shows where the gaps are. The directory starts empty on purpose: it
-          is a reference, not a scraper's guess, and the only way a listing gets in is somebody
-          who was there entering it.
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="wordmark" href="/">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          Kampala Intelligence
+        </a>
+        <nav class="topnav">
+          <a href="/directory.html" aria-current="page">Directory</a>
+          <a href="#engine">Engine</a>
+          <button class="theme-toggle" type="button" hidden>
+            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <!--
+        The hero is the search box, not a number and a gradient. Asking the
+        directory something is the entire point of it, so that is what the page
+        leads with. A plain GET form, so it works with JavaScript switched off
+        and the query lands in a shareable URL.
+      -->
+      <section class="hero">
+        <h1>Somebody walked there.</h1>
+        <p>
+          A reference directory of businesses in Kampala and the districts around it. A listing only
+          exists once somebody visited the premises and confirmed what is actually there. The same
+          record shows what Kampala cannot find, because a gap in the directory is a gap in the city.
         </p>
-      </header>
 
-      <h2>Engine</h2>
-      <div class="status">
-        <span class="dot" id="dot"></span>
-        <span id="status">Checking the engine&hellip;</span>
-      </div>
+        <form class="search" action="/directory.html" method="get" role="search">
+          <label class="sr-only" for="hero-q">Search the directory</label>
+          <div class="field">
+            <input
+              type="search"
+              id="hero-q"
+              name="q"
+              maxlength="200"
+              autocomplete="off"
+              placeholder="Laptop screen replacement, Nakawa, phone repair&hellip;"
+            />
+            <button type="submit">Search</button>
+          </div>
+        </form>
+      </section>
 
-      <h2>Use it</h2>
-      <ul class="endpoints">
-        <li>
-          <a href="/directory.html">/directory.html</a>
-          <em>Browse and search the public directory</em>
-        </li>
-        <li>
-          <a href="/operator.html">/operator.html</a>
-          <em>Sign in to the verification queue</em>
-        </li>
-      </ul>
+      <section class="section" id="engine">
+        <h2>Engine</h2>
+        <p class="status">
+          <span class="dot" id="dot"></span>
+          <span id="status">Checking the engine&hellip;</span>
+        </p>
+      </section>
 
-      <h2>Reference data</h2>
-      <div class="counts" id="counts">
-        <div class="count"><b>&mdash;</b><span>Locations</span></div>
-        <div class="count"><b>&mdash;</b><span>Categories</span></div>
-        <div class="count"><b>&mdash;</b><span>Skills</span></div>
-        <div class="count"><b>&mdash;</b><span>Listed businesses</span></div>
-        <div class="count"><b>&mdash;</b><span>Awaiting review</span></div>
-      </div>
+      <section class="section">
+        <h2>What is in it</h2>
+        <div class="counts" id="counts">
+          <div class="count"><b>&mdash;</b><span>Locations</span></div>
+          <div class="count"><b>&mdash;</b><span>Categories</span></div>
+          <div class="count"><b>&mdash;</b><span>Skills</span></div>
+          <div class="count"><b>&mdash;</b><span>Listed businesses</span></div>
+          <div class="count"><b>&mdash;</b><span>Awaiting review</span></div>
+        </div>
+      </section>
 
-      <h2>Endpoints</h2>
-      <ul class="endpoints">
-        <li>
-          <a href="/api/v1/locations">/api/v1/locations</a>
-          <em>Every administrative level, filterable with ?kind=ward</em>
-        </li>
-        <li>
-          <a href="/api/v1/categories">/api/v1/categories</a>
-          <em>The category tree, with the skills linked to each node</em>
-        </li>
-        <li>
-          <a href="/api/v1/search?q=phone+screen">/api/v1/search?q=&hellip;</a>
-          <em>Full-text search. Records an anonymised demand signal</em>
-        </li>
-        <li>
-          <a href="/api/v1/insights/opportunities">/api/v1/insights/opportunities</a>
-          <em>Ranked gaps, subject to the k-anonymity floor</em>
-        </li>
-        <li>
-          <a href="/api/v1/requests">/api/v1/requests</a>
-          <em>What people are looking for, posted without an account</em>
-        </li>
-        <li>
-          <a href="/api/v1/meta">/api/v1/meta</a>
-          <em>Version, configuration, limits and current counts</em>
-        </li>
-      </ul>
+      <section class="section">
+        <h2>How a listing gets in</h2>
+        <ol class="steps">
+          <li>
+            <div>
+              <b>Somebody submits it</b>
+              <span>
+                A resident, a business owner or a field worker puts in a business, the district it
+                sits in, and what it does or sells.
+              </span>
+            </div>
+          </li>
+          <li>
+            <div>
+              <b>An operator goes and checks</b>
+              <span>
+                Somebody confirms the premises exist and that the description is fair. Claims that
+                cannot be confirmed are sent back rather than softened.
+              </span>
+            </div>
+          </li>
+          <li>
+            <div>
+              <b>It goes live and the gaps start moving</b>
+              <span>
+                The record appears in the directory, and every search for something nearby feeds
+                the gap analysis, so the map of what Kampala is missing stays current.
+              </span>
+            </div>
+          </li>
+        </ol>
+        <p class="note">
+          Only verified records reach this page. Anything still waiting on a decision sits in the
+          <a href="/operator.html">verification queue</a> and is counted nowhere the public can see.
+        </p>
+      </section>
 
-      <p class="note">
-        Aggregates computed over fewer than <strong><span id="k">&mdash;</span> distinct people</strong> are
-        withheld rather than rounded, so a small number of searches can never be subtracted down to
-        an individual. The engine knows the answer and says that it is not publishable yet.
-      </p>
+      <section class="section">
+        <h2>What it will not tell you</h2>
+        <p class="prose" style="color: var(--muted)">
+          Every search is recorded as an anonymised demand signal, and those signals are what the
+          gap analysis is built from. Aggregates computed over fewer than
+          <strong><span id="k">&mdash;</span> distinct people</strong> are withheld rather than
+          rounded, so a handful of searches can never be subtracted back down to an individual. The
+          engine knows the answer and says it is not publishable yet. That is the whole point of
+          running it locally.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Endpoints</h2>
+        <p class="sub" style="margin-top: -0.5rem">
+          The directory is a replaceable interface over the engine. Everything the pages above do is
+          a plain HTTP call, so you can build your own on top of it.
+        </p>
+        <ul class="endpoints">
+          <li>
+            <a href="/api/v1/locations">/api/v1/locations</a>
+            <em>Every administrative level, filterable with ?kind=ward</em>
+          </li>
+          <li>
+            <a href="/api/v1/categories">/api/v1/categories</a>
+            <em>The category tree, with the skills linked to each node</em>
+          </li>
+          <li>
+            <a href="/api/v1/search?q=phone+screen">/api/v1/search?q=&hellip;</a>
+            <em>Full-text search. Records an anonymised demand signal</em>
+          </li>
+          <li>
+            <a href="/api/v1/insights/opportunities">/api/v1/insights/opportunities</a>
+            <em>Ranked gaps, subject to the k-anonymity floor</em>
+          </li>
+          <li>
+            <a href="/api/v1/requests">/api/v1/requests</a>
+            <em>What people are looking for, posted without an account</em>
+          </li>
+          <li>
+            <a href="/api/v1/meta">/api/v1/meta</a>
+            <em>Version, configuration, limits and current counts</em>
+          </li>
+        </ul>
+      </section>
 
       <p class="note">
         Working on the directory yourself? <a href="/operator.html">Sign in to the verification queue</a>.
@@ -252,6 +240,7 @@
       </p>
     </main>
 
+    <script src="/theme.js"></script>
     <script>
       const dot = document.getElementById('dot')
       const status = document.getElementById('status')

@@ -8,671 +8,96 @@
       name="description"
       content="Browse and search verified businesses, services and products in Kampala and the districts around it."
     />
+    <!-- appearance read before paint, so a dark-mode visitor gets no flash -->
+    <script>
+      try {
+        var t = localStorage.getItem('kip-theme')
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/theme.css" />
     <style>
       /*
-       * The public directory.
+       * Directory only. The tokens, the records and the controls all live in
+       * theme.css, so this page cannot drift away from the other three.
        *
-       * Same palette, same type stack and the same argument from the other two
-       * pages, because it is the same product seen from the outside. What changes
-       * is the posture: this is the page a stranger lands on, so it has to work
-       * before anybody has decided to trust it. That is why the search box is the
-       * first thing in the document rather than a link in a corner, and why every
-       * result states where it is rather than asking to be trusted.
-       *
-       * There is no build step and no dependency. The server hands this folder out
-       * as static files, so anything this page needs it has to bring with it.
+       * There is no build step and no dependency. The server hands this folder
+       * out as static files, so anything this page needs it has to bring.
        */
-      :root {
-        --ink: #0d2a30;
-        --ink-soft: #163e46;
-        --gold: #f0b740;
-        --paper: #f7f4ee;
-        --card: #fffdf8;
-        /*
-         * Darkened from the #6d7f83 the other three pages use, and the only token
-         * here that is not shared with them.
-         *
-         * Measured off the rendered page rather than judged by eye: the old value
-         * gave 3.82:1 on `--paper` and 4.12:1 on `--card`, both under the 4.5:1 that
-         * WCAG AA asks of text at this size. It was carrying the count line, the
-         * pager, the search hint and the category on every card — real information,
-         * at 13–14px, which is exactly where a low-contrast grey does most damage.
-         *
-         * This clears 4.5:1 on both backgrounds (4.95 and 5.35) and keeps the same
-         * desaturated blue-grey, so it still reads as "quieter than the ink" rather
-         * than as a second text colour. The other three pages carry the same defect
-         * at the same value and want the same one-line change.
-         */
-        --muted: #5a6d72;
-        --line: #dcd6c9;
-        --danger: #c0453b;
-        --radius: 10px;
 
-        /*
-         * The type scale, stated once.
-         *
-         * This page had fourteen font sizes in it, seven of them inside a band of
-         * 0.22rem — 0.78, 0.82, 0.84, 0.86, 0.88, 0.9, 0.93. Nobody perceives a
-         * difference of 0.02rem; the effect is not hierarchy, it is the sense that
-         * every size was chosen by accident and none on purpose. Five steps with
-         * 0.11rem or more between neighbours is the smallest set that actually reads
-         * as different, so that is what this is.
-         *
-         * There is no display face separate from the body face. The server hands
-         * out a folder of static files with no build step and no network fetch, so
-         * a webfont would be a dependency the page cannot have, and faking
-         * personality with letter-spacing on a system sans is worse than not trying.
-         * The voice is carried by weight, size and placement instead.
-         */
-        --t-display: 1.6rem; /* the page's own name */
-        --t-lead: 1.12rem; /* the things a reader scans for: a listing's name, a heading */
-        --t-body: 1rem; /* anything being read as a sentence */
-        --t-meta: 0.875rem; /* supporting facts: place, category, counts, hints */
-        --t-label: 0.8125rem; /* names of fields, and badges */
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 0 1.5rem 6rem;
-        background: var(--paper);
-        color: var(--ink);
-        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-      }
-
-      .shell {
-        max-width: 68rem;
-        margin: 0 auto;
-      }
-
-      /* A masthead you can see from the back of a room: the name, and the one
-         thing the page is for. */
-      .masthead {
-        padding: 1.9rem 0 1.35rem;
-        border-bottom: 2px solid var(--ink);
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: 1rem 1.5rem;
-        flex-wrap: wrap;
-      }
-
-      .masthead h1 {
-        margin: 0;
-        font-size: var(--t-display);
-        letter-spacing: -0.02em;
-      }
-
-      .masthead .sub {
-        margin: 0.2rem 0 0;
-        color: var(--muted);
-        font-size: var(--t-meta);
-      }
-
-      .masthead nav {
-        display: flex;
-        gap: 1.1rem;
-        font-size: var(--t-meta);
-      }
-
-      .masthead nav a {
-        color: var(--ink-soft);
-        text-decoration: none;
-        border-bottom: 1px solid var(--gold);
-      }
-
-      .masthead nav a:hover,
-      .masthead nav a:focus-visible {
-        background: var(--gold);
-      }
-
-      /*
-       * The search. It is a form, and submitting it is a deliberate act, because
-       * every search this platform serves is recorded as a demand signal and there
-       * is no debounce that makes typing into this box honest. See the note at the
-       * top of the script.
-       */
-      .search {
-        margin: 1.75rem 0 0;
-      }
-
-      .search .field {
-        display: flex;
-        gap: 0.6rem;
-        flex-wrap: wrap;
-      }
-
-      .search input[type='search'] {
-        flex: 1 1 22rem;
-        padding: 0.8rem 0.9rem;
-        font: inherit;
-        font-size: var(--t-lead);
-        color: var(--ink);
-        background: #fff;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-      }
-
-      .search input[type='search']::placeholder {
-        color: #9aa8aa;
-      }
-
-      button {
-        font: inherit;
-        cursor: pointer;
-        border-radius: 8px;
-        border: 1px solid var(--ink);
-        background: var(--ink);
-        color: var(--paper);
-        padding: 0.8rem 1.4rem;
-      }
-
-      button:hover {
-        background: var(--ink-soft);
-      }
-
-      button.quiet {
-        background: transparent;
-        color: var(--ink-soft);
-        border-color: var(--line);
-        padding: 0.45rem 0.8rem;
-        font-size: var(--t-meta);
-      }
-
-      button.quiet:hover {
-        background: #fff;
-        border-color: var(--ink-soft);
-      }
-
-      button:disabled {
-        cursor: not-allowed;
-        opacity: 0.45;
-      }
-
-      button:disabled:hover {
-        background: var(--ink);
-      }
-
-      /*
-       * Disabled form controls, which is where the whole "switch the control off
-       * rather than ignore it" approach lives or dies.
-       *
-       * `button:disabled` alone covered the only disabled element the page had, and
-       * a greyed-out `<select>` looked identical to a live one: no default browser
-       * styling applies to a disabled select, so the order and maturity controls
-       * went dead while still reading as adjustable. If the control is going to be
-       * refused, it has to look refused.
-       */
-      input:disabled,
-      select:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
-        background: var(--paper-sunk, #f2efe8);
-      }
-
-      input:disabled + button,
-      select:disabled {
-        border-color: var(--line, #ddd7cb);
-      }
-
-      /*
-       * Present to a screen reader, absent from the page.
-       *
-       * `hidden` was the wrong tool for the search box's label: it takes the
-       * element out of the accessibility tree as well as out of the layout, which
-       * left the search input with no accessible name and nothing but a
-       * placeholder to announce. Clipping keeps the label in the tree.
-       */
-      .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-        border: 0;
-      }
-
-      input:focus-visible,
-      select:focus-visible,
-      button:focus-visible,
-      a:focus-visible {
-        outline: 2px solid var(--ink);
-        outline-offset: 2px;
-      }
-
-      /*
-       * The focus ring on a card is drawn around the card, not around its name.
-       *
-       * The name is the only focusable thing in a card, but it is not what you hit:
-       * the whole card is the target. A ring drawn round six millimetres of
-       * underlined text while the pointer activates the whole rectangle tells a
-       * keyboard user the target is much smaller than it is, and makes them guess
-       * whether the edges are live. `:focus-within` moves the ring to the thing
-       * that is actually clickable, and the name's own ring is dropped so the card
-       * is not outlined twice.
-       */
-      .card:focus-within {
-        outline: 2px solid var(--ink);
-        outline-offset: 2px;
-      }
-
-      .card .name a:focus-visible {
-        outline: none;
-      }
-
-      .search .hint {
-        margin: 0.5rem 0 0;
-        font-size: var(--t-meta);
-        color: var(--muted);
-      }
-
-      /*
-       * Filters. A row of selects, not a sidebar: the reference sets are small, a
-       * sidebar would push the results off the fold on a phone, and every control
-       * here is optional, so a page with none of them filled in is a complete page.
-       */
-      .filters {
-        margin: 1.6rem 0 0;
-        padding: 1rem 1.1rem;
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
+      /* Two columns once there is room: filters become a rail, records stay
+         the page. On a phone the rail simply comes first. */
+      .dir {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-        gap: 0.9rem 1.1rem;
-        align-items: end;
+        grid-template-columns: 1fr;
+        gap: 0 var(--s6);
+        align-items: start;
       }
 
-      /*
-       * Field names, in sentence case.
-       *
-       * These were tracked-out capitals at 0.78rem, which is the single most
-       * template-looking thing on the page — and here it was worse than usual,
-       * because each one sits directly above a sentence-case option ("KIND OF
-       * BUSINESS" over "Everything"), so the two halves of the same control were
-       * set in different cases. Set like the options they label, and in
-       * `--ink-soft` rather than `--muted` so the label is legible without being
-       * louder than the control it names. The control is now the larger of the
-       * two, which is the right way round.
-       */
-      .filters label {
-        display: block;
-        font-size: var(--t-label);
-        color: var(--ink-soft);
+      .rail .filters {
+        grid-template-columns: 1fr;
+        border-bottom: 0;
+        padding-top: 0;
       }
 
-      .filters select,
-      .filters input[type='text'] {
-        display: block;
-        width: 100%;
-        margin-top: 0.3rem;
-        padding: 0.5rem 0.55rem;
-        font: inherit;
-        font-size: var(--t-body);
-        color: var(--ink);
-        background: #fff;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-      }
-
-      /*
-       * The skill box is a text input rather than a select because the vocabulary
-       * is open and a person does not know what it contains. What they type is
-       * resolved to a real skill and shown back as a chip, so a filter is never
-       * silently applied to a string that matched nothing.
-       */
-      .skill {
-        grid-column: span 2;
-      }
-
-      .chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        margin-top: 0.4rem;
-        padding: 0.15rem 0.3rem 0.15rem 0.55rem;
-        font-size: var(--t-meta);
-        background: #fff;
-        border: 1px solid var(--ink-soft);
-        border-radius: 999px;
-      }
-
-      .chip button {
-        all: unset;
-        cursor: pointer;
-        font-size: 1rem;
-        line-height: 1;
-        padding: 0 0.25rem;
-        color: var(--muted);
-      }
-
-      .chip button:hover,
-      .chip button:focus-visible {
-        color: var(--danger);
-        outline: 2px solid var(--danger);
-        outline-offset: 1px;
-        border-radius: 4px;
-      }
-
-      .chip.unresolved {
-        border-color: var(--line);
-        color: var(--muted);
-        border-radius: 6px;
-        padding: 0.2rem 0.5rem;
-      }
-
-      .filters .clear {
-        align-self: end;
-      }
-
-      /* What is on screen right now, in words, above the results. */
-      .summary {
+      /* The skill chips the script drops in here. */
+      #skill-chip-holder {
         display: flex;
-        align-items: baseline;
-        gap: 0.75rem 1rem;
         flex-wrap: wrap;
-        margin: 2rem 0 0.9rem;
-        padding-bottom: 0.7rem;
-        border-bottom: 1px solid var(--line);
+        gap: var(--s1);
+        margin-top: var(--s2);
       }
 
-      .summary h2 {
-        margin: 0;
-        font-size: var(--t-lead);
-      }
-
-      .summary p {
-        margin: 0;
-        font-size: var(--t-meta);
-        color: var(--muted);
-      }
-
-      .summary .spacer {
-        flex: 1 1 auto;
-      }
-
-      .summary .problem {
-        color: var(--danger);
-      }
-
-      .summary .problem:empty {
+      #skill-chip-holder:empty {
         display: none;
       }
 
-      /*
-       * Results. Cards, because a listing is a small object with several kinds of
-       * fact on it, and a table would be read as a spreadsheet of the platform
-       * rather than as a place somebody works.
-       */
-      .results {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
-        gap: 0.9rem;
-      }
-
-      .card {
-        display: flex;
-        flex-direction: column;
-        gap: 0.4rem;
-        padding: 1rem 1.1rem 1.1rem;
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-      }
-
-      .card .name {
-        margin: 0;
-        font-size: var(--t-lead);
-        font-weight: 600;
-      }
-
-      .card .name a {
-        color: var(--ink);
-        text-decoration: none;
-      }
-
-      /*
-       * The name is the link, and it gets the underline on hover rather than all
-       * the time: a screen of permanently underlined blue stops reading as text
-       * and starts reading as a list of buttons.
-       */
-      .card .name a:hover,
-      .card .name a:focus-visible {
-        text-decoration: underline;
-        text-decoration-color: var(--gold);
-        text-decoration-thickness: 2px;
-      }
-
-      /*
-       * The whole card is the target.
-       *
-       * Nearly every reason to be on this page ends in opening one listing, and
-       * asking for a 6mm-high underlined word to be hit is a small way of making
-       * that feel harder than it is. The name's own link is stretched over the
-       * card with a pseudo-element, so the accessible name stays the business's
-       * name — a screen reader is not told about a rectangle — while a pointer can
-       * land anywhere on it.
-       *
-       * Nothing else in a card is a link, which is what makes this safe. The
-       * search card used to carry a second "See the business offering it" pointing
-       * at the same place; with the card clickable that was a duplicate link to one
-       * destination under two different names, so it is gone. The kind badge above
-       * already says the hit is a service or a product rather than a business.
-       */
-      .card .name a::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-      }
-
-      .card {
-        position: relative;
-      }
-
-      .card .blurb {
-        margin: 0;
-        font-size: var(--t-body);
-        color: var(--ink-soft);
-      }
-
-      .card .blurb:empty {
-        display: none;
-      }
-
-      /*
-       * Where it is.
-       *
-       * This is the one line the whole page is organised around, and it used to be
-       * third in a wrapping meta line at 0.82rem muted, behind the category and
-       * divided from it by a decorative rule — which quietly contradicted the
-       * header's own claim that every result states where it is. A person scanning
-       * this grid is deciding whether a business is somewhere they can walk to, so
-       * the place gets its own line, at body size, in `--ink-soft` rather than
-       * `--muted`, directly under the name.
-       *
-       * The gold rule down its left edge is the one mark on the card that is
-       * decoration in the strict sense, and it earns its place: it is what makes a
-       * column of cards read as a column of addresses rather than as a column of
-       * paragraphs, and it repeats on every card so it encodes nothing about any
-       * one of them. It is not a status colour and it is not per-listing.
-       */
-      .where {
-        margin: 0;
-        padding-left: 0.6rem;
-        border-left: 2px solid var(--gold);
-        font-size: var(--t-body);
-        color: var(--ink-soft);
-      }
-
-      .where.absent {
-        color: var(--muted);
-        font-style: italic;
-        border-left-color: var(--line);
-      }
-
-      /*
-       * Everything else the card knows, on one quiet line under the address.
-       *
-       * The 1px vertical rules that used to separate these facts are gone. They
-       * encoded nothing, and in a wrapping flex container they stranded themselves
-       * at the end of a line and opened the next one, so a category could be
-       * preceded by a floating tick with nothing to divide it from. Space between
-       * facts is enough now that they are no longer competing with the place.
-       */
-      .meta {
-        margin: 0.15rem 0 0;
-        display: flex;
-        align-items: center;
-        gap: 0.15rem 0.6rem;
-        flex-wrap: wrap;
-        font-size: var(--t-meta);
-        color: var(--muted);
-      }
-
-      .meta .absent {
-        color: var(--muted);
-        font-style: italic;
-      }
-
-      .tag {
-        font-size: var(--t-label);
-        padding: 0.05rem 0.4rem;
-        border-radius: 4px;
-        border: 1px solid var(--line);
-        color: var(--muted);
-        white-space: nowrap;
-      }
-
-      /* The kind of thing a search hit is. Filled, because unlike the review
-         states on the operator page this is the reader's own answer to "what am
-         I looking at", not a badge about the listing. */
-      .tag.kind {
-        border-color: var(--ink-soft);
-        color: var(--ink-soft);
-        text-transform: capitalize;
-      }
-
-      .empty {
-        margin: 0;
-        padding: 1.75rem 1.25rem;
-        background: #fff;
-        border-top: 1px solid var(--line);
-        border-bottom: 1px solid var(--line);
-        border-radius: var(--radius);
-        color: var(--ink-soft);
-      }
-
-      .empty strong {
-        display: block;
-        margin-bottom: 0.4rem;
-        font-size: var(--t-lead);
-      }
-
-      .empty p {
-        margin: 0 0 0.6rem;
-        max-width: 42rem;
-        font-size: var(--t-body);
-      }
-
-      .empty p:last-child {
-        margin-bottom: 0;
-      }
-
-      .pager {
-        display: flex;
-        align-items: center;
-        gap: 0.85rem;
-        margin: 1.6rem 0 0;
-        font-size: var(--t-meta);
-        color: var(--muted);
-      }
-
-      .pager .spacer {
-        flex: 1 1 auto;
-      }
-
-      .note {
-        margin: 2.5rem 0 0;
-        padding: 0.95rem 1.1rem;
-        background: #fff;
-        border-left: 3px solid var(--gold);
-        border-radius: 0 var(--radius) var(--radius) 0;
-        font-size: var(--t-body);
-        color: var(--ink-soft);
-        max-width: 46rem;
-      }
-
-      .note a,
-      .empty a {
-        color: var(--ink);
-        border-bottom: 2px solid var(--gold);
-        text-decoration: none;
-      }
-
-      .note a:hover,
-      .empty a:hover {
-        background: var(--gold);
-      }
-
-      [hidden] {
-        display: none !important;
-      }
-
-      @media (max-width: 34rem) {
-        .skill {
-          grid-column: span 1;
-        }
-      }
-
-      @media (prefers-reduced-motion: no-preference) {
-        /*
-         * The card is a link now, so it owes the pointer an answer — a stretched
-         * link with no response at all is a well-known way to lose a click. The
-         * movement is two pixels and the border darkens, which together read as
-         * "this whole thing lifts", and the name's gold underline arrives with it
-         * so the thing that is actually focusable is the thing that looks pressed.
-         *
-         * Gated on `prefers-reduced-motion` because a card that rises on hover is
-         * exactly the kind of incidental movement that setting exists to suppress,
-         * and because the border change alone still carries the affordance for
-         * anyone who does not want it moving.
-         */
-        .card {
-          transition:
-            border-color 120ms ease,
-            transform 120ms ease,
-            box-shadow 120ms ease;
+      @media (min-width: 60rem) {
+        .dir {
+          grid-template-columns: 16rem minmax(0, 1fr);
         }
 
-        .card:hover {
-          border-color: var(--ink-soft);
-          transform: translateY(-2px);
-          box-shadow: 0 2px 10px rgb(13 42 48 / 8%);
+        .rail {
+          position: sticky;
+          top: 4.5rem;
         }
       }
     </style>
   </head>
+
   <body>
-    <div class="shell">
-      <header class="masthead">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="wordmark" href="/">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          Kampala Intelligence
+        </a>
+        <nav class="topnav">
+          <a href="/">Engine</a>
+          <a href="/directory.html" aria-current="page">Directory</a>
+          <a href="/operator.html">Verification queue</a>
+          <button class="theme-toggle" type="button" hidden>
+            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <div class="masthead">
         <div>
           <h1>The directory</h1>
           <p class="sub">Businesses in Kampala and the districts around it, and what they do.</p>
         </div>
-        <nav>
-          <a href="/">Engine</a>
-          <a href="/operator.html">Verification queue</a>
-        </nav>
-      </header>
+      </div>
 
       <form class="search" id="search-form" role="search">
         <div class="field">
@@ -693,85 +118,92 @@
         </p>
       </form>
 
-      <form class="filters" id="filters">
-        <label>
-          Kind of business
-          <select id="category">
-            <option value="">Everything</option>
-          </select>
-        </label>
+      <div class="dir">
+        <aside class="rail">
+          <form class="filters" id="filters">
+            <label>
+              Kind of business
+              <select id="category">
+                <option value="">Everything</option>
+              </select>
+            </label>
 
-        <label>
-          Area
-          <select id="location">
-            <option value="">Everywhere</option>
-          </select>
-        </label>
+            <label>
+              Area
+              <select id="location">
+                <option value="">Everywhere</option>
+              </select>
+            </label>
 
-        <label class="skill">
-          Skill
-          <input
-            type="text"
-            id="skill-input"
-            list="skill-options"
-            maxlength="80"
-            autocomplete="off"
-            placeholder="Start typing a skill, e.g. solar"
-          />
-          <datalist id="skill-options"></datalist>
-          <span id="skill-chip-holder"></span>
-        </label>
+            <label class="skill">
+              Skill
+              <input
+                type="text"
+                id="skill-input"
+                list="skill-options"
+                maxlength="80"
+                autocomplete="off"
+                placeholder="Start typing a skill, e.g. solar"
+              />
+              <datalist id="skill-options"></datalist>
+              <span id="skill-chip-holder"></span>
+            </label>
 
-        <label>
-          Maturity
-          <select id="capability">
-            <option value="">Any</option>
-            <option value="claimed">Claims to offer it</option>
-            <option value="documented">Documented</option>
-            <option value="operating">Operating</option>
-            <option value="established">Established</option>
-          </select>
-        </label>
+            <label>
+              Maturity
+              <select id="capability">
+                <option value="">Any</option>
+                <option value="claimed">Claims to offer it</option>
+                <option value="documented">Documented</option>
+                <option value="operating">Operating</option>
+                <option value="established">Established</option>
+              </select>
+            </label>
 
-        <label>
-          Order
-          <select id="sort">
-            <option value="name">A to Z</option>
-            <option value="name desc">Z to A</option>
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
-            <option value="updated">Recently updated</option>
-          </select>
-        </label>
+            <label>
+              Order
+              <select id="sort">
+                <option value="name">A to Z</option>
+                <option value="name desc">Z to A</option>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="updated">Recently updated</option>
+              </select>
+            </label>
 
-        <button type="button" class="quiet clear" id="clear">Clear filters</button>
-      </form>
+            <button type="button" class="quiet clear" id="clear">Clear filters</button>
+          </form>
+        </aside>
 
-      <div class="summary">
-        <h2 id="heading">Everything</h2>
-        <p id="count" role="status" aria-live="polite"></p>
-        <span class="spacer"></span>
-        <p class="problem" id="problem" role="alert"></p>
+        <div class="dir-main">
+          <div class="summary">
+            <h2 id="heading">Everything</h2>
+            <p id="count" role="status" aria-live="polite"></p>
+            <span class="spacer"></span>
+            <p class="problem" id="problem" role="alert"></p>
+          </div>
+
+          <ul class="results" id="results"></ul>
+
+          <p class="empty" id="empty" hidden></p>
+
+          <div class="pager" id="pager" hidden>
+            <button type="button" class="quiet" id="previous">Previous</button>
+            <span id="range"></span>
+            <button type="button" class="quiet" id="next">Next</button>
+            <span class="spacer"></span>
+          </div>
+
+          <p class="note">
+            Every listing here has been checked by somebody who went and looked. Records that are
+            still in the <a href="/operator.html">verification queue</a> are not in this directory
+            and are not counted anywhere the public can see.
+          </p>
+        </div>
       </div>
+    </main>
 
-      <ul class="results" id="results"></ul>
-
-      <p class="empty" id="empty" hidden></p>
-
-      <div class="pager" id="pager" hidden>
-        <button type="button" class="quiet" id="previous">Previous</button>
-        <span id="range"></span>
-        <button type="button" class="quiet" id="next">Next</button>
-        <span class="spacer"></span>
-      </div>
-
-      <p class="note">
-        Every listing here has been checked by somebody who went and looked. Records that are
-        still in the <a href="/operator.html">verification queue</a> are not in this directory and
-        are not counted anywhere the public can see.
-      </p>
-    </div>
-
+    <script src="/theme.js"></script>
     <script>
       /*
        * Two endpoints, and the difference between them is the whole design of this

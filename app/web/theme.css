@@ -1,0 +1,1245 @@
+/*
+ * Kampala Intelligence Platform — the shared interface.
+ *
+ * One stylesheet for all four pages. The pages used to carry their own copy of
+ * these rules, which is how four pages end up looking like four products; the
+ * tokens and the components now live here and the pages keep only what is
+ * genuinely theirs.
+ *
+ * The visual idea is a field ledger. This directory is a record assembled by
+ * people who went and looked, and it refuses to publish anything it cannot
+ * stand behind. So the interface is a working record, not a brochure: dense
+ * where the content is data, quiet where it is prose, and honest about what it
+ * does not know.
+ *
+ * Two decisions worth stating, because both are deliberate:
+ *
+ * 1. The paper is COOL (#f3f6f6), not the warm cream it used to be. A warm
+ *    ground with a warm gold accent is the single most recognisable thing
+ *    generated sites reach for. The gold is kept because it is the brand, but
+ *    moving the ground cool takes the pairing apart and lets the teal read as
+ *    the primary rather than the accent.
+ * 2. Gold is a signal, never a decoration. It means one thing on this site:
+ *    "checked by somebody". If gold appears twice in one viewport, one of them
+ *    is wrong.
+ *
+ * Rules the rest of this file keeps to:
+ *   - Text meets 4.5:1 in both themes. Gold is a fill, and a darkened gold
+ *     (--gold-ink) carries any gold that has to be read.
+ *   - Radius is for things you can touch. Records are flat and hairline-ruled.
+ *   - Shadow is reserved for things genuinely floating above the page.
+ *   - Motion answers an action. Nothing moves on its own.
+ */
+
+/* ---------------------------------------------------------------- tokens -- */
+
+:root {
+  color-scheme: light;
+
+  /* Ink: the brand's deep teal, and the primary text colour. */
+  --ink: #0b2a30;
+  --ink-2: #14454e;
+  --ink-3: #1d5c67;
+
+  /* Ground and surfaces. Cool, so the gold has something to sit against. */
+  --paper: #f3f6f6;
+  --card: #ffffff;
+  --card-2: #fafcfc;
+  --line: #d7e0e1;
+  --line-2: #b9c8ca;
+  /* Stands between facts in a record, so it has to be visible as a divider
+     (3:1) where --line-2 is only ever a border. */
+  --rule: #7d8e92;
+
+  /* Secondary text. Darkened from the old grey, which measured 3.8:1. */
+  --muted: #566a6f;
+  --faint: #5f7075;
+
+  /* Gold. --gold is a fill, --gold-ink is the same hue made readable as text. */
+  --gold: #e0a42a;
+  --gold-ink: #7a5200;
+  --gold-wash: #fdf4e0;
+
+  /* Signals. The product is about demand met and demand unmet, so these two
+     carry meaning rather than decorating. */
+  --good: #17734a;
+  --good-wash: #e6f3ec;
+  --gap: #ad3729;
+  --gap-wash: #fbeceb;
+  --info: #1f5f8b;
+  --info-wash: #e9f1f7;
+
+  --focus: #0f6fb5;
+
+  --radius: 8px;
+  --radius-lg: 14px;
+  --shadow-pop: 0 1px 2px rgb(11 42 48 / 6%), 0 12px 32px -8px rgb(11 42 48 / 18%);
+
+  --sans: 'Figtree', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'PlexMono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* One spacing scale, used everywhere. */
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  --s7: 3rem;
+  --s8: 4.5rem;
+
+  --shell: 78rem;
+  --prose: 42rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --ink: #e8f0f0;
+    --ink-2: #b9cfd2;
+    --ink-3: #8fb3b8;
+
+    --paper: #0a1b1f;
+    --card: #10262b;
+    --card-2: #143036;
+    --line: #21424a;
+    --line-2: #2f5860;
+  --rule: #56838c;
+
+    --muted: #9db2b6;
+    --faint: #7d9498;
+
+    --gold: #e8b64a;
+    --gold-ink: #e8b64a;
+    --gold-wash: #2a2415;
+
+    --good: #4cc38d;
+    --good-wash: #102c22;
+    --gap: #f08a7c;
+    --gap-wash: #2e1a18;
+    --info: #74b3e0;
+    --info-wash: #12242f;
+
+    --focus: #63b4f0;
+
+    --shadow-pop: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -8px rgb(0 0 0 / 60%);
+  }
+}
+
+/* Explicit override, for the toggle in theme.js. Set on <html data-theme>. */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --ink: #0b2a30;
+  --ink-2: #14454e;
+  --ink-3: #1d5c67;
+  --paper: #f3f6f6;
+  --card: #ffffff;
+  --card-2: #fafcfc;
+  --line: #d7e0e1;
+  --line-2: #b9c8ca;
+  /* Stands between facts in a record, so it has to be visible as a divider
+     (3:1) where --line-2 is only ever a border. */
+  --rule: #7d8e92;
+  --muted: #566a6f;
+  --faint: #5f7075;
+  --gold: #e0a42a;
+  --gold-ink: #7a5200;
+  --gold-wash: #fdf4e0;
+  --good: #17734a;
+  --good-wash: #e6f3ec;
+  --gap: #ad3729;
+  --gap-wash: #fbeceb;
+  --info: #1f5f8b;
+  --info-wash: #e9f1f7;
+  --focus: #0f6fb5;
+  --shadow-pop: 0 1px 2px rgb(11 42 48 / 6%), 0 12px 32px -8px rgb(11 42 48 / 18%);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --ink: #e8f0f0;
+  --ink-2: #b9cfd2;
+  --ink-3: #8fb3b8;
+  --paper: #0a1b1f;
+  --card: #10262b;
+  --card-2: #143036;
+  --line: #21424a;
+  --line-2: #2f5860;
+  --rule: #56838c;
+  --muted: #9db2b6;
+  --faint: #7d9498;
+  --gold: #e8b64a;
+  --gold-ink: #e8b64a;
+  --gold-wash: #2a2415;
+  --good: #4cc38d;
+  --good-wash: #102c22;
+  --gap: #f08a7c;
+  --gap-wash: #2e1a18;
+  --info: #74b3e0;
+  --info-wash: #12242f;
+  --focus: #63b4f0;
+  --shadow-pop: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -8px rgb(0 0 0 / 60%);
+}
+
+/* ----------------------------------------------------------------- reset -- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  /* The hero band is full-bleed, which on a machine with a classic scrollbar
+     can overshoot by the scrollbar width. `clip` rather than `hidden`, so it
+     does not quietly turn into a scroll container and break the sticky
+     top bar. */
+  overflow-x: clip;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1rem/1.6 var(--sans);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ul,
+ol,
+dl,
+dd,
+figure {
+  margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: var(--ink);
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  text-decoration-color: var(--gold);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------------ type -- */
+
+h1 {
+  font-size: clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: 1.125rem;
+  font-weight: 650;
+  letter-spacing: -0.012em;
+  line-height: 1.3;
+}
+
+h3 {
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+}
+
+.sub,
+.lede {
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.lede {
+  font-size: 1.0625rem;
+  max-width: var(--prose);
+}
+
+.sub {
+  font-size: 0.9375rem;
+  margin-top: var(--s2);
+  max-width: 38rem;
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  font-variant-ligatures: none;
+}
+
+code {
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.1em 0.34em;
+}
+
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Section label. Sentence case on purpose: the tracked-out capital used to be
+   here read as template chrome rather than as information. */
+.label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* ----------------------------------------------------------------- shell -- */
+
+.shell {
+  max-width: var(--shell);
+  margin: 0 auto;
+  padding: 0 var(--s5) var(--s8);
+}
+
+/* Sticky top bar. One per site, so it doubles as the nav. */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(1.6) blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar-inner {
+  max-width: var(--shell);
+  margin: 0 auto;
+  padding: var(--s3) var(--s5);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s5);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s3);
+  text-decoration: none;
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-size: 0.9375rem;
+  white-space: nowrap;
+}
+
+/* The mark is a record glyph, not a logo: three rules of decreasing length,
+   the way a ledger line closes. It is the one piece of ornament on the site. */
+.mark {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 5px;
+  background: var(--ink);
+  display: grid;
+  align-content: center;
+  gap: 2.5px;
+  padding: 4px;
+}
+
+.mark i {
+  display: block;
+  height: 2px;
+  background: var(--gold);
+  border-radius: 1px;
+}
+
+.mark i:nth-child(2) {
+  width: 70%;
+}
+
+.mark i:nth-child(3) {
+  width: 42%;
+}
+
+/* Takes whatever the wordmark leaves and wraps its links onto further lines
+   instead of breaking a label in half. It grows rather than being pushed with
+   margin-left:auto so that once the bar has to wrap, the wrapped line is still
+   right-aligned instead of being shoved off the edge of the screen. */
+.topnav {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s1);
+  min-width: 0;
+}
+
+.topnav a {
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+  font-size: 0.9375rem;
+  font-weight: 550;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.topnav a:hover {
+  color: var(--ink);
+  background: var(--card);
+}
+
+.topnav a[aria-current='page'] {
+  color: var(--ink);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+  flex-wrap: wrap;
+  padding: var(--s7) 0 var(--s5);
+}
+
+.masthead nav {
+  display: flex;
+  gap: var(--s2);
+}
+
+.masthead nav a {
+  font-size: 0.9375rem;
+  font-weight: 550;
+  color: var(--muted);
+  text-decoration: none;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+}
+
+.masthead nav a:hover {
+  color: var(--ink);
+  background: var(--card);
+}
+
+/* --------------------------------------------------------------- controls -- */
+
+button,
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  padding: 0.5rem 0.9rem;
+  min-height: 2.25rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 550;
+  line-height: 1.2;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+button:hover,
+.btn:hover {
+  background: var(--card-2);
+  border-color: var(--ink-3);
+}
+
+/* The one place gold is a fill, because this is the one thing you press to
+   commit to a search. */
+button[type='submit'],
+.btn-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+button[type='submit']:hover,
+.btn-primary:hover {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
+button.quiet {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+button.quiet:hover {
+  background: var(--card);
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+input[type='text'],
+input[type='search'],
+input[type='email'],
+input[type='password'],
+input[type='number'],
+select,
+textarea {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  min-height: 2.25rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--card);
+  transition: border-color 120ms ease;
+}
+
+input::placeholder {
+  color: var(--faint);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--ink-3);
+}
+
+select {
+  appearance: none;
+  padding-right: 2rem;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    right 0.95rem center,
+    right 0.65rem center;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+}
+
+label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+label > input,
+label > select {
+  margin-top: var(--s1);
+  font-weight: 400;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--s3) var(--s4);
+  align-items: end;
+  padding: var(--s4) 0 var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+
+.filters .clear {
+  align-self: end;
+}
+
+/* Search. The most important control on the site, so it is the largest. */
+.search {
+  padding: var(--s5) 0 0;
+}
+
+.field {
+  display: flex;
+  gap: var(--s2);
+}
+
+.field input {
+  flex: 1 1 auto;
+  min-height: 2.75rem;
+  font-size: 1.0625rem;
+}
+
+.field button {
+  min-height: 2.75rem;
+  padding-inline: 1.25rem;
+}
+
+.hint {
+  margin-top: var(--s3);
+  color: var(--muted);
+  font-size: 0.875rem;
+  max-width: 46rem;
+  text-wrap: pretty;
+}
+
+/* --------------------------------------------------------------- records -- */
+
+/*
+ * The signature of the site: a record reads as a ruled ledger line, not a
+ * floating card. Flat, hairline-separated, with the identifier in mono so it
+ * can be quoted back and checked.
+ */
+.results {
+  border-top: 1px solid var(--line);
+}
+
+/* A directory result. Stacked, because name-then-blurb-then-facts is the order
+   it is meant to be read in. */
+.card {
+  display: block;
+  padding: var(--s4) 0;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 120ms ease;
+}
+
+/* A queue row on the operator page: the checkbox, then the name and its facts,
+   then the trust badge and the kind, all on one line. The middle wrapper is the
+   one <div> that page builds without putting a class on it, so it is the only
+   thing here reached structurally. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--s3) var(--s4);
+  padding: var(--s4) 0;
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  transition: background-color 120ms ease;
+}
+
+/* The 14rem basis is what makes the row wrap by itself: narrow the window far
+   enough and the badges drop onto a line of their own under the name, with no
+   breakpoint to keep in step with anything else. */
+.row > div {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.row > .tag,
+.row > .kind,
+.row > .none {
+  flex: none;
+  margin-top: 3px;
+}
+
+/* Both records are <li>, not <a>, so the lift is keyed on the row itself. */
+.card:hover,
+.row:hover {
+  background: var(--card);
+  box-shadow: 0 0 0 8px var(--card);
+}
+
+.name {
+  font-size: 1.0625rem;
+  font-weight: 650;
+  letter-spacing: -0.012em;
+  line-height: 1.3;
+}
+
+/* The name is the link, but a page of them all underlined reads like a wall of
+   corrections. Resting state carries no underline; hovering the row brings it
+   back in gold, so the affordance is never actually lost. */
+.name a,
+a.name {
+  text-decoration: none;
+}
+
+.card:hover .name a,
+a.card:hover .name,
+.row:hover .name a,
+a.row:hover .name {
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.18em;
+}
+
+.where {
+  color: var(--muted);
+  font-size: 0.9375rem;
+  margin-top: 1px;
+  /* Carries either a single location line or, on the operator page, a set of
+     facts separated by .rule spans. Flex-wrap lets it be both without the
+     styles knowing which page they are on. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* The separator between facts in a record. A hairline rather than a middle
+   dot: dots are the default way to glue metadata together, and a rule reads as
+   part of the ledger instead. */
+.rule {
+  display: inline-block;
+  width: 1px;
+  height: 0.85em;
+  background: var(--rule);
+  margin: 0 0.6rem;
+  flex: none;
+}
+
+.blurb {
+  color: var(--muted);
+  font-size: 0.9375rem;
+  margin-top: var(--s2);
+  max-width: 54ch;
+  text-wrap: pretty;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  margin-top: var(--s3);
+  font-size: 0.8125rem;
+  color: var(--faint);
+}
+
+.kind {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+}
+
+/* "Checked by somebody" — the one meaning gold carries. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--gold-wash);
+  color: var(--gold-ink);
+  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+  white-space: nowrap;
+}
+
+.tag::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--gold);
+  flex: none;
+}
+
+/* Which kind of record this is. The pages ask for `class="tag kind"` on this
+   one, so it has to be told apart deliberately: it says nothing about whether
+   somebody checked the thing, so it does not get to wear the checked-in gold. */
+.tag.kind {
+  background: transparent;
+  border-color: var(--line-2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+}
+
+.tag.kind::before {
+  content: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--info-wash);
+  color: var(--info);
+  border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
+  font-size: 0.75rem;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+/* A gap in the record: present in the data, absent in the world. The words
+   already say so ("No category", "Not stated"), so the mark is colour alone —
+   no em dash fighting the hairline rule that separates the facts. */
+.absent {
+  color: var(--faint);
+  font-size: 0.8125rem;
+}
+
+/* "No skill called "solar" — searching by text instead."
+   A whole sentence rather than a label, so it drops the pill and sits under
+   the skill field as a note instead of masquerading as another filter. */
+.chip.unresolved {
+  display: block;
+  white-space: normal;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--s2);
+  background: var(--info-wash);
+  border-color: color-mix(in srgb, var(--info) 26%, transparent);
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.none {
+  color: var(--faint);
+  font-style: normal;
+}
+
+/* On business.html: a service or product line. */
+.offer {
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+}
+
+.offer:last-child {
+  border-bottom: 0;
+}
+
+.offer .name {
+  flex: 1 1 auto;
+  font-size: 0.9375rem;
+}
+
+.primary {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- summary -- */
+
+.summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding: var(--s5) 0 var(--s3);
+}
+
+.summary h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.summary #count,
+#count {
+  font-size: 0.9375rem;
+  color: var(--ink);
+}
+
+/* Errors name the fix, not the feeling. */
+.problem,
+#problem {
+  color: var(--gap);
+  font-size: 0.9375rem;
+  font-weight: 550;
+}
+
+.problem:empty,
+#problem:empty {
+  display: none;
+}
+
+.empty {
+  padding: var(--s7) var(--s4);
+  text-align: center;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-lg);
+  max-width: 34rem;
+  margin: var(--s5) auto;
+  text-wrap: pretty;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s5) 0;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+#range {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ note -- */
+
+.note {
+  margin-top: var(--s6);
+  padding: var(--s4) var(--s5);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 0.9375rem;
+  color: var(--muted);
+  max-width: 46rem;
+  text-wrap: pretty;
+}
+
+.note strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+/* ------------------------------------------------------------------ misc -- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.9375rem;
+}
+
+.dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+
+.dot.up {
+  background: var(--good);
+  box-shadow: 0 0 0 3px var(--good-wash);
+}
+
+.dot.down {
+  background: var(--gap);
+  box-shadow: 0 0 0 3px var(--gap-wash);
+}
+
+/* Figure row. A ruled table, not a card grid. */
+.counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  background: var(--line);
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.count {
+  background: var(--card);
+  padding: var(--s4);
+}
+
+.count b {
+  display: block;
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.count span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.endpoints {
+  border-top: 1px solid var(--line);
+}
+
+.endpoints li {
+  display: flex;
+  gap: var(--s4);
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.endpoints a {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  text-decoration: none;
+  color: var(--ink-2);
+  flex: none;
+}
+
+.endpoints a:hover {
+  color: var(--gold-ink);
+}
+
+.endpoints em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+/* Definition pairs, used for listing details. */
+.facts {
+  display: grid;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  gap: var(--s2) var(--s5);
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.facts dt {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  padding-top: 2px;
+}
+
+.facts dd {
+  margin: 0;
+}
+
+/* Sections on the business page. */
+.section + .section {
+  margin-top: var(--s6);
+}
+
+.section > h2 {
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--s3);
+}
+
+/* The theme toggle. */
+.theme-toggle {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+  flex: none;
+}
+
+.theme-toggle:hover {
+  color: var(--ink);
+  background: var(--card);
+}
+
+.theme-toggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+:root[data-theme='dark'] .theme-toggle .sun,
+:root:not([data-theme='dark']) .theme-toggle .moon {
+  display: none;
+}
+
+/* Landing hero. The search is the hero, because asking is the whole point of
+   the directory. Deliberately not a big number and a gradient.
+   Behind it runs a full-bleed band of Kampala, desaturated toward the brand ink
+   when the derivative was made so the photograph never competes with the
+   palette.
+   Nothing is written on the photograph. That is a measured decision rather than
+   a stylistic one: --muted body text needs about 94% of the light theme's paper
+   to clear 4.5:1 over the photograph's black and 64% of the dark theme's, so
+   any wash soft enough to still read as a photograph fails the paragraph. The
+   band therefore gives the picture the part of itself where nothing is set, and
+   the text keeps the paper contrast it was designed against.
+   `.hero` carries no max-width, so it spans the shell and its centre is the
+   viewport's centre, which is what makes ::before's full bleed land correctly.
+   The text is constrained on the children instead. */
+.hero {
+  position: relative;
+  isolation: isolate;
+  padding: var(--s8) 0 var(--s6);
+}
+
+.hero h1,
+.hero .search {
+  max-width: 44rem;
+}
+
+/* The photograph. Full-bleed, and reaching up under the sticky top bar so its
+   own top edge is never a visible line. */
+.hero::before {
+  content: '';
+  position: absolute;
+  z-index: -2;
+  top: -5rem;
+  bottom: calc(var(--s6) * -0.5);
+  left: 50%;
+  width: 100vw;
+  margin-left: -50vw;
+  background-color: var(--paper);
+  background-image: url('img/kampala-hero.webp');
+  background-size: cover;
+  /* Biased above centre: the photograph's foreground is its darkest part, and
+     the skyline is the part that says Kampala. */
+  background-position: center 38%;
+  background-repeat: no-repeat;
+}
+
+/* The paper the text is actually set on. Anchored to the hero's own left edge,
+   so it tracks the 44rem column at every viewport instead of guessing at a
+   percentage: the column is a fixed 44rem but ranges from 57% to 81% of the
+   window between 1440px and 900px. Opaque to 47rem, which is the column's right
+   edge measured from this box's own left edge at -3rem, then a soft edge across
+   the 8rem that no glyph is set in. */
+.hero::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: -2rem;
+  bottom: -3rem;
+  left: -3rem;
+  width: 55rem;
+  background: linear-gradient(90deg, var(--paper) 0, var(--paper) 47rem, transparent 55rem);
+}
+
+@media (max-width: 48rem) {
+  /* One column, so the text now spans the full width and the photograph cannot
+     sit beside it. It moves above instead: a strip of Kampala, then opaque
+     paper from the heading down. */
+  .hero {
+    padding-top: 11rem;
+  }
+
+  .hero::before {
+    background-image: url('img/kampala-hero-sm.webp');
+    background-position: center 34%;
+  }
+
+  .hero::after {
+    top: 7rem;
+    left: -1.5rem;
+    right: -1.5rem;
+    width: auto;
+    background: linear-gradient(180deg, transparent 0, var(--paper) 4.5rem);
+  }
+}
+
+.hero h1 {
+  font-size: clamp(2.25rem, 1.5rem + 3.4vw, 3.75rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.04;
+}
+
+.hero p {
+  margin-top: var(--s4);
+  font-size: 1.125rem;
+  color: var(--muted);
+  max-width: 38rem;
+  text-wrap: pretty;
+}
+
+.stack > * + * {
+  margin-top: var(--s4);
+}
+
+.stack-lg > * + * {
+  margin-top: var(--s6);
+}
+
+.prose {
+  max-width: var(--prose);
+}
+
+.prose p + p {
+  margin-top: var(--s4);
+}
+
+/* ---------------------------------------------------------------- print -- */
+
+@media print {
+  .topbar,
+  button,
+  .filters,
+  .search {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+  }
+}

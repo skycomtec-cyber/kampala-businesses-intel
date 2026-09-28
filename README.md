@@ -64,7 +64,7 @@ This is the part worth reading before deploying it anywhere public.
    reference data and runs the test suite so you know the install works.
 2. **Create Admin Account** from the menu. There is no public sign-up; this prompts for an email
    and a password (typed characters are not echoed) and is the only way an account is created.
-3. **Start** from the menu. Pinokio assigns a free port and opens the status page.
+3. **Start** from the menu. Pinokio assigns a free port and opens the front page.
 
 Menu items: `Start`, `Create Admin Account`, `Update`, `Reset`. Stopping the server is done from
 the Pinokio terminal, as with any other script.
@@ -288,7 +288,7 @@ field and no counts, so a caller cannot read a private number out of a listing p
 
 `http://127.0.0.1:4310/operator.html` is the queue as a page, so working through an import does not
 mean pasting ids into curl. It is one static file with no build step and no dependencies, served from
-the same origin as the api, and the `/` status page links to it.
+the same origin as the api, and every page links to it from the topbar.
 
 Sign in with an account from `create-admin` or the `create-admin.js` launcher. There is no sign-up,
 deliberately: a public form that creates accounts would collect the very addresses this platform
@@ -302,6 +302,24 @@ that has already been decided. Tick the rows, choose `Verified`, `Rejected` or `
 one reason, and the page sends the same batch endpoint the curl example above uses, up to 100 rows at a
 time. The reason is required, for the same reason it is required in the api: an audit line that says
 only "verified" is worth very little later.
+
+### The pages, and what they share
+
+Four static files, no build step, no framework, served from the same origin as the api and linked
+from the same topbar, so any of them can be bookmarked or reloaded on its own:
+
+| Page | What it is for |
+| --- | --- |
+| `/` | The front door: what the platform is, and the sequence a listing goes through to get published |
+| `/directory.html` | Public search. Filters, then the results list, then a page for one listing |
+| `/business.html?b=<slug>` | One listing: contacts marked public or private, services, skills, and the source it came from |
+| `/operator.html` | The review queue, above |
+
+Everything the four pages agree on lives in `app/web/theme.css` as tokens, so light and dark are two
+readings of one set of rules rather than two stylesheets, and a page cannot drift from its neighbours.
+`theme.js` only reads and writes the saved appearance; the choice is inlined into each page's `<head>`
+so a dark-mode visitor never sees a white flash, and with JavaScript off the rest of each page still
+works. The fonts are self-hosted (`fonts.css` and `fonts/`), so the app has no runtime CDN dependency.
 
 ## API
 
@@ -537,7 +555,16 @@ print(created.json()["data"]["slug"])
 │   │   └── server.js         the process
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin, import
 │   ├── test/                 89 tests, no network, temporary folders only
-│   └── web/                  the two pages: status at /, operator at /operator.html
+│   └── web/                  the four pages, and the stylesheet they share
+│       ├── index.html            the front door: what this is and how a listing gets in
+│       ├── directory.html        search, filters and the results list
+│       ├── business.html         one listing, with its contacts, services and provenance
+│       ├── operator.html         the review queue
+│       ├── theme.css             every shared token and component, light and dark
+│       ├── theme.js              the appearance toggle, and nothing else
+│       ├── fonts.css             self-hosted Figtree and IBM Plex Mono, no CDN
+│       ├── fonts/                the woff2 subsets and their OFL notices
+│       └── img/                  the hero image
 ├── install.js                Pinokio: dependencies, migrations, reference data, tests
 ├── start.js                  Pinokio: maintenance, then the server
 ├── create-admin.js           Pinokio: the only way an account is created
