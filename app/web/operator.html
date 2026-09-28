@@ -167,6 +167,21 @@
       .outcome:empty {
         display: none;
       }
+
+      /* The same four tones the dialog boxes use, for the line that stays on
+         screen afterwards. It borrows the signal rather than inventing one, so
+         a result read here and the same result read in a box look alike. */
+      .outcome[data-tone='success'] {
+        color: var(--good);
+      }
+
+      .outcome[data-tone='warning'] {
+        color: var(--warn);
+      }
+
+      .outcome[data-tone='danger'] {
+        color: var(--gap);
+      }
     </style>
   </head>
 
@@ -268,6 +283,7 @@
     </div>
 
     <script src="/theme.js"></script>
+    <script src="/sheet.js"></script>
     <script>
       /*
        * The session cookie is HttpOnly, so nothing here ever holds a token: the
@@ -309,6 +325,36 @@
 
       /** The decisions that change whether the public can see a listing at all. */
       const PUBLISHING = new Set(['approve', 'unapprove'])
+
+      /**
+       * What each decision is about, as a sentence an operator would want to
+       * read before pressing the button rather than after.
+       *
+       * Only the four that change what the public sees are here. `verify`,
+       * `claim`, `submit`, `reopen` and `restore` are steps inside the review
+       * and none of them is destructive, so putting a confirmation in front of
+       * them would be teaching the operator that a box means "careful" and then
+       * not being careful. A box is reserved for the irreversible half.
+       */
+      const CONSEQUENCE = {
+        approve: 'Each of these will appear in the public directory as soon as this is recorded.',
+        unapprove: 'Each of these will disappear from the public directory. The listing is kept, unpublished.',
+        reject: 'Each of these is closed as rejected. It will not be published, and the reason is kept against it.',
+        archive: 'Each of these leaves the queue and the directory. The record is kept, and can be restored.',
+      }
+
+      /**
+       * The colour a confirmation wears, which is decided by what the action
+       * does rather than by how the button was labelled. Approving is the good
+       * outcome, withdrawing and archiving are the two that need another look,
+       * and rejecting is the one that closes a record.
+       */
+      const ACTION_TONES = {
+        approve: 'success',
+        unapprove: 'warning',
+        reject: 'danger',
+        archive: 'warning',
+      }
 
       /**
        * Whether this session may take an action, judged against the server's own
@@ -358,8 +404,15 @@
         }
       }
 
-      const say = (element, message) => {
+      /**
+       * Writes a line of text, and optionally the tone it is read in. A caller
+       * that passes no tone gets the plain muted line, which is right for
+       * "Recording…" and for the counts.
+       */
+      const say = (element, message, tone) => {
         element.textContent = message ?? ''
+        if (tone) element.dataset.tone = tone
+        else element.removeAttribute('data-tone')
       }
 
       /* --- signing in and out ------------------------------------------- */
@@ -429,18 +482,36 @@
         who.hidden = false
         say(document.getElementById('who-name'), `${state.user.displayName} (${state.user.role})`)
         // Saying up front what this account cannot do is better than letting an
-        // operator fill in a reason, press the button, and be refused.
+        // operator fill in a reason, press the button, and be refused. The
+        // bracket in the header is the quiet version of that; the box is the one
+        // that is read, because an operator who did not notice will still try.
         if (!may('business:verify')) {
           state.canDecide = false
           say(
             document.getElementById('who-name'),
             `${state.user.displayName} (${state.user.role}) — read only`,
           )
+          kipSheet.open({
+            tone: 'warning',
+            title: 'Read only',
+            body:
+              'This account can read the queue but cannot record a decision against a listing. ' +
+              'The buttons are off on purpose; an admin has to grant the capability.',
+            confirm: 'Close',
+          })
         } else if (!may('business:publish')) {
           say(
             document.getElementById('who-name'),
             `${state.user.displayName} (${state.user.role}) — can verify, cannot publish`,
           )
+          kipSheet.open({
+            tone: 'warning',
+            title: 'Cannot publish',
+            body:
+              'This account can verify a listing but not put one in the public directory. ' +
+              'Approve and withdraw are not offered, and the server would refuse them.',
+            confirm: 'Close',
+          })
         }
         await Promise.all([loadReferenceNames(), loadQueue()])
         reasonInput.focus()
@@ -671,6 +742,35 @@
         record()
       })
 
+      /**
+       * Asks before the four decisions that change what the public can see.
+       *
+       * The box restates the decision, the number of listings it applies to and
+       * the reason that will be written against each of them, because the audit
+       * row is permanent and the reason is the only part of it anybody will
+       * read later. A refusal is a dismissal, not a cancellation of the batch:
+       * the selection, the decision and the reason are all left exactly as they
+       * were, so a mis-click costs one press rather than the retyping.
+       */
+      async function confirmConsequential(action, ids, reason) {
+        const names = state.items
+          .filter((item) => ids.includes(item.id))
+          .map((item) => item.name)
+        const facts = [
+          ['Decision', ACTION_LABELS[action] ?? action],
+          ['Listings', `${ids.length} (${names.slice(0, 3).join(', ')}${names.length > 3 ? `, +${names.length - 3} more` : ''})`],
+          ['Reason on each', reason],
+        ]
+        return kipSheet.open({
+          tone: ACTION_TONES[action],
+          title: `${ACTION_LABELS[action] ?? action}?`,
+          body: CONSEQUENCE[action],
+          facts,
+          confirm: ACTION_LABELS[action] ?? action,
+          cancel: 'Go back',
+        })
+      }
+
       async function record() {
         if (recordButton.disabled) return
         const ids = state.items
@@ -679,8 +779,13 @@
         const action = chosenAction()
         const reason = reasonInput.value.trim()
 
+        if (CONSEQUENCE[action]) {
+          const confirmed = await confirmConsequential(action, ids, reason)
+          if (!confirmed) return
+        }
+
         recordButton.disabled = true
-        say(outcome, 'Recording…')
+        say(outcome, 'Recording…', 'neutral')
         try {
           const result = await api('/api/v1/admin/businesses/verification', {
             method: 'POST',
@@ -694,9 +799,34 @@
           if (unchanged > 0) parts.push(`${unchanged} already in that state.`)
           if (refused > 0) parts.push(`${refused} refused by the server.`)
           if (missing > 0) parts.push(`${missing} no longer exist.`)
-          say(outcome, parts.join(' '))
           reasonInput.value = ''
           await loadQueue()
+
+          // A box is for something that needs attention, not for a receipt. If
+          // the batch went as asked, the line at the bottom of the screen says
+          // so and the operator carries on; if rows were refused, went missing
+          // or nothing moved at all, a line under a sticky bar is exactly where
+          // it would not be read, so that case gets the box.
+          const clean = updated > 0 && refused === 0 && missing === 0
+          if (clean) {
+            say(outcome, parts.join(' '), 'success')
+          } else {
+            say(outcome, parts.join(' '), 'warning')
+            kipSheet.open({
+              tone: updated > 0 ? 'warning' : 'danger',
+              title: updated > 0 ? 'Recorded, but not all of it' : 'Nothing was recorded',
+              body: parts.join(' '),
+              facts: [
+                ['Decision', ACTION_LABELS[action] ?? action],
+                ['Selected', String(ids.length)],
+                ['Updated', String(updated)],
+                ['Already in that state', String(unchanged)],
+                ['Refused by the server', String(refused)],
+                ['No longer exist', String(missing)],
+              ],
+              confirm: 'Close',
+            })
+          }
         } catch (error) {
           if (error.status === 401) {
             showGate()
@@ -707,11 +837,21 @@
             // stop offering the control, and do not carry a capability table in
             // this file that could drift from the one in core/auth.js.
             state.canDecide = false
-            say(outcome, error.message)
-          } else {
-            say(outcome, error.message)
           }
-          updateBar()
+          // The decision may or may not have been taken, and an operator who
+          // is left to guess will press the button again. So the failure is put
+          // in a box rather than in a line under a bar.
+          say(outcome, error.message, 'danger')
+          kipSheet.open({
+            tone: 'danger',
+            title: 'The decision was not recorded',
+            body: error.message,
+            facts: [
+              ['Decision', ACTION_LABELS[action] ?? action],
+              ['Selected', String(ids.length)],
+            ],
+            confirm: 'Close',
+          })
         } finally {
           updateBar()
         }

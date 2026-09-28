@@ -68,12 +68,23 @@
   --gap-wash: #fbeceb;
   --info: #1f5f8b;
   --info-wash: #e9f1f7;
+  /* Warning is a burnt orange, not the gold. Gold already means one thing on
+     this site, "checked by somebody", and a warning wearing it would be saying
+     the opposite. It is also kept apart from --gap, because "look again" and
+     "refused" are different sentences. 4.53:1 on its own wash, which is the
+     tightest text pair in this file and still clears 4.5. */
+  --warn: #b1540b;
+  --warn-wash: #fdf0e5;
 
   --focus: #0f6fb5;
 
   --radius: 8px;
   --radius-lg: 14px;
   --shadow-pop: 0 1px 2px rgb(11 42 48 / 6%), 0 12px 32px -8px rgb(11 42 48 / 18%);
+  /* What a modal puts between the box and the page. Its own token rather than a
+     colour-mix on --ink, because --ink inverts between the themes and a white
+     veil over a dark page is not a veil. */
+  --veil: rgb(11 42 48 / 48%);
 
   --sans: 'Figtree', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'PlexMono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -120,10 +131,13 @@
     --gap-wash: #2e1a18;
     --info: #74b3e0;
     --info-wash: #12242f;
+    --warn: #f0a45c;
+    --warn-wash: #2e2114;
 
     --focus: #63b4f0;
 
     --shadow-pop: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -8px rgb(0 0 0 / 60%);
+    --veil: rgb(0 0 0 / 66%);
   }
 }
 
@@ -152,8 +166,11 @@
   --gap-wash: #fbeceb;
   --info: #1f5f8b;
   --info-wash: #e9f1f7;
+  --warn: #b1540b;
+  --warn-wash: #fdf0e5;
   --focus: #0f6fb5;
   --shadow-pop: 0 1px 2px rgb(11 42 48 / 6%), 0 12px 32px -8px rgb(11 42 48 / 18%);
+  --veil: rgb(11 42 48 / 48%);
 }
 
 :root[data-theme='dark'] {
@@ -178,8 +195,11 @@
   --gap-wash: #2e1a18;
   --info: #74b3e0;
   --info-wash: #12242f;
+  --warn: #f0a45c;
+  --warn-wash: #2e2114;
   --focus: #63b4f0;
   --shadow-pop: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px -8px rgb(0 0 0 / 60%);
+  --veil: rgb(0 0 0 / 66%);
 }
 
 /* ----------------------------------------------------------------- reset -- */
@@ -962,6 +982,177 @@ a.row:hover .name {
   font-weight: 650;
 }
 
+/* --------------------------------------------------------------- dialogs -- */
+
+/*
+ * A native <dialog>, because the behaviour the platform needs comes with the
+ * element rather than having to be written and remembered: the focus trap, the
+ * inert page behind it, Escape, and a top layer that ignores the stacking
+ * context of whatever it happens to open over.
+ *
+ * The tone is the reason this component exists. "This will be published" and
+ * "the server refused that" cannot be the same box in the same colour, so each
+ * tone borrows a signal the rest of the file already uses for that meaning --
+ * --good for published, --gap for refused, --warn for look again, and the plain
+ * ink of --ink-3 for a box that is neither, which is also the only one whose
+ * mark is not a colour already carrying judgement. A tone is never the only
+ * cue: every one of them carries its own glyph and its own sentence, so a box
+ * read by somebody who cannot separate the hues says the same thing.
+ */
+
+dialog.sheet {
+  width: min(34rem, calc(100vw - 2rem));
+  max-width: none;
+  /* Tall enough for a long list of listings, bounded so a long body scrolls
+     inside the box instead of pushing its buttons off the screen. */
+  max-height: min(85dvh, 42rem);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+dialog.sheet::backdrop {
+  background: var(--veil);
+  backdrop-filter: blur(2px) saturate(0.9);
+}
+
+dialog.sheet[open] {
+  /* Answers the press that opened it, and nothing on the page moves on its
+     own. 150ms is under the threshold where it reads as waiting. */
+  animation: sheet-in 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+dialog.sheet[data-tone='neutral'] {
+  --tone: var(--ink-3);
+  --tone-wash: var(--card-2);
+}
+
+dialog.sheet[data-tone='success'] {
+  --tone: var(--good);
+  --tone-wash: var(--good-wash);
+}
+
+dialog.sheet[data-tone='warning'] {
+  --tone: var(--warn);
+  --tone-wash: var(--warn-wash);
+}
+
+dialog.sheet[data-tone='danger'] {
+  --tone: var(--gap);
+  --tone-wash: var(--gap-wash);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s4) var(--s5);
+  background: var(--tone-wash);
+  border-bottom: 1px solid color-mix(in srgb, var(--tone) 26%, transparent);
+}
+
+.sheet-mark {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tone);
+  color: var(--card);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sheet-title {
+  margin: 0;
+  padding-top: 1px;
+  font-size: 1.0625rem;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.sheet-body {
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s5);
+  overflow-y: auto;
+  color: var(--ink-2);
+  font-size: 0.9375rem;
+  text-wrap: pretty;
+}
+
+/* The record inside a dialog, when the decision turns on facts. The same
+   definition list the rest of the pages use, because a confirmation that lays
+   its facts out differently from the page it is confirming is a second thing
+   to read. */
+.sheet-body .facts {
+  padding: var(--s3) var(--s4);
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+}
+
+.sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s2);
+  padding: var(--s4) var(--s5);
+  background: var(--card-2);
+  border-top: 1px solid var(--line);
+}
+
+/* The button that commits. It is the tone, filled, because in a box whose
+   whole argument is "this is what will happen" the press should look like what
+   it does. --card is white in the light theme and near-black in the dark one,
+   which is the readable text against a filled tone either way. */
+.sheet-actions .tone-primary {
+  background: var(--tone);
+  border-color: var(--tone);
+  color: var(--card);
+  font-weight: 650;
+}
+
+.sheet-actions .tone-primary:hover {
+  background: color-mix(in srgb, var(--tone) 86%, var(--ink));
+  border-color: color-mix(in srgb, var(--tone) 86%, var(--ink));
+  color: var(--card);
+}
+
+@media (max-width: 26rem) {
+  /* The two buttons stop being a row and become a column, confirm on top,
+     because a 34rem box on a phone is 22rem of it and two side-by-side
+     buttons at that width are both easy to miss. */
+  .sheet-actions {
+    flex-direction: column-reverse;
+  }
+
+  .sheet-actions button {
+    width: 100%;
+  }
+}
+
 /* ------------------------------------------------------------------ misc -- */
 
 .status {
@@ -1235,7 +1426,8 @@ a.row:hover .name {
   .topbar,
   button,
   .filters,
-  .search {
+  .search,
+  dialog {
     display: none !important;
   }
 

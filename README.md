@@ -303,6 +303,42 @@ one reason, and the page sends the same batch endpoint the curl example above us
 time. The reason is required, for the same reason it is required in the api: an audit line that says
 only "verified" is worth very little later.
 
+Four of the decisions are consequential, and those four are the only ones that ask first:
+`approve`, `unapprove`, `reject` and `archive` change what the public can see. The box restates the
+decision, how many listings it covers, and the reason that will be written permanently against each
+one, because the audit row is what anybody will read later. A refusal is treated as a dismissal rather
+than a cancellation of the batch, so the selection, the decision and the typed reason all survive a
+mis-click and a second attempt costs one press instead of the retyping. A step inside the review
+(`verify`, `claim`, `submit`, `reopen`, `restore`) asks for nothing, because a box in front of every
+button would teach the operator that a box means "careful" and then not be careful.
+
+### The confirmation boxes
+
+`app/web/sheet.js` is the one `<dialog>` component, built once and reused, and it is what makes those
+boxes behave without being written each time. `<dialog>` supplies the parts that are easy to forget:
+the focus trap, the inert page behind, Escape, and a top layer that ignores the stacking context of
+whatever it opened over. What is left is the three decisions the element cannot make:
+
+| Decision | What it settles here |
+| --- | --- |
+| Which button is focused first | The way back, whenever there is one. A box that opens with the dangerous button under the operator's finger has already caused the accident it exists to prevent. |
+| What a click outside means | Go back. The browser has no opinion, and a box that cannot be dismissed from the page around it reads as a dead end on a trackpad. |
+| What the caller is told | A promise that is `true` only if the committing button was pressed. Escape and the backdrop are both `false`, so a caller cannot read "dismissed" as "confirmed". |
+
+Tones are borrowed rather than invented: `success` takes `--good`, `danger` takes `--gap`, `warning`
+takes the new `--warn`, and `neutral` takes plain `--ink-3`, so a result read in a box and the same
+result read in the line at the bottom of the screen look alike. No tone is ever the only cue — each
+carries its own glyph and its own sentence, so a box read by somebody who cannot separate the hues says
+the same thing.
+
+One subtlety is worth recording, because it is silent when it goes wrong. `close` is delivered as a
+task, not synchronously, so the event raised by dismissing one box arrives *after* the next `open()`
+has attached its own listener. A listener that merely checked whether it was still the current one
+would settle the new box with the old box's exit: the new box would answer `false` the moment it
+appeared, and its button would do nothing for the rest of the page's life — an operator would press
+"Approve and publish" and the batch would simply never be recorded. The component therefore counts the
+closures it causes itself and spends that count instead of settling on it.
+
 ### The pages, and what they share
 
 Four static files, no build step, no framework, served from the same origin as the api and linked
@@ -319,7 +355,9 @@ Everything the four pages agree on lives in `app/web/theme.css` as tokens, so li
 readings of one set of rules rather than two stylesheets, and a page cannot drift from its neighbours.
 `theme.js` only reads and writes the saved appearance; the choice is inlined into each page's `<head>`
 so a dark-mode visitor never sees a white flash, and with JavaScript off the rest of each page still
-works. The fonts are self-hosted (`fonts.css` and `fonts/`), so the app has no runtime CDN dependency.
+works. `sheet.js` is the one confirmation box, shared so the operator queue and any later page cannot
+disagree about what a box means. The fonts are self-hosted (`fonts.css` and `fonts/`), so the app has
+no runtime CDN dependency.
 
 ## API
 
