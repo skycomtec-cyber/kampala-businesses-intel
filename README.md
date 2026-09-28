@@ -172,6 +172,12 @@ becomes public when somebody makes that decision, not when a spreadsheet lands.
 existing listing on a contact point, or, if it has no contact details at all, on the same name in the
 same location. Everything else is a separate business, because two real traders can share a name.
 
+**It does not record where the row came from.** A file can name a source in a column, and that name
+lands in the legacy free-text `business.source_id`. The controlled reference the review pipeline reads,
+`business.catalogue_source_id`, stays null, so a listing imported from a file cannot answer "who
+published this?" on the page that shows its provenance. See
+[Where a record's provenance comes from](#where-a-records-provenance-comes-from).
+
 ### Fixing what a file gets wrong
 
 A survey of an area nobody has mapped fails on a handful of places, not four hundred different ones, so
@@ -249,6 +255,46 @@ curl -sS -X POST http://127.0.0.1:4310/api/v1/admin/imports/businesses \
 
 `GET /api/v1/admin/imports/businesses/schema` returns the column contract as JSON, so a client does
 not have to parse this page.
+
+### Where a record's provenance comes from
+
+Two different things write a listing, and only one of them records its origin.
+
+`POST /api/v1/admin/catalogue/intake` is the controlled path. It takes a registered source key, the
+record and the evidence string, and in one transaction it writes the business, its `record_provenance`
+row and an intake event. It creates the record, so it cannot be used to explain one that already
+exists. The CSV importer is the other path, and it writes no provenance at all: a source named in a
+column is free text in `business.source_id`, `business.catalogue_source_id` stays null, and nothing
+records which page any given phone number was read off. There is no HTTP route for closing that gap,
+because quietly attaching an origin to a record is not something a client should be able to do — so it
+is a repository call, `catalogue.recordProvenance(businessId, { sourceId, externalRef, evidence,
+notes, attachToBusiness })`, and a script is how it gets run.
+
+`app/scripts/backfill-provenance.mjs` is that script, written for the five listings imported from pages
+harvested off KampalaBiz.Space. It does three things and stops there:
+
+- Attaches a `record_provenance` row to each listing, quoting the harvested page and the line the
+  number was on, with `attachToBusiness: true` so the listing's source column points at the source
+  that produced it rather than at whoever last touched a detail.
+- Adds the phone numbers those pages publish, **private**. A number read off a scraped page is a claim
+  waiting for a reviewer, not something the directory may publish.
+- Writes the two judgement calls into the notes instead of resolving them. The Eder and Lake Victoria
+  View listings publish the same estate line, so it is stored twice and flagged as a possible
+  duplicate rather than merged. Mama's Food is given no contact point at all, because the page is an
+  unmodified template whose number is the placeholder `+00`; its note says a reviewer should expect it
+  to be unpublishable as it stands.
+
+It changes no review state. Every listing stays in the queue, because a provenance row says where a
+claim came from, not that the claim is true.
+
+```bash
+cd app && node scripts/backfill-provenance.mjs
+```
+
+It is idempotent, and that is the property worth insisting on: `recordProvenance` upserts on
+(source, externalRef) rather than stacking a second claim, and a contact that is already there is
+skipped instead of duplicated. Running it twice writes nothing the second time, so it is safe to point
+at a database somebody has been working in.
 
 ### Reviewing what a file imported
 
@@ -713,7 +759,8 @@ print(created.json()["data"]["slug"])
 │   │   ├── import/           csv reader, row resolution, the importer itself
 │   │   ├── api/              plugins, routes, response envelope
 │   │   └── server.js         the process
-│   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin, import
+│   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin, import,
+│   │                         and the one-off repairs — backfill-provenance, add-sources
 │   ├── test/                 96 tests, no network, temporary folders only
 │   └── web/                  the four pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
@@ -722,6 +769,7 @@ print(created.json()["data"]["slug"])
 │       ├── operator.html         the review queue
 │       ├── theme.css             every shared token and component, light and dark
 │       ├── theme.js              the appearance toggle, and nothing else
+│       ├── sheet.js              the one confirmation box, reused by every page that asks
 │       ├── fonts.css             self-hosted Figtree and IBM Plex Mono, no CDN
 │       ├── fonts/                the woff2 subsets and their OFL notices
 │       └── img/                  the hero photograph, and CREDITS.md for its licence
