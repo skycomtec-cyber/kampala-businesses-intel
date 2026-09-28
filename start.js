@@ -24,17 +24,30 @@ module.exports = {
       method: "shell.run",
       params: {
         path: "app",
+        // This step runs under bash on every platform, which is what lets the
+        // redirect and the fallback below each be spelled exactly once.
+        // `which('bash')` resolves Pinokio's bundled bash on Windows and the
+        // system bash elsewhere, and it is a pure `{{...}}` value -- the only
+        // form the template engine reads unambiguously.
+        //
+        // The platform used to be chosen with a
+        // `{{platform === 'win32' ? ... : ...}}` template, and that never
+        // worked. The message string both began with `{{` and ended with `}}`,
+        // so Pinokio's template engine read the whole line as one expression,
+        // stripped only the outer braces, and handed the leftover
+        // `...}} || echo ... {{...` to its evaluator. That is a syntax error, it
+        // is raised outside the engine's own try/catch, and the object-level
+        // catch then returns the step completely unrendered. cmd.exe received
+        // the raw `{{...}}` text, could not find it as a command, and the
+        // `|| echo` fallback swallowed that failure -- so maintenance silently
+        // never ran and the rollup stayed empty.
+        //
+        // The `& cd .` that used to sit at the end existed to clear ERRORLEVEL
+        // after the `echo`, because cmd.exe's `echo` succeeds without resetting
+        // it. bash has no such quirk, so it is gone along with the fork.
+        shell: "{{which('bash')}}",
         message: [
-          // `2>nul` and `2>/dev/null` are the two spellings of /dev/null.
-          // `||` and `echo` are built into both cmd.exe and bash, so the
-          // fallback needs no extra tooling.
-          //
-          // The trailing `cd .` is Windows-only and exists because of a cmd.exe
-          // quirk: `echo` succeeds but does NOT reset ERRORLEVEL, so `||` alone
-          // still leaves the step exiting non-zero. `&` binds looser than `||`,
-          // so this runs on both paths and prints nothing. bash has no such
-          // quirk -- `||` already yields 0 there.
-          "{{platform === 'win32' ? 'npm run maintenance 2>nul' : 'npm run maintenance 2>/dev/null'}} || echo maintenance did not complete, starting anyway{{platform === 'win32' ? ' & cd .' : ''}}",
+          "npm run maintenance 2>/dev/null || echo maintenance did not complete, starting anyway",
         ]
       }
     },
