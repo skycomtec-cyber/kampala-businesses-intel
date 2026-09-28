@@ -428,6 +428,24 @@ A hover bends towards the row rather than the other way round. An attributed rec
 plain `--card` under the pointer would lose its colour at the exact moment somebody is reading it, so
 it deepens towards its own hue instead, and only a record with no attribute gets the card white.
 
+### The photograph
+
+The landing band is a real photograph of Kampala, in colour, and the credit is rendered in the page
+under the text it sits below rather than only in a file. That is a licence obligation, not a courtesy:
+the image is *View of Kampala city 1* by Dr. S-mon from Wikimedia Commons under CC BY 4.0, and CC BY
+asks for credit a reader can actually reach. If the photograph is ever replaced, the credit line in
+`index.html` has to be replaced with it, and the replacement's licence is what decides whether the
+derivative is admissible at all — the graded and resized versions here are adaptations, which is why
+CC BY-SA was avoided: share-alike would carry that obligation into a repository that carries no licence
+of its own.
+
+`app/web/img/CREDITS.md` records the original, the author, the licence, the exact `ffmpeg` chain both
+derivatives come from, and why that chain is what it is. The short version: this is a dense,
+high-frequency cityscape whose size curve is nearly flat, so a blur pays for a low quality setting
+instead of a high one, and colour costs about 13% more bytes than the grayscale treatment that
+preceded it. It is worth reading before changing the band, because re-measuring is cheaper than
+rediscovering it.
+
 ## API
 
 Base URL `http://127.0.0.1:4310`. Every response uses the same envelope:
@@ -706,7 +724,7 @@ print(created.json()["data"]["slug"])
 │       ├── theme.js              the appearance toggle, and nothing else
 │       ├── fonts.css             self-hosted Figtree and IBM Plex Mono, no CDN
 │       ├── fonts/                the woff2 subsets and their OFL notices
-│       └── img/                  the hero image
+│       └── img/                  the hero photograph, and CREDITS.md for its licence
 ├── install.js                Pinokio: dependencies, migrations, reference data, tests
 ├── start.js                  Pinokio: maintenance, then the server
 ├── create-admin.js           Pinokio: the only way an account is created

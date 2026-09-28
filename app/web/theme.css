@@ -1469,9 +1469,12 @@ dialog.sheet[data-tone='danger'] {
 
 /* Landing hero. The search is the hero, because asking is the whole point of
    the directory. Deliberately not a big number and a gradient.
-   Behind it runs a full-bleed band of Kampala, desaturated toward the brand ink
-   when the derivative was made so the photograph never competes with the
-   palette.
+   Behind it runs a full-bleed band of Kampala. The photograph is in colour on
+   purpose: it was previously desaturated toward the brand ink so it could never
+   compete with the palette, and the result was a Kampala cityscape that no
+   longer read as Kampala. The paper gradient below is what keeps the band from
+   fighting the text, so the photograph does not also have to give up its colour
+   to do a job the layout is already doing.
    Nothing is written on the photograph. That is a measured decision rather than
    a stylistic one: --muted body text needs about 94% of the light theme's paper
    to clear 4.5:1 over the photograph's black and 64% of the dark theme's, so
