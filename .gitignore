@@ -28,6 +28,10 @@ skills-lock.json
 .codestudio/
 .commandcode/
 .continue/
+# Cursor's own editor settings, for the same reason as the folders above: it is
+# written by the editor on the machine, and `.cursorrules` is already ignored
+# above.
+.cursor/
 .grok/
 .jazz/
 .openhands/
