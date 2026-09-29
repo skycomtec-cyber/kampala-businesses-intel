@@ -50,7 +50,13 @@ This is the part worth reading before deploying it anywhere public.
   must not outlive data that cannot. Note that `search_query_raw.search_event_id` is
   `ON DELETE CASCADE`, so this is also the only ordering the schema can honour — a raw row cannot
   outlive its own event, so raising the raw setting above the event setting would not extend its
-  life, it would just make the setting do nothing.
+  life, it would just make the setting do nothing. A raw window above the event window is therefore
+  clamped down to match it, and a window of `0`, a negative number or an unparseable one falls back
+  to its default. Retention settings are the one place a bad value is caught at load rather than at
+  use: nothing downstream re-checks a window, so a window of `0` would make every row look expired
+  the moment it was written and the next maintenance run would delete the entire demand history
+  while reporting success. `/api/v1/meta` publishes both values, so the number in force is the
+  number you get.
 - **Navigation is not demand.** "login", a pasted URL and a bare UUID are recorded as searches for
   the search index but never as demand, because counting them would poison every trend.
 - **Contact details are private by default.** A phone number added to a listing is invisible to
@@ -96,7 +102,7 @@ KIP_PORT=5000 KIP_K_THRESHOLD=10 npm start
 | `KIP_DATA_DIR` | `app/data` | Where the database and the session secret live. |
 | `KIP_DB_FILE` | `<data dir>/kampala.db` | SQLite file. |
 | `KIP_K_THRESHOLD` | `5` | Distinct actors required before an aggregate is published. |
-| `KIP_RAW_SEARCH_RETENTION_DAYS` | `30` | How long raw query text survives. Must stay below the event window; see the privacy notes. |
+| `KIP_RAW_SEARCH_RETENTION_DAYS` | `30` | How long raw query text survives. Must stay within the event window; see the privacy notes. |
 | `KIP_EVENT_RETENTION_DAYS` | `90` | How long search and interaction events survive. |
 | `KIP_SESSION_SECRET` | generated | Session signing secret. Generated and persisted on first run if unset. |
 | `KIP_SESSION_TTL_HOURS` | `12` | Session lifetime. |
@@ -796,7 +802,7 @@ print(created.json()["data"]["slug"])
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
 │   │                         import, analyse, and the one-off repairs
 │   │                         — backfill-provenance, add-sources
-│   ├── test/                 119 tests, no network, temporary folders only
+│   ├── test/                 124 tests, no network, temporary folders only
 │   └── web/                  the four pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
@@ -827,7 +833,7 @@ cd app
 npm test
 ```
 
-119 tests, no network access, each against its own temporary database. The API tests mount the real
+124 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule

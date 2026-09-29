@@ -33,6 +33,28 @@ function readInt(name, fallback) {
   return Number.isFinite(value) ? value : fallback
 }
 
+/**
+ * Reads a count of days that must be at least one.
+ *
+ * `readInt` is right for ports and thresholds, where a nonsense value is caught
+ * by an assertion at the point of use. It is wrong for a retention window,
+ * because nothing downstream re-checks one: a window of 0 or -5 makes every row
+ * look expired the moment it is written, so the next maintenance run deletes the
+ * entire demand history and reports success doing it. A setting that destroys
+ * the data it governs must not be reachable by typo.
+ *
+ * `Number` rather than `parseInt` on purpose. `parseInt('1e9')` is 1, which
+ * turns an operator's request to keep data for a billion days into a request to
+ * keep it for one. `Number('1e9')` is 1000000000, and `Number('30d')` is NaN,
+ * which falls back to the default rather than quietly becoming 30.
+ */
+function readPositiveInt(name, fallback) {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const value = Number(raw)
+  return Number.isInteger(value) && value >= 1 ? value : fallback
+}
+
 function readString(name, fallback) {
   const raw = process.env[name]
   return raw === undefined || raw === '' ? fallback : raw
@@ -120,14 +142,17 @@ export function loadConfig(overrides = {}) {
       // aggregate is kept longer for the trend work it is actually used for.
       //
       // It is also the only ordering that the schema can actually honour.
-      // search_query_raw.search_event_id is ON DELETE CASCADE, so an event can
-      // never outlive its own raw row's deletion, but a raw row can never
-      // outlive its event: purge the event at 90 days and the text is destroyed
-      // with it, whatever expires_at it carries. Set these the wrong way round
-      // and KIP_RAW_SEARCH_RETENTION_DAYS silently becomes a setting that does
-      // nothing at all, which is exactly what it used to do.
-      rawSearchRetentionDays: readInt('KIP_RAW_SEARCH_RETENTION_DAYS', 30),
-      eventRetentionDays: readInt('KIP_EVENT_RETENTION_DAYS', 90),
+      // search_query_raw.search_event_id is ON DELETE CASCADE, so a raw row can
+      // never outlive its event whatever expires_at it carries: purge the event
+      // and the text is destroyed with it. The defaults enforce the ordering so
+      // this cannot be misconfigured into a knob that does nothing, which is
+      // exactly what KIP_RAW_SEARCH_RETENTION_DAYS used to be.
+      rawSearchRetentionDays:
+        overrides.privacy?.rawSearchRetentionDays ??
+        readPositiveInt('KIP_RAW_SEARCH_RETENTION_DAYS', 30),
+      eventRetentionDays:
+        overrides.privacy?.eventRetentionDays ??
+        readPositiveInt('KIP_EVENT_RETENTION_DAYS', 90),
     },
     auth: {
       sessionSecret: resolveSessionSecret(dataDir),
@@ -202,6 +227,23 @@ export function loadConfig(overrides = {}) {
 
   if (Number.isInteger(overrides.port)) config.port = overrides.port
   if (overrides.host) config.host = overrides.host
+
+  // The one cross-field rule in the config, enforced here because the two values
+  // are read independently and either one can be overridden.
+  //
+  // Asking for the identifying text to outlive the aggregate is not refused,
+  // because refusing it would turn a mistyped number into a platform that will
+  // not start. The schema cannot honour it in any case: the cascade would delete
+  // the text first regardless, so the only outcome of accepting the request is a
+  // setting that reports a lifetime the rows never get. Clamping to the event
+  // window is the safe direction - the text is kept for less time than asked
+  // for, never more - and it makes the reported value true again.
+  //
+  // /api/v1/meta publishes both numbers, so the value actually in force is
+  // observable rather than something an operator has to take on trust.
+  if (config.privacy.rawSearchRetentionDays > config.privacy.eventRetentionDays) {
+    config.privacy.rawSearchRetentionDays = config.privacy.eventRetentionDays
+  }
 
   return Object.freeze(config)
 }
