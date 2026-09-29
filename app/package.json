@@ -16,6 +16,7 @@
     "import": "node scripts/import.js",
     "bootstrap": "node scripts/bootstrap.js",
     "maintenance": "node scripts/maintenance.js",
+    "analyse": "node scripts/analyse.js",
     "test": "node --test"
   },
   "dependencies": {

@@ -98,19 +98,48 @@ KIP_PORT=5000 KIP_K_THRESHOLD=10 npm start
 | `KIP_TRUST_PROXY` | `false` | Honour `X-Forwarded-For`. Only enable behind a proxy you control. |
 | `KIP_LOG_LEVEL` | `info` | Pino log level. |
 | `KIP_SEED_REFERENCE` | `true` | Import reference data on start. |
+| `KIP_GAP_WINDOW_DAYS` | `30` | Default window the gap engine measures. |
+| `KIP_GAP_TREND_WINDOW_DAYS` | `7` | Days on each side of a window's midpoint used to detect rising or falling demand. |
+| `KIP_GAP_MAX_SIGNALS` | `200` | Most signals a single run will measure, highest-searching first. |
+| `KIP_GAP_OPPORTUNITY_FLOOR` | `moderate` | Lowest severity promoted to an opportunity. Below it, a gap stays a gap. |
 
 ### Scheduled work
 
 ```bash
-npm run maintenance                  # roll up the last 2 days, enforce retention
+npm run maintenance                  # roll up the last 2 days, measure gaps, enforce retention
 npm run maintenance -- --days 7      # the last 7 days
 npm run maintenance -- --from 2026-01-01 --to 2026-01-31
 npm run maintenance -- --no-rollup   # retention only
+npm run maintenance -- --no-gaps     # roll up and enforce retention, but do not measure
+npm run maintenance -- --window 60   # measure over 60 days instead of 30
 ```
 
-The insights routes only read the daily rollup, so without this the opportunity view stays empty.
-`start.js` runs it before the port opens, because a launcher with no scheduler still needs the
-rollup to happen.
+Both jobs run in the right order, because the engine measures supply against demand that has already
+been counted. Rollup first, then gaps, then retention, so a run never scores a day that is about to
+be purged. Every run is recorded whether it succeeded or not, so a window that was never measured is
+distinguishable from a window that was measured and found nothing.
+
+The insights routes only read the rollup, so without this the opportunity view stays empty. `start.js`
+runs it before the port opens, because a launcher with no scheduler still needs the rollup to happen.
+
+### Measuring gaps on demand
+
+Maintenance is for the schedule. When you want to look at a window without waiting for one:
+
+```bash
+npm run analyse                      # 30-day window, what is running
+npm run analyse -- --window 90
+npm run analyse -- --top 10          # more rows
+npm run analyse -- --floor high      # promote only high findings
+```
+
+Same engine, same tables, same k-anonymity floor as the scheduled run — the difference is only that
+the window is yours rather than the default, and that it prints what it found instead of logging it.
+
+It measures the last N days **ending yesterday**, not today, because today is usually still
+accumulating raw events. A window that includes a partial day scores demand that has not happened yet
+as if it had, which quietly biases every finding downward. For the same reason, a day whose rollup is
+missing contributes no demand rather than being treated as a day of silence.
 
 ## Importing businesses
 
@@ -759,9 +788,10 @@ print(created.json()["data"]["slug"])
 │   │   ├── import/           csv reader, row resolution, the importer itself
 │   │   ├── api/              plugins, routes, response envelope
 │   │   └── server.js         the process
-│   ├── scripts/              migrate, seed, bootstrap, maintenance, create-admin, import,
-│   │                         and the one-off repairs — backfill-provenance, add-sources
-│   ├── test/                 96 tests, no network, temporary folders only
+│   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
+│   │                         import, analyse, and the one-off repairs
+│   │                         — backfill-provenance, add-sources
+│   ├── test/                 114 tests, no network, temporary folders only
 │   └── web/                  the four pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list

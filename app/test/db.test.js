@@ -84,7 +84,7 @@ test('migrations are idempotent and recorded', () => {
     // Re-running the migrator on an up-to-date database must be a no-op, or the
     // launcher would re-apply the schema on every start.
     const results = migrate(app.db)
-    assert.equal(results.length, 9)
+    assert.equal(results.length, 10)
     assert.ok(results.every((row) => row.status === 'skipped'))
 
     const ledger = app.db.prepare('SELECT id FROM schema_migration ORDER BY id').all()
@@ -100,6 +100,7 @@ test('migrations are idempotent and recorded', () => {
         '007_marketplace_access_tokens',
         '008_audit_reason',
         '009_catalogue_ingestion',
+        '010_opportunity_identity',
       ],
     )
   } finally {

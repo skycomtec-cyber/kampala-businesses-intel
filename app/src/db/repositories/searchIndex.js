@@ -265,6 +265,194 @@ export function createSearchIndexRepository(db) {
     },
 
     /**
+     * Measures how much supply the platform has for a phrase in a place.
+     *
+     * The gap engine compares demand against supply, and supply here is not a
+     * document count. One business whose name, three services and two products
+     * all match "laptop repair" is one business that can serve the demand, so a
+     * raw row count would let a single well-listed trader invent a market's worth
+     * of coverage and the gap would silently close. So the query resolves every
+     * matching document to its owning business, groups by that business, and
+     * sums `trust_weight` once per business. Since `trust_weight` is
+     * `supplyWeight(business)` and is identical on all of one business's
+     * documents, MAX() over the group is that business's weight exactly.
+     *
+     * `locationId` scopes the same way `search()` does, as a prefix match on the
+     * materialised path, so a district figure covers the cities and wards inside
+     * it. A null `locationId` measures the whole country, which is the right
+     * answer for a countrywide search.
+     *
+     * Read-only and unranked: a gap asks "how much supply exists", not "what
+     * would rank first", so bm25 and paging would only add cost and a second
+     * answer to the same question.
+     */
+    supplyFor({ query, locationId = null }) {
+      const match = buildMatchExpression(query)
+      if (!match) {
+        return {
+          businessCount: 0,
+          supplyScore: 0,
+          verifiedCount: 0,
+          documentCount: 0,
+          bySource: { business: 0, service: 0, product: 0 },
+        }
+      }
+
+      const filters = { match }
+      // Interpolated into two CTEs below, so it is built once here rather than
+      // nested into the query template twice. `d` is the alias both CTEs use.
+      const locationClause = locationId
+        ? `AND ('/' || d.location_path_ids || '/') LIKE '%/' || @locationId || '/%'`
+        : ''
+      if (locationId) filters.locationId = locationId
+
+      const row = db
+        .prepare(
+          `WITH matched AS (
+             SELECT d.source_type, d.source_id, d.trust_weight
+               FROM search_index
+               JOIN search_document d ON d.id = search_index.rowid
+              WHERE search_index MATCH @match
+                AND d.is_active = 1
+                AND d.source_type IN ('business','service','product')
+                ${locationClause}
+           ),
+           all_business_matches AS (
+             -- The same phrase match, but ignoring is_active, because the question
+             -- this CTE answers is whether anybody here has been checked at all,
+             -- and a business still awaiting publication has not.
+             SELECT d.source_id AS business_id
+               FROM search_index
+               JOIN search_document d ON d.id = search_index.rowid
+              WHERE search_index MATCH @match
+                AND d.source_type = 'business'
+                ${locationClause}
+           ),
+           owners AS (
+             SELECT COALESCE(
+                      CASE WHEN m.source_type = 'business' THEN m.source_id END,
+                      s.business_id,
+                      p.business_id
+                    ) AS business_id,
+                    m.trust_weight
+               FROM matched m
+               LEFT JOIN service s ON m.source_type = 'service' AND s.id = m.source_id
+               LEFT JOIN product p ON m.source_type = 'product' AND p.id = m.source_id
+           ),
+           per_business AS (
+             -- MAX, not SUM: all of one business's documents carry the same
+             -- trust_weight, so this is that business's weight counted once.
+             SELECT o.business_id, MAX(o.trust_weight) AS trust_weight
+               FROM owners o
+              WHERE o.business_id IS NOT NULL
+              GROUP BY o.business_id
+           )
+            SELECT
+              (SELECT COUNT(*) FROM per_business) AS business_count,
+              (SELECT COALESCE(SUM(trust_weight), 0) FROM per_business) AS supply_score,
+              -- Counted across every matching business document, published or
+              -- not, rather than across the per_business CTE. A business only reaches
+              -- the active index by being approved, so measuring "verified"
+              -- inside the active set would just re-count business_count and
+              -- learn nothing. Counting it outside the active set is the
+              -- question worth answering: is there supply here that has been
+              -- checked but is still sitting in the review queue? A gap with
+              -- verified_count far above business_count is not a market, it is a
+              -- backlog, and the lab needs to be able to tell those apart.
+              (SELECT COUNT(DISTINCT b.id)
+                 FROM all_business_matches m
+                 JOIN business b ON b.id = m.business_id
+                WHERE b.verification_state IN ('verified', 'approved')) AS verified_count,
+              (SELECT COUNT(*) FROM matched) AS document_count,
+              (SELECT COUNT(*) FROM matched WHERE source_type = 'business') AS business_docs,
+              (SELECT COUNT(*) FROM matched WHERE source_type = 'service') AS service_docs,
+              (SELECT COUNT(*) FROM matched WHERE source_type = 'product') AS product_docs`,
+        )
+        .get(filters)
+
+      return {
+        businessCount: row.business_count,
+        supplyScore: row.supply_score,
+        verifiedCount: row.verified_count,
+        documentCount: row.document_count,
+        bySource: {
+          business: row.business_docs,
+          service: row.service_docs,
+          product: row.product_docs,
+        },
+      }
+    },
+
+    /**
+     * A census of supply in a place, with no phrase involved.
+     *
+     * The other half of supply measurement from `supplyFor`: that one answers
+     * "how much supply exists for what people are asking about", this answers
+     * "how much supply exists here at all". The lab needs both - a district can
+     * be well stocked overall and still have one large gap, and the gap number
+     * alone cannot tell those apart from a district that is empty.
+     *
+     * Read from `search_document` rather than the business tables because that is
+     * the same set of rows `supplyFor` measures, so the two numbers are
+     * guaranteed to be talking about the same supply. `is_active` already
+     * encodes public visibility per document, so no join to business is needed
+     * for the counts.
+     */
+    supplyTotals({ locationId = null } = {}) {
+      const conditions = ["is_active = 1", "source_type IN ('business','service','product')"]
+      const filters = {}
+      // Three places below filter on the location path, and each is either the
+      // bare search_document or the same table aliased `d`. Both forms are built
+      // here so the query template stays free of nested literals.
+      const scopePlain = locationId
+        ? `AND ('/' || location_path_ids || '/') LIKE '%/' || @locationId || '/%'`
+        : ''
+      const scopeAliased = locationId
+        ? `AND ('/' || d.location_path_ids || '/') LIKE '%/' || @locationId || '/%'`
+        : ''
+      if (locationId) {
+        conditions.push(scopePlain.slice(4))
+        filters.locationId = locationId
+      }
+      const whereSql = conditions.join(' AND ')
+
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) AS document_count,
+                  SUM(CASE WHEN source_type = 'business' THEN 1 ELSE 0 END) AS business_count,
+                  SUM(CASE WHEN source_type = 'service'  THEN 1 ELSE 0 END) AS service_count,
+                  SUM(CASE WHEN source_type = 'product'  THEN 1 ELSE 0 END) AS product_count,
+                  -- One weight per business, not per document: the same reason
+                  -- supplyFor groups by owner. A business with five services is
+                  -- one unit of supply, not six.
+                  (SELECT COALESCE(SUM(pb.trust_weight), 0) FROM (
+                     SELECT MAX(trust_weight) AS trust_weight
+                       FROM search_document
+                      WHERE is_active = 1 AND source_type = 'business'
+                        ${scopePlain}
+                      GROUP BY source_id
+                   ) pb) AS supply_score,
+                  (SELECT COUNT(DISTINCT b.id) FROM search_document d
+                    JOIN business b ON b.id = d.source_id
+                   WHERE d.source_type = 'business'
+                     AND b.verification_state IN ('verified', 'approved')
+                     ${scopeAliased}) AS verified_count
+             FROM search_document
+            WHERE ${whereSql}`,
+        )
+        .get(filters)
+
+      return {
+        businessCount: row.business_count ?? 0,
+        serviceCount: row.service_count ?? 0,
+        productCount: row.product_count ?? 0,
+        documentCount: row.document_count ?? 0,
+        supplyScore: row.supply_score ?? 0,
+        verifiedCount: row.verified_count ?? 0,
+      }
+    },
+
+    /**
      * Rebuilds the whole index from the source tables.
      *
      * `build` receives a fresh document list from the caller, because only the

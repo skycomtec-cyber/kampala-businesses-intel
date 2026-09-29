@@ -81,7 +81,7 @@ test('health, meta and the reference endpoints answer without a session', async 
   const health = await ctx.server.inject({ method: 'GET', url: '/healthz' })
   assert.equal(health.statusCode, 200)
   assert.equal(health.json().data.status, 'ok')
-  assert.equal(health.json().data.migrationsApplied, 9)
+  assert.equal(health.json().data.migrationsApplied, 10)
 
   const meta = await ctx.server.inject({ method: 'GET', url: '/api/v1/meta' })
   assert.equal(meta.statusCode, 200)

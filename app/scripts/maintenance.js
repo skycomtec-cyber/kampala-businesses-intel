@@ -2,34 +2,42 @@
 /**
  * The scheduled work, as a command.
  *
- * Two jobs that cannot happen inside a request:
+ * Three jobs that cannot happen inside a request:
  *
  *   1. Rolling search events up into `demand_signal_daily`. The insights routes
  *      only ever read the rollup, so without this the public opportunity view is
  *      permanently empty no matter how many people search. A request is never
  *      made to wait for a rollup, because a slow rollup must degrade freshness
  *      and never lose a search.
- *   2. Enforcing the retention windows. The raw query table is the only table
+ *   2. Measuring the gaps. Rolling demand up is only half the loop: it records
+ *      what people asked for, and nothing was comparing that against the supply
+ *      the platform actually has. This job runs the engine, which is what puts
+ *      rows in `gap_snapshot` and `opportunity`. It runs after the rollup rather
+ *      than independently so that a run never measures a day that has not been
+ *      rolled up yet.
+ *   3. Enforcing the retention windows. The raw query table is the only table
  *      that can identify a person, and it is deleted whether or not anyone runs
  *      this script, but a platform that only purges when asked is a platform
  *      that eventually does not.
  *
- * Both are idempotent, so running it twice is the same as running it once. It
- * rolls up the last few days rather than today alone, because a launch, a crash
- * or a laptop that was asleep at midnight all leave a day behind and there is no
- * scheduler in the launcher to notice.
+ * All three are idempotent, so running it twice is the same as running it once.
+ * It rolls up the last few days rather than today alone, because a launch, a
+ * crash or a laptop that was asleep at midnight all leave a day behind and there
+ * is no scheduler in the launcher to notice.
  *
  * Usage:
  *   node scripts/maintenance.js                 yesterday and today
  *   node scripts/maintenance.js --days 7        the last 7 days
  *   node scripts/maintenance.js --from 2026-01-01 --to 2026-01-31
  *   node scripts/maintenance.js --no-rollup     retention only
- *   node scripts/maintenance.js --no-purge      rollup only
+ *   node scripts/maintenance.js --no-gaps       do not measure gaps
+ *   node scripts/maintenance.js --no-purge      rollup and gaps only
  */
 
 import process from 'node:process'
 import { loadConfig } from '../src/config.js'
 import { openApp } from '../src/db/index.js'
+import { runGapEngine } from '../src/engine/gaps.js'
 
 const DAY_MS = 86400000
 
@@ -38,7 +46,16 @@ function toDayString(date) {
 }
 
 function parseArgs(argv) {
-  const args = { days: 2, rollup: true, purge: true, from: null, to: null, quiet: false }
+  const args = {
+    days: 2,
+    rollup: true,
+    gaps: true,
+    purge: true,
+    from: null,
+    to: null,
+    windowDays: null,
+    quiet: false,
+  }
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index]
     const value = argv[index + 1]
@@ -51,8 +68,13 @@ function parseArgs(argv) {
     } else if (flag === '--to') {
       args.to = value
       index += 1
+    } else if (flag === '--window') {
+      args.windowDays = Math.max(1, Math.min(365, Number.parseInt(value, 10) || 30))
+      index += 1
     } else if (flag === '--no-rollup') {
       args.rollup = false
+    } else if (flag === '--no-gaps') {
+      args.gaps = false
     } else if (flag === '--no-purge') {
       args.purge = false
     } else if (flag === '--quiet') {
@@ -94,6 +116,21 @@ try {
     }
     log(
       `Rolled up ${days} day(s): ${events} search event(s) into ${signals} signal row(s).`,
+    )
+  }
+
+  if (args.gaps) {
+    // Runs last among the measuring jobs, and only if the rollup happened, so the
+    // engine never measures a day that is still missing from the rollup. A failed
+    // run is recorded as failed in intelligence_run and rethrown, which fails this
+    // script: a gap engine that cannot run should be loud, not quietly skipped.
+    const run = runGapEngine(app, {
+      windowDays: args.windowDays ?? undefined,
+    })
+    log(
+      `Gaps: ${run.gapsWritten} signal(s) measured over ${run.windowDays} day(s), ` +
+        `${run.gapsSuppressed} suppressed by the k-anonymity floor, ` +
+        `${run.opportunitiesWritten} opportunit(y/ies) written.`,
     )
   }
 

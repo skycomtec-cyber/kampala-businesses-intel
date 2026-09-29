@@ -9,6 +9,7 @@ import {
   RESULT_QUALITY_ORDER,
 } from '../../core/demand.js'
 import { pseudonymise, dailySalt, suppressIfBelowK, bucketCount } from '../../core/privacy.js'
+import { COVERAGE_LEVELS } from '../../core/location.js'
 import { camelizeRow, camelizeRows, camelizeJsonRow, nowIso, toJson, parseJson, toDayString } from '../mapping.js'
 
 /**
@@ -82,6 +83,51 @@ export function createDemandRepository(db, config) {
     `SELECT ${SIGNAL_COLUMNS} FROM demand_signal_daily
       WHERE day >= ? AND (? IS NULL OR day <= ?) AND location_id IS ?
       ORDER BY searches DESC
+      LIMIT ?`,
+  )
+  // The gap engine's demand side: one row per (phrase, location, ngram) across
+  // the whole window rather than one per day.
+  //
+  // Searches and zero_results sum because they are counts of events. Coverage
+  // does not sum: it is a qualitative label, and the most specific level present
+  // in the window is the honest description of what people asked. `none_in_area`
+  // sums because it is a count of sessions that found nothing nearby, but it is
+  // capped at `searches` because a session can be recorded against a day it did
+  // not roll up into, and an unachievable ratio is worse than a conservative one.
+  //
+  // `specificity` is averaged over sessions, so the average is weighted by how
+  // many sessions each day contributed rather than being a flat mean of daily
+  // means - one day with 200 sessions should move a 30-day mean far more than a
+  // day with 2.
+  //
+  // coverage_level is aggregated as a rank rather than a string. COVERAGE_LEVELS
+  // is a strict hierarchy, but the order in it means nothing to SQL: MAX() over
+  // the raw text returns 'subcounty' over 'district' and 'region' over 'city',
+  // which is alphabetical noise dressed up as specificity. Taking the highest
+  // rank and naming it back in JS keeps the one ordering that actually means
+  // something - the hierarchy in core/location.js - the single source of truth.
+  const COVERAGE_RANK_CASE = COVERAGE_LEVELS.map(
+    (level, index) => `WHEN '${level}' THEN ${index + 1}`,
+  ).join('\n              ')
+  const selectWindowSignals = db.prepare(
+    `SELECT phrase,
+            location_id,
+            ngram_size,
+            MAX(CASE coverage_level
+              ${COVERAGE_RANK_CASE}
+              ELSE 0 END) AS coverage_rank,
+            SUM(searches) AS searches,
+            SUM(zero_results) AS zero_results,
+            MIN(none_in_area, SUM(searches)) AS none_in_area,
+            SUM(distinct_actors) AS distinct_actors,
+            CASE WHEN SUM(searches) > 0
+                 THEN SUM(specificity_sum) / SUM(searches) ELSE 0 END AS specificity,
+            AVG(total_results) AS average_results_per_day
+       FROM demand_signal_daily
+      WHERE day >= ? AND (? IS NULL OR day <= ?)
+      GROUP BY phrase, location_id, ngram_size
+      HAVING SUM(searches) > 0
+      ORDER BY searches DESC, phrase ASC
       LIMIT ?`,
   )
   const deleteSignalDay = db.prepare(`DELETE FROM demand_signal_daily WHERE day = ?`)
@@ -407,6 +453,50 @@ export function createDemandRepository(db, config) {
           visible: gate.visible,
           suppressed: gate.suppressed,
           kThreshold: gate.kThreshold,
+          searchesBucket: bucketCount(record.searches),
+        }
+      })
+    },
+
+    /**
+     * The demand half of a gap calculation: one row per phrase across a window.
+     *
+     * Where `topSignals` answers "what is the strongest demand today, for the
+     * lab", this answers "what did people ask for over these 30 days", which is
+     * the question a gap is about. A gap measured over a single day is noise;
+     * one measured over a window is a market.
+     *
+     * The privacy gate is applied to the windowed actor count rather than to
+     * each day. `distinct_actors` is summed across the window because a
+     * day-bucketed actor is not a person and the same bucket can recur across
+     * days, so the sum over-counts and never under-counts. Over-counting is the
+     * safe direction: it can only ever fail to publish something borderline,
+     * never publish something too small.
+     */
+    windowSignals({ from, to = null, limit = 200, kThreshold }) {
+      const threshold = kThreshold ?? config.privacy.kThreshold
+      return selectWindowSignals.all(from, to, to, limit).map((row) => {
+        const { coverageRank, ...rest } = camelizeRow(row)
+        const record = {
+          ...rest,
+          // The most specific level anyone actually searched at. Null when the
+          // signal was recorded without a resolved location.
+          coverageLevel: COVERAGE_LEVELS[coverageRank - 1] ?? null,
+        }
+        const gate = suppressIfBelowK(record, threshold)
+        return {
+          ...record,
+          visible: gate.visible,
+          suppressed: gate.suppressed,
+          kThreshold: gate.kThreshold,
+          // The share of sessions in the window that found nothing at all. A gap
+          // is a demand that exists and is unmet, so this is what separates
+          // "people want this and cannot find it" from "people did not want it
+          // either".
+          zeroResultRate:
+            record.searches > 0
+              ? Math.round((record.zeroResults / record.searches) * 1000) / 1000
+              : 0,
           searchesBucket: bucketCount(record.searches),
         }
       })

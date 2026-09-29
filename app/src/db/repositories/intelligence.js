@@ -111,7 +111,8 @@ export function createIntelligenceRepository(db, config) {
        @day, @locationId, @coverageLevel, @categoryId, @skillId,
        @businessCount, @serviceCount, @productCount, @supplyScore, @verifiedCount
      )
-     ON CONFLICT(day, location_id, category_id, skill_id) DO UPDATE SET
+      ON CONFLICT(day, IFNULL(location_id, ''), IFNULL(coverage_level, ''),
+                  IFNULL(category_id, ''), IFNULL(skill_id, '')) DO UPDATE SET
        business_count = excluded.business_count,
        service_count = excluded.service_count,
        product_count = excluded.product_count,
@@ -124,6 +125,7 @@ export function createIntelligenceRepository(db, config) {
       WHERE location_id IS ? AND category_id IS ? AND day >= ? AND day <= ?
       ORDER BY day ASC`,
   )
+  const deleteSupplyMetricDay = db.prepare(`DELETE FROM supply_metric_daily WHERE day = ?`)
 
   const upsertOpportunity = db.prepare(
     `INSERT INTO opportunity (
@@ -135,7 +137,7 @@ export function createIntelligenceRepository(db, config) {
        @categoryId, @severity, @score, @estimatedMonthlySearches, @supplyCount,
        @trendDirection, @rationale, @suggestedAction, @state, @now, @now
      )
-     ON CONFLICT(keyword, location_id) DO UPDATE SET
+      ON CONFLICT(keyword, IFNULL(location_id, '')) DO UPDATE SET
        gap_snapshot_id = excluded.gap_snapshot_id,
        location_name = excluded.location_name,
        coverage_level = excluded.coverage_level,
@@ -254,6 +256,12 @@ export function createIntelligenceRepository(db, config) {
      * Supply changes slowly and demand changes quickly. Keeping supply as an
      * explicit daily series is what lets the lab distinguish "demand rose" from
      * "supply fell", which is the difference between an opportunity and a warning.
+     *
+     * The conflict target names `idx_supply_metric_scope` from migration 010
+     * rather than the table's own UNIQUE constraint, which is declared without
+     * `coverage_level` and treats every NULL as distinct. Targeting the table
+     * constraint instead would not compile, and would in any case let a second run
+     * on the same day append a duplicate of every measurement.
      */
     recordSupplyMetric(metric) {
       assertCoverageLevel(metric.coverageLevel ?? 'country')
@@ -273,8 +281,20 @@ export function createIntelligenceRepository(db, config) {
       return true
     },
 
+    /**
+     * Replaces a day's supply census rather than merging into it.
+     *
+     * The engine decides which scopes to measure from the gaps it found, so the
+     * scope set is not fixed: a district with demand today may have none
+     * tomorrow, and a scope that simply stops being measured would otherwise
+     * sit in the table forever holding a number from the last run that happened
+     * to visit it. A census is a snapshot of what was counted on a day, so the
+     * day's rows are cleared and rewritten rather than upserted into.
+     */
     recordSupplyMetrics(metrics) {
+      const days = [...new Set(metrics.map((metric) => metric.day))]
       const write = db.transaction((list) => {
+        for (const day of days) deleteSupplyMetricDay.run(day)
         for (const metric of list) this.recordSupplyMetric(metric)
       })
       write(metrics)
@@ -314,11 +334,21 @@ export function createIntelligenceRepository(db, config) {
       return series
     },
 
+    /**
+     * The trend for one phrase at one place.
+     *
+     * The `.map` is load-bearing and easy to remove by accident: `demandSeries`
+     * returns `{ day, searches }` points because the lab renders them, but
+     * `detectTrend` does arithmetic on its input, so it is handed the bare counts.
+     * Passing the objects through instead makes `Number({ day, searches })` NaN,
+     * which `detectTrend` then reads as zero - and a series of zeroes compares
+     * equal to itself, so every phrase would report as flat rather than rising.
+     */
     trend({ phrase, locationId = null, from, to, window = 7, minBaseline = 3 }) {
-      return detectTrend(this.demandSeries({ phrase, locationId, from, to }), {
-        window,
-        minBaseline,
-      })
+      return detectTrend(
+        this.demandSeries({ phrase, locationId, from, to }).map((point) => point.searches),
+        { window, minBaseline },
+      )
     },
 
     // ---- Gaps ---------------------------------------------------------------
@@ -331,12 +361,18 @@ export function createIntelligenceRepository(db, config) {
      * the time a gap reaches the data layer. A suppressed gap is still stored —
      * with a zero score — so that the lab can count how much signal the privacy
      * floor is hiding, which is itself a finding.
+     *
+     * Returns the rows as stored, ids included, rather than just a count: an
+     * opportunity is a claim *about* a specific gap snapshot, and the only way to
+     * keep that claim auditable is to let the caller link back to the exact row
+     * that produced it rather than re-deriving the match by phrase afterwards.
      */
     writeGaps(runId, gaps) {
-      const write = db.transaction((list) => {
-        for (const gap of list) {
+      const write = db.transaction((list) =>
+        list.map((gap) => {
+          const id = newId()
           insertGap.run({
-            id: newId(),
+            id,
             runId,
             phrase: gap.phrase,
             term: gap.term ?? gap.phrase.split(' ')[0],
@@ -364,10 +400,31 @@ export function createIntelligenceRepository(db, config) {
             kThreshold: gap.kThreshold ?? config.privacy.kThreshold,
             inputsJson: toJson(gap.inputs ?? {}),
           })
-        }
-      })
-      write(gaps)
-      return gaps.length
+          return {
+            id,
+            phrase: gap.phrase,
+            term: gap.term ?? gap.phrase.split(' ')[0],
+            ngramSize: gap.ngramSize ?? gap.phrase.split(' ').length,
+            locationId: gap.locationId ?? null,
+            categoryId: gap.categoryId ?? null,
+            locationName: gap.locationName ?? null,
+            searches: gap.searches ?? 0,
+            distinctActors: gap.distinctActors ?? 0,
+            supplyCount: gap.supplyCount ?? 0,
+            supplyScore: gap.supplyScore ?? 0,
+            specificity: gap.specificity ?? 0,
+            averageResultQuality: gap.averageResultQuality ?? 'zero',
+            trendDirection: gap.trendDirection ?? 'insufficient_data',
+            trendRatio: gap.trendRatio ?? null,
+            trendDelta: gap.trendDelta ?? 0,
+            gapScore: gap.suppressed ? 0 : (gap.gapScore ?? 0),
+            severity: gap.suppressed ? 'none' : (gap.severity ?? 'none'),
+            suppressed: Boolean(gap.suppressed),
+            kThreshold: gap.kThreshold ?? config.privacy.kThreshold,
+          }
+        }),
+      )
+      return write(gaps)
     },
 
     gaps({
@@ -462,6 +519,12 @@ export function createIntelligenceRepository(db, config) {
      * creating a duplicate. The alternative is an opportunity list that fills
      * with the same finding every time anyone recomputes, which is exactly how
      * people learn to ignore the list.
+     *
+     * The conflict target is the expression `IFNULL(location_id, '')`, matching
+     * `idx_opportunity_keyword_location` from migration 010. Naming the table's
+     * own `UNIQUE (keyword, location_id)` here instead would compile but silently
+     * fail to match any countrywide opportunity, and every recompute would append
+     * a fresh duplicate row for it. See that migration for the full explanation.
      */
     recordOpportunities(entries) {
       const write = db.transaction((list) => {

@@ -146,6 +146,26 @@ export function loadConfig(overrides = {}) {
         read: { windowMs: 60_000, max: 240 },
       },
     },
+    intelligence: {
+      // The demand window a gap is measured over. Thirty days is a month of
+      // trading, which is the shortest span in which a business's own decision
+      // cycle fits: anyone acting on a gap needs to act before the next one, and
+      // anything shorter measures a news cycle rather than a market.
+      windowDays: readInt('KIP_GAP_WINDOW_DAYS', 30),
+      // Ceiling on phrases measured per run. Each phrase costs one FTS query
+      // against the supply index, and a run over an unbounded tail spends most of
+      // its time on phrases too small to ever clear the privacy floor. The
+      // ordering in `demand.windowSignals` is by demand, so the cap drops the
+      // weakest signal rather than a random sample of the strong ones.
+      maxSignals: readInt('KIP_GAP_MAX_SIGNALS', 200),
+      // Minimum severity that becomes an opportunity. 'low' findings are stored
+      // as gaps so the lab can show them, but promoting them all would bury the
+      // handful worth acting on under noise, and a list nobody reads is worth
+      // less than no list.
+      opportunityFloor: readString('KIP_GAP_OPPORTUNITY_FLOOR', 'moderate'),
+      // Trend comparison window, in days, for the rising/falling annotation.
+      trendWindowDays: readInt('KIP_GAP_TREND_WINDOW_DAYS', 7),
+    },
     seed: {
       // Reference data (administrative locations, taxonomy) is real-world
       // reference data, not synthetic content. Business content is never
