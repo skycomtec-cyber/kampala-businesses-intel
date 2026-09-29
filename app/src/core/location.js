@@ -106,18 +106,30 @@ export function haversineKm(a, b) {
 }
 
 /**
- * The coverage levels the platform reports on. Every metric rollup and gap is
- * computed at one of these so that comparing a district against a single ward
- * is impossible by construction.
+ * The levels a search can be scoped at, and the levels every rollup and gap is
+ * reported on, so that comparing a district against a single ward is impossible
+ * by construction: a number always carries the level it was computed at.
+ *
+ * This is the location vocabulary, not a shorter list of it. A search scoped to
+ * somewhere has to be able to say *where*, and every kind in the tree is a place
+ * a person can be: the platform seeds all five Kampala divisions, offers them in
+ * the public area picker, and stores businesses against them. Leaving the finer
+ * kinds out of this list did not make their demand unmeasurable, it made it
+ * unrepresentable - a search scoped to a division was rejected outright, because
+ * the only level available to attribute it to was one the division did not match.
+ *
+ * Deriving it from LOCATION_KINDS rather than restating it is the point. The two
+ * drifted once already, and the symptom was a public search returning 400 for a
+ * choice the UI had just offered.
+ *
+ * The order is a ranking from least to most specific, which is what lets a window
+ * spanning several days name the finest level any of them was recorded at. It is
+ * a ranking, not a description of the tree: the hierarchy is a dag rather than a
+ * chain (a town sits inside a district, and a division is a peer of a subcounty
+ * rather than a child of a town), so this total order is a simplification. It is
+ * only ever used to pick one name for a mixed window, never to infer containment.
  */
-export const COVERAGE_LEVELS = Object.freeze([
-  'country',
-  'region',
-  'district',
-  'city',
-  'town',
-  'subcounty',
-])
+export const COVERAGE_LEVELS = LOCATION_KINDS
 
 export function assertCoverageLevel(level) {
   if (!COVERAGE_LEVELS.includes(level)) {

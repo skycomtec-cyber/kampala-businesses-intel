@@ -109,8 +109,24 @@ export function loadConfig(overrides = {}) {
       // Rotating salt for search/session pseudonymisation. Rotated daily so the
       // signals remain useful while individual actors stay unlinkable.
       rotationDays: readInt('KIP_ROTATION_DAYS', 1),
-      // Hard retention floors, in days.
-      rawSearchRetentionDays: readInt('KIP_RAW_SEARCH_RETENTION_DAYS', 180),
+      // Retention in days, named for the table each one governs.
+      //
+      // The raw window has to be the SHORTER of the two, and this is the one
+      // ordering constraint in the file. search_query_raw holds the verbatim
+      // query and the salt that derives actor_bucket, so it is the only table
+      // here that can name a person; search_event holds tokens, phrases and
+      // counts that cannot. Data that can identify someone must not outlive data
+      // that cannot, so the identifying text goes first and the pseudonymous
+      // aggregate is kept longer for the trend work it is actually used for.
+      //
+      // It is also the only ordering that the schema can actually honour.
+      // search_query_raw.search_event_id is ON DELETE CASCADE, so an event can
+      // never outlive its own raw row's deletion, but a raw row can never
+      // outlive its event: purge the event at 90 days and the text is destroyed
+      // with it, whatever expires_at it carries. Set these the wrong way round
+      // and KIP_RAW_SEARCH_RETENTION_DAYS silently becomes a setting that does
+      // nothing at all, which is exactly what it used to do.
+      rawSearchRetentionDays: readInt('KIP_RAW_SEARCH_RETENTION_DAYS', 30),
       eventRetentionDays: readInt('KIP_EVENT_RETENTION_DAYS', 90),
     },
     auth: {

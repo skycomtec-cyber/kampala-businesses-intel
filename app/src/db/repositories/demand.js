@@ -158,8 +158,23 @@ export function createDemandRepository(db, config) {
       WHERE day = ? AND surface IN ('web', 'api') AND query_hash <> 'suppressed'`,
   )
 
-  const retentionMs = () => config.privacy.rawSearchRetentionDays * 86400000
-  const interactionRetentionMs = () => config.privacy.eventRetentionDays * 86400000
+  // Two windows, named for the table each one applies to, because conflating them
+  // is how the identifying table ends up outliving the pseudonymous one it
+  // belongs to.
+  //
+  // search_query_raw is the only table in the platform that can identify a
+  // person: it holds the verbatim query text and the salt that derives an actor
+  // bucket. search_event and interaction_event hold tokens, phrases and counts,
+  // which cannot. So the raw window is the shorter of the two and the text goes
+  // first; the aggregate is kept longer because that is what the gap engine reads.
+  //
+  // The order is not only a preference, it is the only one the schema can honour:
+  // search_query_raw.search_event_id is ON DELETE CASCADE, so a raw row can never
+  // outlive its event no matter what expires_at it carries. Giving the raw window
+  // a longer setting than the event window does not extend its life, it just
+  // makes the setting unreachable.
+  const rawQueryRetentionMs = () => config.privacy.rawSearchRetentionDays * 86400000
+  const eventRetentionMs = () => config.privacy.eventRetentionDays * 86400000
 
   /**
    * Derives the day-bucketed actor identity.
@@ -219,7 +234,12 @@ export function createDemandRepository(db, config) {
       const quality = classifyResultQuality({ totalResults, inAreaResults })
       const { salt, bucket } = actorBucket(actorSeed ?? 'anonymous', at)
       const now = new Date(at)
-      const expiresAt = new Date(now.getTime() + retentionMs()).toISOString()
+      // The text expires first, on the raw window; the pseudonymous event beside
+      // it is kept on the longer event window. Set separately rather than reusing
+      // one value, so the identifying column can never inherit the aggregate's
+      // longer life by accident.
+      const eventExpiresAt = new Date(now.getTime() + eventRetentionMs()).toISOString()
+      const rawQueryExpiresAt = new Date(now.getTime() + rawQueryRetentionMs()).toISOString()
       const id = newId()
 
       const write = db.transaction(() => {
@@ -241,7 +261,7 @@ export function createDemandRepository(db, config) {
           totalResults,
           inAreaResults,
           resultQuality: quality,
-          expiresAt,
+          expiresAt: eventExpiresAt,
         })
         insertRawQuery.run({
           id: newId(),
@@ -249,7 +269,7 @@ export function createDemandRepository(db, config) {
           salt,
           rawQuery: raw,
           normalisedQuery: tokens.join(' '),
-          expiresAt,
+          expiresAt: rawQueryExpiresAt,
         })
       })
       write()
@@ -288,7 +308,7 @@ export function createDemandRepository(db, config) {
           // Only the keys listed here are ever stored. An engineer adding a new
           // field has to add it here too, so a new field cannot leak by default.
           metadataJson: toJson(pickMetadata(metadata)),
-          expiresAt: new Date(new Date(at).getTime() + interactionRetentionMs()).toISOString(),
+          expiresAt: new Date(new Date(at).getTime() + eventRetentionMs()).toISOString(),
         })
       })
       write()

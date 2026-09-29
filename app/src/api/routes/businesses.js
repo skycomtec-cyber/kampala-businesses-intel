@@ -153,7 +153,18 @@ export default async function businessRoutes(fastify, { app }) {
               type: 'array',
               items: { type: 'string', enum: ['business', 'service', 'product'] },
             },
-            surface: { type: 'string', enum: ['web', 'mobile', 'api', 'assistant'] },
+            // Only the surfaces a caller can honestly claim for itself. The
+            // database also allows 'admin', 'import' and 'system', and those are
+            // deliberately not offered here: this route is anonymous, so
+            // accepting them would let anyone file demand under an attribution
+            // the platform chose for itself. A value absent from the search_event
+            // CHECK is a 500 rather than a 400, so this list has to stay a
+            // subset of what the column allows - test/api.test.js reads the
+            // constraint out of SQLite and fails if it ever stops being one.
+            //
+            // 'mobile' is not here because no mobile client exists yet. It gets
+            // added in the same commit as the migration that widens the CHECK.
+            surface: { type: 'string', enum: ['web', 'api'] },
             limit: { type: 'integer', minimum: 1, maximum: 50 },
             offset: { type: 'integer', minimum: 0 },
           },

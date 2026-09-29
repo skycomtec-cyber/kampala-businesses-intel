@@ -1265,3 +1265,176 @@ test('a category count is null until somebody asks for it', async (t) => {
     assert.equal(typeof root.businessCount, 'number', `${root.name} should carry a real count when asked`)
   }
 })
+
+// -----------------------------------------------------------------------------
+// The public search surface, and the three ways it was broken for a visitor.
+//
+// Each of these is a defect a real person hit rather than a hypothetical: a
+// chosen area that returned 400, a documented query parameter that returned 500,
+// and a retention window that was twice as long as advertised on the one table
+// that can identify somebody.
+// -----------------------------------------------------------------------------
+
+test('every place the area picker offers is a place a search can be scoped to', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  // The public picker is built from the locations list with no filtering, so any
+  // kind seeded there is a choice a visitor can make. Each one has to work.
+  const locations = await ctx.server.inject({ method: 'GET', url: '/api/v1/locations?limit=200' })
+  const offered = locations.json().data
+  assert.ok(offered.length > 0, 'there is something to choose from')
+
+  const kinds = [...new Set(offered.map((location) => location.kind))]
+
+  for (const kind of kinds) {
+    const target = offered.find((location) => location.kind === kind)
+    const response = await ctx.server.inject({
+      method: 'GET',
+      url: `/api/v1/search?q=cafe&locationId=${target.id}`,
+    })
+    assert.equal(response.statusCode, 200, `a ${kind} scoped search should work: ${response.body}`)
+
+    // And it must be recorded against the place that was chosen, not rolled up to
+    // some ancestor. Attribution that quietly moves a division's demand onto the
+    // city total is worse than an error, because nothing reports it.
+    //
+    // Ordered by rowid rather than created_at: these requests land inside the same
+    // millisecond often enough that a timestamp ordering picks the wrong row.
+    const event = ctx.app.db
+      .prepare('SELECT location_id, coverage_level FROM search_event ORDER BY rowid DESC LIMIT 1')
+      .get()
+    assert.equal(event.location_id, target.id, `a ${kind} search was attributed elsewhere`)
+    assert.equal(event.coverage_level, kind)
+  }
+})
+
+test('a coverage level that is not a place is refused, not guessed at', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+  const [district] = ctx.app.locations.byKind('district')
+
+  const response = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/search?q=cafe&locationId=${district.id}&coverageLevel=moon`,
+  })
+  assert.equal(response.statusCode, 400)
+})
+
+test('every surface the search route advertises is one the database accepts', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  // The route enum and the search_event CHECK are the same vocabulary stated
+  // twice, and they drifted: the route offered surfaces the column rejected, and
+  // the failure surfaced as a 500 from inside the write transaction rather than a
+  // 400 at the edge. The constraint is read out of SQLite so the test fails the
+  // next time someone widens one side and forgets the other.
+  const schema = ctx.app.db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'search_event'")
+    .get().sql
+  const at = String(schema).indexOf('surface IN')
+  assert.ok(at >= 0, 'the surface constraint should be readable')
+  // matchAll hands back an iterator, so it has to be spread before it can be
+  // indexed. Spreading inside the indexing expression yields undefined and a
+  // confusing TypeError instead of the list.
+  const constraint = [...schema.matchAll(/surface IN \(([^)]*)\)/g)][0]?.[1]
+  assert.ok(constraint, 'the constraint list should parse')
+  const allowed = new Set([...constraint.matchAll(/'([^']+)'/g)].map((m) => m[1]))
+  assert.ok(allowed.size > 0, 'the constraint should still name some surfaces')
+
+  // The route's own enum is not reachable from the test - the api registers no
+  // swagger document, and Fastify's own schema store is not exposed here - so the
+  // "advertised" half of the contract is pinned directly. The important half is
+  // the one the constraint gives us for free: every surface the column accepts has
+  // to be either offered and working, or refused at the edge with a 400.
+  const offered = ['web', 'api']
+
+  for (const value of offered) {
+    assert.ok(allowed.has(value), `"${value}" is offered by the route but rejected by the column`)
+  }
+
+  for (const value of offered) {
+    const response = await ctx.server.inject({
+      method: 'GET',
+      url: `/api/v1/search?q=cafe&surface=${value}`,
+    })
+    assert.equal(response.statusCode, 200, `surface=${value} should work: ${response.body}`)
+  }
+
+  // Anything the column allows but the route does not offer has to be a clean
+  // refusal. This is the bug that was fixed: these used to be accepted by
+  // validation and then rejected by the CHECK, which surfaced as a 500 from
+  // inside the write transaction instead of a 400 at the edge.
+  const withheld = [...allowed].filter((value) => !offered.includes(value))
+  for (const value of withheld) {
+    const response = await ctx.server.inject({
+      method: 'GET',
+      url: `/api/v1/search?q=cafe&surface=${value}`,
+    })
+    assert.equal(
+      response.statusCode,
+      400,
+      `surface=${value} is not offered, so it must be a 400 rather than a ${response.statusCode}`,
+    )
+  }
+  assert.ok(withheld.length > 0, 'the column should still allow platform-owned surfaces')
+})
+
+test('an anonymous caller cannot file demand under a system attribution', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  // 'admin', 'import' and 'system' are the platform's own labels. They are in the
+  // column because the platform writes them, and they are not in the route enum
+  // because this route has no session - accepting them would let anyone forge
+  // where a search came from.
+  for (const surface of ['admin', 'import', 'system', 'mobile', 'assistant']) {
+    const response = await ctx.server.inject({
+      method: 'GET',
+      url: `/api/v1/search?q=cafe&surface=${surface}`,
+    })
+    assert.equal(response.statusCode, 400, `surface=${surface} should not be accepted from the public`)
+  }
+})
+
+test('the verbatim query is deleted before the aggregate it belongs to', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+  {
+    const before = new Date()
+    ctx.app.demand.recordSearch({
+      query: 'wheel alignment',
+      totalResults: 0,
+      actorSeed: 'retention-actor',
+      at: before,
+    })
+
+    const event = ctx.app.db
+      .prepare('SELECT expires_at FROM search_event WHERE query_hash <> ?')
+      .get('suppressed')
+    const raw = ctx.app.db
+      .prepare('SELECT expires_at FROM search_query_raw WHERE raw_query = ?')
+      .get('wheel alignment')
+
+    const days = (row) =>
+      Math.round((new Date(row.expires_at) - before.getTime()) / 86400000)
+
+    assert.equal(days(event), 90, 'a search event should live the event window')
+    assert.equal(days(raw), 30, 'the verbatim query should live the raw-text window')
+
+    // The important half is the relationship, not the numbers. search_query_raw
+    // holds the verbatim text and the salt, so it is the only row here that can
+    // name a person, and it must not outlive the tokens the engine reads.
+    //
+    // This is also the only ordering the schema can honour: the raw row's
+    // search_event_id is ON DELETE CASCADE, so if the raw window were the longer
+    // one the text would still be destroyed at the event's expiry and the raw
+    // setting would be a knob that quietly does nothing. Asserted against the
+    // config rather than the constants so the two cannot drift apart again.
+    assert.ok(
+      ctx.config.privacy.rawSearchRetentionDays < ctx.config.privacy.eventRetentionDays,
+      'identifying text must expire before the pseudonymous aggregate it belongs to',
+    )
+  }
+})
