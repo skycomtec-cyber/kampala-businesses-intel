@@ -13,10 +13,10 @@
  */
 
 import process from 'node:process'
-import readline from 'node:readline'
 import { loadConfig } from '../src/config.js'
 import { openApp } from '../src/db/index.js'
 import { assertRole } from '../src/core/auth.js'
+import { createReader } from '../src/core/prompt.js'
 
 function parseArgs(argv) {
   const options = { role: 'admin' }
@@ -28,38 +28,6 @@ function parseArgs(argv) {
     else if (arg === '--quiet') options.quiet = true
   }
   return options
-}
-
-/**
- * A line reader that can hide what it is reading.
- *
- * readline has no echo control, so the password prompt replaces the writer that
- * echoes the typed characters with one that passes the prompt through and drops
- * everything after it. Good enough for a one-shot CLI, and it avoids taking a
- * dependency on a prompt library for two questions.
- */
-function createReader() {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-  const echo = rl._writeToOutput
-  return {
-    ask(question, { hidden = false } = {}) {
-      return new Promise((resolve) => {
-        if (hidden) {
-          // Pass the prompt through, drop the characters that follow it.
-          rl._writeToOutput = function muted(stringToWrite) {
-            if (stringToWrite.startsWith(question)) echo.call(this, question)
-          }
-        }
-        rl.question(question, (answer) => {
-          rl._writeToOutput = echo
-          resolve(answer)
-        })
-      })
-    },
-    close() {
-      rl.close()
-    },
-  }
 }
 
 /** Piped input, so a launcher step can feed answers in without a terminal. */
@@ -99,8 +67,8 @@ try {
     process.exit(0)
   }
 
-  // Exactly one thing may own stdin. A readline interface and a raw 'data'
-  // listener attached at the same time split the input between them, and the
+  // Exactly one thing may own stdin. Reading piped input and the interactive
+  // prompt attached at the same time split the input between them, and the
   // account then gets created with half an email address.
   const piped = options.email || process.stdin.isTTY ? [] : await readStdinLines()
   const suppliedPassword = process.env.KIP_ADMIN_PASSWORD ?? piped[1]

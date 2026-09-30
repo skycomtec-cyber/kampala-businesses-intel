@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
-
+import { createReader, recorder, fakeTerminal } from '../src/core/prompt.js'
 import { loadConfig } from '../src/config.js'
 import { openApp } from '../src/db/index.js'
 
@@ -142,4 +142,101 @@ test('create-admin refuses a second account without being told whose', async () 
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true })
   }
+})
+
+/*
+ * The interactive prompt, driven through a stand-in for a terminal.
+ *
+ * This exists because of a hang that no amount of API testing could have found.
+ * Pinokio's browser terminals are a JavaScript PTY, and a PTY bridge is free to
+ * deliver Enter as LF where a real terminal sends CR. The old prompt was built
+ * on readline's private `_writeToOutput`, and under that terminal the line
+ * refresh was swallowed by the echo muter, so the password prompt looked frozen
+ * while the process waited for input nobody could see was still wanted. Reading
+ * the terminal directly is the fix; these cases are what hold it in place.
+ */
+
+const ENTER = { cr: '\r', lf: '\n' }
+
+for (const [name, eol] of Object.entries(ENTER)) {
+  test(`the password prompt accepts a line ended with ${name.toUpperCase()}`, async () => {
+    const input = fakeTerminal()
+    const out = recorder()
+    const reader = createReader(input, out)
+
+    const answer = reader.ask('Password: ', { hidden: true })
+    input.write(`Kampala-Reference-2026${eol}`)
+
+    assert.equal(await answer, 'Kampala-Reference-2026')
+    reader.close()
+  })
+}
+
+test('a hidden prompt never echoes what is typed', async () => {
+  const input = fakeTerminal()
+  const out = recorder()
+  const reader = createReader(input, out)
+
+  const answer = reader.ask('Password: ', { hidden: true })
+  input.write('hunter2-hunter2')
+
+  // Nothing is drawn while the characters are being typed.
+  assert.equal(out.text(), 'Password: ')
+
+  input.write('\r')
+  assert.equal(await answer, 'hunter2-hunter2')
+  assert.equal(out.text(), 'Password: \n')
+  reader.close()
+})
+
+test('a visible prompt echoes what is typed', async () => {
+  const input = fakeTerminal()
+  const out = recorder()
+  const reader = createReader(input, out)
+
+  const answer = reader.ask('Email: ')
+  input.write('ops@kampala.test')
+  assert.equal(out.text(), 'Email: ops@kampala.test')
+
+  input.write('\r')
+  assert.equal(await answer, 'ops@kampala.test')
+  reader.close()
+})
+
+for (const [name, key] of Object.entries({ backspace: '\b', delete: '\u007f' })) {
+  test(`${name} removes a character instead of becoming part of the answer`, async () => {
+    const input = fakeTerminal()
+    const out = recorder()
+    const reader = createReader(input, out)
+
+    const answer = reader.ask('Email: ')
+    input.write(`ops@kampala.testX${key}Y\r`)
+    assert.equal(await answer, 'ops@kampala.testY')
+    reader.close()
+  })
+}
+
+test('the prompt takes the terminal out of raw mode and lets go of it', async () => {
+  const input = fakeTerminal()
+  const reader = createReader(input, recorder())
+
+  const answer = reader.ask('Email: ')
+  input.write('ops@kampala.test\r')
+  await answer
+
+  // Left in raw mode, node would not exit: stdin keeps the event loop alive.
+  assert.equal(input.rawMode(), false)
+  assert.equal(input.listenerCount('data'), 0)
+  reader.close()
+})
+
+test('Ctrl+C at the password prompt gives up rather than storing the line', async () => {
+  const input = fakeTerminal()
+  const reader = createReader(input, recorder())
+
+  const answer = reader.ask('Password: ', { hidden: true })
+  input.write('half-typed-secret\u0003')
+
+  await assert.rejects(answer, /Cancelled/)
+  reader.close()
 })
