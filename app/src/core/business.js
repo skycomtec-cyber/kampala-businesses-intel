@@ -51,6 +51,25 @@ export const PRODUCT_CONDITIONS = Object.freeze([
 ])
 
 /**
+ * Whether a product is currently for sale.
+ *
+ * This list has to stay identical to the CHECK constraint on `product.status` in
+ * 003_supply.sql, for the same reason `PRICE_UNITS` has to: the route used to spell
+ * the vocabulary out as `['available','reserved','sold','hidden']`, which named a
+ * state the database forbids and omitted the one it allows. So an operator could not
+ * mark a sold item `withdrawn` - the request was refused as a validation error - and
+ * nothing in the codebase could enumerate the states for a form.
+ *
+ * Declaring it here is the fix; keeping it here is what stops it drifting again.
+ */
+export const PRODUCT_STATUSES = Object.freeze([
+  'available',
+  'reserved',
+  'sold',
+  'withdrawn',
+])
+
+/**
  * The units a service price can be quoted in.
  *
  * This list has to stay identical to the CHECK constraint on

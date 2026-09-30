@@ -10,6 +10,7 @@ module.exports = {
     let running = {
       install: info.running("install.js"),
       start: info.running("start.js"),
+      demo: info.running("demo.js"),
       update: info.running("update.js"),
       reset: info.running("reset.js"),
       admin: info.running("create-admin.js"),
@@ -47,6 +48,34 @@ module.exports = {
         href: "create-admin.js",
       }]
     }
+    if (running.demo) {
+      // The demonstration gets its own menu while it is up, because both servers
+      // being live at once is the normal case and the operator needs to tell them
+      // apart. The labels say which database each one is on: the whole difference
+      // between them is invisible from the web UI.
+      let local = info.local("demo.js")
+      let url = local && local.url
+      let menu = []
+      if (url) {
+        menu.push({
+          default: true,
+          icon: "fa-solid fa-rocket",
+          text: "Open Demonstration",
+          href: url,
+        })
+      }
+      menu.push({
+        default: !url,
+        icon: "fa-solid fa-terminal",
+        text: url ? "Demo Server Terminal" : "Starting Demonstration",
+        href: "demo.js",
+      }, {
+        icon: "fa-solid fa-power-off",
+        text: "<div><strong>Start</strong><div>The real install, on its own database</div></div>",
+        href: "start.js",
+      })
+      return menu
+    }
     if (!installed) {
       return [{
         default: true,
@@ -78,6 +107,10 @@ module.exports = {
         icon: "fa-solid fa-user-plus",
         text: "<div><strong>Create Admin Account</strong><div>There is no public sign-up</div></div>",
         href: "create-admin.js",
+      }, {
+        icon: "fa-solid fa-flask",
+        text: "<div><strong>Run the Demonstration</strong><div>A separate database full of invented traders. Useful when the real one is too empty to show anything.</div></div>",
+        href: "demo.js",
       })
       return menu
     }
@@ -92,14 +125,18 @@ module.exports = {
       text: "<div><strong>Create Admin Account</strong><div>There is no public sign-up</div></div>",
       href: "create-admin.js",
     }, {
+      icon: "fa-solid fa-flask",
+      text: "<div><strong>Run the Demonstration</strong><div>A separate database full of invented traders. Useful when the real one is too empty to show anything.</div></div>",
+      href: "demo.js",
+    }, {
       icon: "fa-solid fa-plug",
       text: "Update",
       href: "update.js",
     }, {
       icon: "fa-regular fa-circle-xmark",
-      text: "<div><strong>Reset</strong><div>Deletes the database and every dependency</div></div>",
+      text: "<div><strong>Reset</strong><div>Deletes both databases and every dependency</div></div>",
       href: "reset.js",
-      confirm: "This deletes the database, every operator account and every listing. Are you sure?"
+      confirm: "This deletes both databases, every operator account and every listing, including the demonstration. Are you sure?"
     }]
   }
 }

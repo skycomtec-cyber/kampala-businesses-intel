@@ -130,12 +130,13 @@ export function createIntelligenceRepository(db, config) {
   const upsertOpportunity = db.prepare(
     `INSERT INTO opportunity (
        id, gap_snapshot_id, keyword, location_id, location_name, coverage_level,
-       category_id, severity, score, estimated_monthly_searches, supply_count,
-       trend_direction, rationale, suggested_action, state, created_at, updated_at
+       category_id, severity, score, distinct_actors, estimated_monthly_searches,
+       supply_count, trend_direction, rationale, suggested_action, state,
+       created_at, updated_at
      ) VALUES (
        @id, @gapSnapshotId, @keyword, @locationId, @locationName, @coverageLevel,
-       @categoryId, @severity, @score, @estimatedMonthlySearches, @supplyCount,
-       @trendDirection, @rationale, @suggestedAction, @state, @now, @now
+       @categoryId, @severity, @score, @distinctActors, @estimatedMonthlySearches,
+       @supplyCount, @trendDirection, @rationale, @suggestedAction, @state, @now, @now
      )
       ON CONFLICT(keyword, IFNULL(location_id, '')) DO UPDATE SET
        gap_snapshot_id = excluded.gap_snapshot_id,
@@ -144,6 +145,7 @@ export function createIntelligenceRepository(db, config) {
        category_id = excluded.category_id,
        severity = excluded.severity,
        score = excluded.score,
+       distinct_actors = excluded.distinct_actors,
        estimated_monthly_searches = excluded.estimated_monthly_searches,
        supply_count = excluded.supply_count,
        trend_direction = excluded.trend_direction,
@@ -539,6 +541,11 @@ export function createIntelligenceRepository(db, config) {
             categoryId: entry.categoryId ?? null,
             severity: entry.severity ?? 'none',
             score: entry.score ?? 0,
+            // Carried onto the row rather than joined at read time, so the route's
+            // k-anonymity filter has a real number to judge and an opportunity's
+            // visibility does not change underneath it when the next run replaces
+            // the snapshot it was derived from. See migration 011.
+            distinctActors: entry.distinctActors ?? 0,
             estimatedMonthlySearches: entry.estimatedMonthlySearches ?? 0,
             supplyCount: entry.supplyCount ?? 0,
             trendDirection: entry.trendDirection ?? 'insufficient_data',

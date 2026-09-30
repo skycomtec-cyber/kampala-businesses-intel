@@ -6,7 +6,14 @@ import {
   toPage,
   uuidPattern,
 } from '../lib/http.js'
+// `suppressIfBelowK` answers one question - may this aggregate leave? - and returns
+// a decision, not the row's measurements: `{visible, suppressed, row, kThreshold}`.
+// The measurements are read off the row itself below. Reading them off the verdict
+// was the second half of the bug in migration 011: `verdict.distinctActors` was
+// `undefined` on every row, so the published actor count was missing even once the
+// underlying column existed.
 import { suppressIfBelowK } from '../../core/privacy.js'
+import { GAP_SEVERITIES, OPPORTUNITY_STATES } from '../../core/intelligence.js'
 
 /**
  * Public opportunity insights.
@@ -38,8 +45,19 @@ export default async function insightRoutes(fastify, { config, app }) {
           type: 'object',
           properties: {
             locationId: { type: 'string', pattern: uuidPattern },
-            state: { type: 'string', enum: ['new', 'reviewing', 'actioned', 'dismissed'] },
-            severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+            // These two were the worst of the vocabulary drift, because they made the
+            // endpoint look filterable while filtering nothing. The route asked for
+            // `new`, `reviewing` and `actioned` on a column whose CHECK allows
+            // `candidate`, `validating`, `actionable` and `acted_on`, and asked for
+            // `medium` on a severity the engine writes as `moderate`. So
+            // `?severity=moderate` was a 400 and `?severity=medium` always returned
+            // nothing: the one value an operator would reach for was the one value
+            // refused, and the value that was accepted could never occur.
+            //
+            // Both are now read from the engine rather than restated, so the two
+            // cannot disagree again.
+            state: { type: 'string', enum: [...OPPORTUNITY_STATES] },
+            severity: { type: 'string', enum: [...GAP_SEVERITIES] },
             includeDismissed: { type: 'boolean' },
             includeSuppressed: { type: 'boolean' },
             sort: { type: 'string', enum: ['score', 'recent', 'demand', 'severity'] },
@@ -66,8 +84,12 @@ export default async function insightRoutes(fastify, { config, app }) {
         const verdict = suppressIfBelowK(row, kThreshold)
         return {
           ...row,
-          distinctActors: verdict.suppressed ? null : verdict.distinctActors,
-          searches: verdict.suppressed ? null : verdict.searches,
+          distinctActors: verdict.suppressed ? null : row.distinctActors,
+          // `searches` is deliberately not mapped. There is no such column on
+          // `opportunity`, and the nearest thing that does exist,
+          // `estimatedMonthlySearches`, is a rounded projection rather than a count
+          // of people behind it. Nulling a field that was always `undefined`
+          // withheld nothing and implied a measurement the response never carried.
           suppressed: verdict.suppressed,
         }
       })
@@ -110,8 +132,9 @@ export default async function insightRoutes(fastify, { config, app }) {
       const verdict = suppressIfBelowK(opportunity, config.privacy.kThreshold)
       return single({
         ...opportunity,
-        distinctActors: verdict.suppressed ? null : verdict.distinctActors,
-        searches: verdict.suppressed ? null : verdict.searches,
+        // As in the list route: the measurement comes off the row, not off the
+        // decision, and there is no `searches` column to report.
+        distinctActors: verdict.suppressed ? null : opportunity.distinctActors,
         suppressed: verdict.suppressed,
       })
     },

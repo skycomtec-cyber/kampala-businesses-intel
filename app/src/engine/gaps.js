@@ -128,6 +128,10 @@ export function runGapEngine(repositories, options = {}) {
           locationName: gap.locationName,
           coverageLevel: null,
           categoryId: gap.categoryId,
+          // The privacy floor is applied to this row again on the way out, by the
+          // public route, so the count has to travel with it. Without it the route
+          // reads nothing, treats the row as having zero actors, and withholds it.
+          distinctActors: gap.distinctActors,
           ...deriveOpportunity({
             gap,
             trend,
@@ -343,14 +347,28 @@ function measureSupply({ searchIndex }, day, gaps) {
 /**
  * The window, as day strings.
  *
- * Yesterday, not today: a day is only complete once it has been rolled up, and
- * the last day of a window that has not been rolled up yet would drag the average
- * down and read as a fall in demand. Ending on yesterday means every day in the
- * window is one the rollup has already written.
+ * Today, not yesterday.
+ *
+ * This used to end the window on yesterday, on the reasoning that a day is only
+ * complete once it has been rolled up and an unrolled day would drag the average
+ * down and read as a fall in demand. The reasoning was sound and the conclusion
+ * was not: `maintenance.js` rolls up *before* it measures, and it rolls up today,
+ * so the day this excluded was a day the engine had already measured by proxy.
+ *
+ * The cost was that the newest data was structurally invisible, which on a young
+ * platform is not a rounding error but the whole window. Both recorded runs on the
+ * live database measured `searches_seen: 0` over a window that ended the day before
+ * the only searches that existed. The engine had been collecting demand it could
+ * not read since the first commit.
+ *
+ * The safety property the old window was protecting still holds, and it holds
+ * elsewhere: a day that has not been rolled up contributes no demand rather than
+ * being read as a day of silence, so running the engine without a fresh rollup
+ * under-reports rather than mis-reports. `analyse.js` depends on that, because it
+ * deliberately does not roll up.
  */
 function resolveWindow(windowDays, now = new Date()) {
   const end = new Date(now)
-  end.setUTCDate(end.getUTCDate() - 1)
   const start = new Date(end)
   start.setUTCDate(start.getUTCDate() - (windowDays - 1))
   return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) }

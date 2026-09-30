@@ -87,8 +87,8 @@ function publishBusiness(app, { city, category, ...input }) {
 /**
  * Records one search from a distinct actor.
  *
- * `at` matters: the rollup is by day, and the engine reads a window ending
- * yesterday, so a search has to land inside that window to be measured at all.
+ * `at` matters: the rollup is by day, and the engine reads a window ending today,
+ * so a search has to land inside that window to be measured at all.
  */
 function search(app, { query, locationId, coverageLevel, totalResults, actorSeed, at, inAreaResults }) {
   return app.demand.recordSearch({
@@ -102,10 +102,22 @@ function search(app, { query, locationId, coverageLevel, totalResults, actorSeed
   })
 }
 
-/** A day inside the engine's window: yesterday, plus `offset` days back. */
-function dayOffsetFromYesterday(offset) {
+/**
+ * A day inside the engine's window: `offset` days back from today, so 0 is today.
+ *
+ * The engine reads a window ending *today*, and the tests below deliberately reach
+ * back one and two days rather than placing everything on today, because a gap
+ * engine that can only ever see a single day of demand is not being tested at all.
+ *
+ * This helper used to be `dayOffsetFromYesterday`, with 0 meaning yesterday, and
+ * every call site was written to reach back past the end of the window. That is the
+ * clearest single statement of the bug it was working around: the whole suite
+ * avoided today because today was invisible, and so nothing ever failed when it
+ * stayed that way.
+ */
+function daysAgo(offset) {
   const date = new Date()
-  date.setUTCDate(date.getUTCDate() - 1 - offset)
+  date.setUTCDate(date.getUTCDate() - offset)
   date.setUTCHours(9, 0, 0, 0)
   return date
 }
@@ -126,10 +138,10 @@ test('a run measures demand against supply and promotes opportunities', () => {
         coverageLevel: 'city',
         totalResults: 0,
         actorSeed: `welder-${index}`,
-        at: dayOffsetFromYesterday(1),
+        at: daysAgo(2),
       })
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(1).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(2).toISOString().slice(0, 10))
 
     const run = runGapEngine(app)
 
@@ -269,10 +281,10 @@ test('a well supplied phrase does not become a gap', () => {
           coverageLevel: 'city',
           totalResults: 9,
           actorSeed: `cake-${offset}-${index}`,
-          at: dayOffsetFromYesterday(offset),
+          at: daysAgo(offset + 1),
         })
       }
-      app.demand.rollupDay(dayOffsetFromYesterday(offset).toISOString().slice(0, 10))
+      app.demand.rollupDay(daysAgo(offset + 1).toISOString().slice(0, 10))
     }
 
     const run = runGapEngine(app)
@@ -298,10 +310,10 @@ test('a signal below the k-anonymity floor is stored defused and never promoted'
         query: 'hydrotherapy',
         totalResults: 0,
         actorSeed: `private-${index}`,
-        at: dayOffsetFromYesterday(1),
+        at: daysAgo(2),
       })
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(1).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(2).toISOString().slice(0, 10))
 
     const run = runGapEngine(app)
 
@@ -339,10 +351,10 @@ test('re-running refreshes a countrywide opportunity instead of duplicating it',
         coverageLevel: 'country',
         totalResults: 0,
         actorSeed: `grower-${index}`,
-        at: dayOffsetFromYesterday(1),
+        at: daysAgo(2),
       })
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(1).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(2).toISOString().slice(0, 10))
 
     const first = runGapEngine(app)
     const second = runGapEngine(app)
@@ -381,10 +393,10 @@ test('a rising phrase is annotated as rising and its opportunity says so', () =>
           coverageLevel: 'city',
           totalResults: 0,
           actorSeed: `baseline-${offset}-${actor}`,
-          at: dayOffsetFromYesterday(offset),
+          at: daysAgo(offset + 1),
         })
       }
-      app.demand.rollupDay(dayOffsetFromYesterday(offset).toISOString().slice(0, 10))
+      app.demand.rollupDay(daysAgo(offset + 1).toISOString().slice(0, 10))
     }
     for (let offset = 0; offset < 7; offset += 1) {
       for (let actor = 0; actor < 30; actor += 1) {
@@ -394,10 +406,10 @@ test('a rising phrase is annotated as rising and its opportunity says so', () =>
           coverageLevel: 'city',
           totalResults: 0,
           actorSeed: `spike-${offset}-${actor}`,
-          at: dayOffsetFromYesterday(offset),
+          at: daysAgo(offset + 1),
         })
       }
-      app.demand.rollupDay(dayOffsetFromYesterday(offset).toISOString().slice(0, 10))
+      app.demand.rollupDay(daysAgo(offset + 1).toISOString().slice(0, 10))
     }
 
     const run = runGapEngine(app)
@@ -449,19 +461,19 @@ test('a run records daily supply metrics and the public counters', () => {
         coverageLevel: 'city',
         totalResults: 0,
         actorSeed: `baker-${index}`,
-        at: dayOffsetFromYesterday(1),
+        at: daysAgo(2),
       })
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(1).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(2).toISOString().slice(0, 10))
 
     const run = runGapEngine(app)
-    const yesterday = dayOffsetFromYesterday(0).toISOString().slice(0, 10)
+    const today = daysAgo(0).toISOString().slice(0, 10)
     const supplyAt = (locationId) =>
       app.intelligence.supplySeries({
         locationId,
         categoryId: null,
-        from: yesterday,
-        to: yesterday,
+        from: today,
+        to: today,
       })
 
     // The scopes are the places the run actually measured: Kampala, because a gap
@@ -514,8 +526,10 @@ test('a scope the run stops measuring is dropped, not left holding a stale count
       description: 'Boat engine servicing on the lake.',
     })
 
-    // Demand for the same phrase in both cities, two days back, so a two-day
-    // window sees both and a one-day window sees neither.
+    // Demand for the same phrase in both cities, yesterday, so a two-day window
+    // ending today sees both and a one-day window ending today sees neither. The
+    // placement is one day later than it used to be, and for the same reason: the
+    // window moved forward a day, so the fixture had to move with it.
     for (const location of [city, other]) {
       for (let index = 0; index < 12; index += 1) {
         search(app, {
@@ -524,19 +538,19 @@ test('a scope the run stops measuring is dropped, not left holding a stale count
           coverageLevel: 'city',
           totalResults: 0,
           actorSeed: `baker-${location.id}-${index}`,
-          at: dayOffsetFromYesterday(1),
+          at: daysAgo(1),
         })
       }
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(1).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(1).toISOString().slice(0, 10))
 
-    // The window always ends yesterday, so a two-day window covers the demand and
-    // a one-day window does not. Both runs write the same day of the series.
+    // The window ends today, so a two-day window covers the demand and a one-day
+    // window does not. Both runs write the same day of the series.
     runGapEngine(app, { windowDays: 2 })
 
-    const yesterday = dayOffsetFromYesterday(0).toISOString().slice(0, 10)
+    const today = daysAgo(0).toISOString().slice(0, 10)
     const supplyAt = (locationId) =>
-      app.intelligence.supplySeries({ locationId, categoryId: null, from: yesterday, to: yesterday })
+      app.intelligence.supplySeries({ locationId, categoryId: null, from: today, to: today })
     assert.equal(supplyAt(city.id).length, 1, 'Kampala was measured')
     assert.equal(supplyAt(other.id).length, 1, 'Jinja was measured')
 
@@ -583,18 +597,18 @@ test('a location-less gap does not produce two rows for the same national census
         coverageLevel: null,
         totalResults: 0,
         actorSeed: `baker-${index}`,
-        at: dayOffsetFromYesterday(0),
+        at: daysAgo(1),
       })
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(0).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(1).toISOString().slice(0, 10))
     runGapEngine(app)
 
-    const yesterday = dayOffsetFromYesterday(0).toISOString().slice(0, 10)
+    const today = daysAgo(0).toISOString().slice(0, 10)
     const national = app.intelligence.supplySeries({
       locationId: null,
       categoryId: null,
-      from: yesterday,
-      to: yesterday,
+      from: today,
+      to: today,
     })
     assert.equal(national.length, 1)
     assert.equal(national[0].businessCount, 1)
@@ -629,10 +643,10 @@ test('the opportunity floor keeps weak findings as gaps', () => {
         query: 'kayaking',
         totalResults: 3,
         actorSeed: `kayak-${index}`,
-        at: dayOffsetFromYesterday(1),
+        at: daysAgo(2),
       })
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(1).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(2).toISOString().slice(0, 10))
 
     const permissive = runGapEngine(app, { opportunityFloor: 'low' })
     assert.equal(permissive.gapsWritten, 1)
@@ -675,10 +689,10 @@ test('a failed run is recorded as failed rather than left running', () => {
         query: 'scaffolding',
         totalResults: 0,
         actorSeed: `scaffold-${index}`,
-        at: dayOffsetFromYesterday(1),
+        at: daysAgo(2),
       })
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(1).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(2).toISOString().slice(0, 10))
 
     // Break the supply measurement the way a real fault would. The point of the
     // test is what the run ledger says afterwards, not what went wrong.
@@ -706,7 +720,7 @@ test('a failed run is recorded as failed rather than left running', () => {
   }
 })
 
-test('the window ends yesterday and covers the configured span', () => {
+test('the window ends today and covers the configured span', () => {
   const { app, cleanup } = freshApp()
   try {
     const { city } = seedReference(app)
@@ -717,10 +731,10 @@ test('the window ends yesterday and covers the configured span', () => {
         coverageLevel: 'city',
         totalResults: 0,
         actorSeed: `stone-${index}`,
-        at: dayOffsetFromYesterday(1),
+        at: daysAgo(2),
       })
     }
-    app.demand.rollupDay(dayOffsetFromYesterday(1).toISOString().slice(0, 10))
+    app.demand.rollupDay(daysAgo(2).toISOString().slice(0, 10))
 
     const run = runGapEngine(app)
     const start = new Date(`${run.windowStart}T00:00:00.000Z`)
@@ -728,10 +742,17 @@ test('the window ends yesterday and covers the configured span', () => {
     const spanDays = Math.round((end - start) / 86400000) + 1
 
     assert.equal(spanDays, WINDOW_DAYS, 'a 30-day window spans 30 days inclusive')
-    const startOfToday = new Date(`${dayOffsetFromYesterday(-1).toISOString().slice(0, 10)}T00:00:00.000Z`)
-    assert.ok(
-      end < startOfToday,
-      'the window stops before today, because today has not been rolled up yet',
+
+    // This used to assert the opposite, and the assertion is the bug in one line:
+    // the window ended yesterday "because today has not been rolled up yet", so the
+    // engine could never see the newest demand it had just collected. The rollup
+    // that matters runs before the engine in `maintenance.js`, so the newest day is
+    // always available by the time a run measures it.
+    const startOfToday = new Date(`${daysAgo(0).toISOString().slice(0, 10)}T00:00:00.000Z`)
+    assert.equal(
+      end.toISOString().slice(0, 10),
+      startOfToday.toISOString().slice(0, 10),
+      'the window ends today, so a run can measure the demand it just collected',
     )
     assert.equal(app.intelligence.gaps({ runId: run.id }).total, 1)
   } finally {
@@ -773,7 +794,7 @@ test('a window names the most specific coverage level it spans, not the largest 
   const { app, cleanup } = freshApp()
   try {
     const { city } = seedReference(app)
-    const toDay = (offset) => dayOffsetFromYesterday(offset).toISOString().slice(0, 10)
+    const toDay = (offset) => daysAgo(offset + 1).toISOString().slice(0, 10)
 
     // A daily signal is one phrase at one location, and the rollup's bucket key
     // leaves coverage_level out on purpose - so within a day there is a single
@@ -792,7 +813,7 @@ test('a window names the most specific coverage level it spans, not the largest 
           coverageLevel,
           totalResults: 0,
           actorSeed: `welder-${coverageLevel}-${index}`,
-          at: dayOffsetFromYesterday(offset),
+          at: daysAgo(offset + 1),
         })
       }
       app.demand.rollupDay(toDay(offset))

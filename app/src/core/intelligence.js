@@ -181,7 +181,14 @@ export function deriveOpportunity({ gap, trend, keyword, locationName }) {
     keyword,
     locationName,
     severity: gap.severity,
-    score: gap.score,
+    // `gapScore`, not `score`. The gap snapshot's column is `gap_score`, the
+    // repository camelises rows on the way out, and the camelised field is
+    // therefore `gapScore` - so reading `gap.score` here produced `undefined` and
+    // every opportunity was written with a score of zero. The default API sort is
+    // `score`, which made the "ranked" list rank nothing and return rows in
+    // whatever order SQLite found them. The field name is asserted in
+    // `test/insights.test.js` so the two cannot drift apart again silently.
+    score: gap.gapScore,
     estimatedMonthlySearches,
     trendDirection: trend.direction,
     rationale: drivers.join(' ') || 'Insufficient signal to state a rationale.',

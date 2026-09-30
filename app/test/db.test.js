@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { loadConfig } from '../src/config.js'
 import { openApp } from '../src/db/index.js'
+import { openDatabase } from '../src/db/driver.js'
 import { migrate } from '../src/db/migrator.js'
 import {
   computeGapScore,
@@ -14,6 +16,8 @@ import {
   demandWeight,
   supplyAdequacy,
 } from '../src/core/intelligence.js'
+
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
  * The data layer's own tests.
@@ -81,30 +85,122 @@ function seedReference(app) {
 test('migrations are idempotent and recorded', () => {
   const { app, cleanup } = freshApp()
   try {
+    // The ledger is listed explicitly rather than counted from the directory,
+    // because the point of this test is that a new migration is a deliberate act
+    // somebody has to come here and acknowledge. Deriving the list from the folder
+    // would make adding one invisible, which is the opposite of what it is for.
+    //
+    // The count is taken from the list rather than written out again, so the two
+    // cannot drift into disagreeing with each other.
+    const expected = [
+      '001_platform_identity',
+      '002_reference',
+      '003_supply',
+      '004_search',
+      '005_demand',
+      '006_intelligence',
+      '007_marketplace_access_tokens',
+      '008_audit_reason',
+      '009_catalogue_ingestion',
+      '010_opportunity_identity',
+      '011_opportunity_actor_count',
+    ]
+
     // Re-running the migrator on an up-to-date database must be a no-op, or the
     // launcher would re-apply the schema on every start.
     const results = migrate(app.db)
-    assert.equal(results.length, 10)
+    assert.equal(results.length, expected.length)
     assert.ok(results.every((row) => row.status === 'skipped'))
 
     const ledger = app.db.prepare('SELECT id FROM schema_migration ORDER BY id').all()
     assert.deepEqual(
       ledger.map((row) => row.id),
-      [
-        '001_platform_identity',
-        '002_reference',
-        '003_supply',
-        '004_search',
-        '005_demand',
-        '006_intelligence',
-        '007_marketplace_access_tokens',
-        '008_audit_reason',
-        '009_catalogue_ingestion',
-        '010_opportunity_identity',
-      ],
+      expected,
     )
   } finally {
     cleanup()
+  }
+})
+
+test('011 backfills the actor count onto opportunities that predate the column', () => {
+  // The upgrade path, which the ledger test above cannot reach: a database that
+  // already ran the engine against the old schema. `ALTER TABLE ... ADD COLUMN
+  // ... DEFAULT 0` alone would silently mark every pre-existing opportunity as
+  // below the floor, hiding the entire back catalogue on the first start after
+  // the upgrade - and invisibly, because the rows would still be there.
+  //
+  // So the migration has to copy the count off the snapshot the opportunity was
+  // derived from, and this is the only test that proves it does.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kip-upgrade-'))
+  const migrations = path.join(APP_ROOT, 'src', 'db', 'migrations')
+  const before = fs.mkdtempSync(path.join(os.tmpdir(), 'kip-before-'))
+  for (const name of fs.readdirSync(migrations)) {
+    if (name === '011_opportunity_actor_count.sql') continue
+    fs.copyFileSync(path.join(migrations, name), path.join(before, name))
+  }
+
+  const config = loadConfig({ dataDir: dir, databaseFile: path.join(dir, 'old.db') })
+  // Deliberately not `openApp`: that migrates with the full directory on the way
+  // in, which is the very thing this test needs to stage. This opens the file.
+  const db = openDatabase(config)
+  try {
+    // Stand up a database from the pre-011 schema only.
+    migrate(db, { dir: before })
+    assert.equal(
+      db.prepare('PRAGMA table_info(opportunity)').all().some((c) => c.name === 'distinct_actors'),
+      false,
+      'sanity: the column genuinely does not exist yet',
+    )
+
+    const run = db
+      .prepare("INSERT INTO intelligence_run (id, kind, status) VALUES ('r1', 'opportunities', 'completed')")
+      .run()
+    assert.equal(run.changes, 1)
+
+    // Two gaps: one with a provable actor count, one with none.
+    db.prepare(
+      `INSERT INTO gap_snapshot (id, run_id, phrase, term, ngram_size, distinct_actors, searches)
+       VALUES ('g-yes', 'r1', 'granite worktop', 'granite worktop', 2, 30, 412),
+              ('g-no',  'r1', 'mystery trade',  'mystery trade',  2,  0,   3)`,
+    ).run()
+
+    // Opportunities in the shape the old engine wrote: no actor count at all,
+    // and one with no parent snapshot, which is exactly the case a join cannot
+    // rescue and which must stay hidden rather than be guessed at.
+    db.prepare(
+      `INSERT INTO opportunity (id, gap_snapshot_id, keyword, severity, score, rationale, state)
+       VALUES ('o-yes',  'g-yes', 'granite worktop', 'critical', 1,   'derived', 'candidate'),
+              ('o-no',   'g-no',  'mystery trade',   'critical', 0.9, 'derived', 'candidate'),
+              ('o-orphan', NULL,  'orphan phrase',   'critical', 0.8, 'derived', 'candidate')`,
+    ).run()
+
+    // Now the real upgrade: the full directory, so 011 is the only pending one.
+    // `migrate` reports skipped migrations too, so the interesting half is the
+    // set that actually ran.
+    const results = migrate(db)
+    assert.deepEqual(
+      results.filter((row) => row.status !== 'skipped').map((row) => row.id),
+      ['011_opportunity_actor_count'],
+      '011 is the only migration the upgrade applies',
+    )
+
+    const rows = db.prepare('SELECT id, distinct_actors FROM opportunity ORDER BY id').all()
+    assert.deepEqual(rows, [
+      { id: 'o-no', distinct_actors: 0 },
+      { id: 'o-orphan', distinct_actors: 0 },
+      { id: 'o-yes', distinct_actors: 30 },
+    ])
+
+    // The two zeros are the whole point of the privacy design and must stay
+    // hidden: a snapshot that never cleared the floor, and an opportunity whose
+    // parent is gone, both resolve to "we cannot prove how many people this is".
+    const kThreshold = config.privacy.kThreshold
+    const visible = rows.filter((row) => row.distinct_actors >= kThreshold).map((row) => row.id)
+    assert.deepEqual(visible, ['o-yes'], 'only the provable row clears the floor')
+  } finally {
+    db.close()
+    fs.rmSync(dir, { recursive: true, force: true })
+    fs.rmSync(before, { recursive: true, force: true })
   }
 })
 

@@ -14,6 +14,18 @@ module.exports = {
       params: {
         path: "app/data"
       }
+    },
+    {
+      // The demonstration database too, at the launcher root rather than under
+      // `app`. It is regenerable - `demo.js` rebuilds it on the next run, because
+      // that step is conditional on the file being absent - so leaving it behind
+      // would be worse than useless: Reset would report the install as cleared
+      // while a full set of invented traders survived in a directory nobody
+      // remembers creating.
+      method: "fs.rm",
+      params: {
+        path: "data-demo"
+      }
     }
   ]
 }

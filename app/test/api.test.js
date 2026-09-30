@@ -3,11 +3,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { loadConfig } from '../src/config.js'
 import { openApp } from '../src/db/index.js'
 import { seedReferenceData } from '../src/seed/index.js'
 import { buildApi } from '../src/api/index.js'
+
 
 /**
  * The api layer's own tests.
@@ -24,7 +26,9 @@ import { buildApi } from '../src/api/index.js'
  *   - the rate limit and the capability table, which are how the platform refuses
  */
 
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PASSWORD = 'Kampala-Reference-2026'
+
 
 async function freshServer() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kip-api-'))
@@ -81,7 +85,15 @@ test('health, meta and the reference endpoints answer without a session', async 
   const health = await ctx.server.inject({ method: 'GET', url: '/healthz' })
   assert.equal(health.statusCode, 200)
   assert.equal(health.json().data.status, 'ok')
-  assert.equal(health.json().data.migrationsApplied, 10)
+  // Asserted as "every migration in the folder has been applied" rather than as a
+  // literal, so that adding a migration does not fail an unrelated health check.
+  // `test/db.test.js` is where the ledger is pinned to an explicit list; this one
+  // only cares that health reports a complete schema.
+  const migrations = health.json().data.migrationsApplied
+  const migrationDir = path.join(APP_ROOT, 'src', 'db', 'migrations')
+  const onDisk = fs.readdirSync(migrationDir).filter((name) => name.endsWith('.sql'))
+  assert.equal(migrations, onDisk.length)
+
 
   const meta = await ctx.server.inject({ method: 'GET', url: '/api/v1/meta' })
   assert.equal(meta.statusCode, 200)
@@ -851,6 +863,82 @@ test('an aggregate below the k-anonymity floor is withheld, not rounded', async 
   })
   assert.ok(publicOnly.json().data.every((row) => !row.suppressed))
 })
+
+test('the opportunity filters accept what the engine actually writes', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  // The route used to declare its own copy of the severity and state vocabulary,
+  // and both copies had drifted from the engine's. The failure mode was worse than
+  // a 400: the endpoint advertised filters that matched no row that could ever
+  // exist, so a client written against it got a valid 200 and an empty list. These
+  // assertions are all 200s, deliberately - a schema rejection would have been the
+  // kinder bug.
+  const accepted = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/insights/opportunities?severity=moderate',
+  })
+  assert.equal(accepted.statusCode, 200, accepted.body)
+
+  // `moderate` is the default opportunity floor, so the most common value an
+  // operator filters by is the one that has to work.
+  const candidate = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/insights/opportunities?state=candidate',
+  })
+  assert.equal(candidate.statusCode, 200, candidate.body)
+  assert.ok(Array.isArray(candidate.json().data))
+
+  // The drifted spellings are still refused. They are not silently aliased,
+  // because a client that had adapted to `medium` should find out now rather than
+  // keep receiving a permanently empty list.
+  const drifted = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/insights/opportunities?severity=medium',
+  })
+  assert.equal(drifted.statusCode, 400, '`medium` was never a real severity')
+  assert.equal(
+    (
+      await ctx.server.inject({
+        method: 'GET',
+        url: '/api/v1/insights/opportunities?state=new',
+      })
+    ).statusCode,
+    400,
+    '`new` was never a real opportunity state',
+  )
+
+  // The same class of drift on the product status field, which the route offered as
+  // `hidden` on a column whose CHECK allows `withdrawn` - so `hidden` was accepted
+  // and would have failed on insert, while the real value was refused. This one is
+  // a body schema rather than a filter, so the failure was a rejected request
+  // rather than an empty list.
+  const admin = await signIn(ctx, { email: 'vocabulary@example.com' })
+  const [district] = ctx.app.locations.byKind('district')
+  const business = ctx.app.businesses.create({
+    categoryId: leafCategory(ctx.app).id,
+    locationId: district.id,
+    status: 'active',
+    name: 'Kitchen supplies',
+  })
+
+  const withdrawn = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/admin/businesses/${business.id}/products`,
+    headers: admin.headers,
+    payload: { name: 'Granite worktop offcut', condition: 'new', status: 'withdrawn' },
+  })
+  assert.equal(withdrawn.statusCode, 201, withdrawn.body)
+
+  const hidden = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/admin/businesses/${business.id}/products`,
+    headers: admin.headers,
+    payload: { name: 'Granite worktop offcut', condition: 'new', status: 'hidden' },
+  })
+  assert.equal(hidden.statusCode, 400, '`hidden` was never a real product status')
+})
+
 
 test('a rate limited endpoint says so with a retry-after, and the limit is enforced', async (t) => {
   const ctx = await freshServer()

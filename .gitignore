@@ -44,6 +44,12 @@ Thumbs.db
 # files. All of it is rebuilt by `npm run migrate` plus the reference import, and
 # none of it belongs in version control.
 app/data/
+# The demonstration database, at the launcher root rather than under `app`. It is
+# a generated artefact like the real one - rebuilt by `npm run seed:demo` or by the
+# `demo.js` launcher step - and it is invented content, so it is the last thing that
+# belongs in version control. It also sits outside `app/`, so the `app/data/` rule
+# above does not reach it.
+data-demo/
 /AGENTS.md
 /CLAUDE.md
 /GEMINI.md

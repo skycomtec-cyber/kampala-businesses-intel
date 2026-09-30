@@ -2,6 +2,7 @@ import { paged, single, toPage, toText, uuidPattern, idParamSchema } from '../..
 import {
   BUSINESS_STATUSES,
   PRODUCT_CONDITIONS,
+  PRODUCT_STATUSES,
   CONTACT_KINDS,
 } from '../../../core/business.js'
 import { REVIEW_ACTIONS, REVIEW_STATES } from '../../../core/catalogue.js'
@@ -88,7 +89,7 @@ const productBodySchema = {
     currency: { type: 'string', minLength: 3, maxLength: 3 },
     /** Recycled stock is the Second Life Electronics vertical, not a by-product. */
     isRecyclable: { type: 'boolean' },
-    status: { type: 'string', enum: ['available', 'reserved', 'sold', 'hidden'] },
+    status: { type: 'string', enum: [...PRODUCT_STATUSES] },
   },
 }
 
