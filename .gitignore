@@ -40,9 +40,17 @@ Thumbs.db
 ~*
 /logs/
 /cache/
-# The SQLite database, its WAL/SHM siblings, and any reference import staging
-# files. All of it is rebuilt by `npm run migrate` plus the reference import, and
-# none of it belongs in version control.
+# Coverage output, if a run ever writes it. The suite uses node --test with no
+# reporter configured, so this exists for a local `c8` run rather than for CI.
+coverage/
+/.npm/
+*.tsbuildinfo
+# The SQLite database, its WAL/SHM siblings, the generated session secret, the
+# live-process lock, and the backups directory. All of it is rebuilt by
+# `npm run migrate` plus the reference import, and none of it belongs in version
+# control - except the backups, which are the only copy of anything not
+# re-imported, and are ignored by the same rule only because they sit inside it.
+# If KIP_DATA_DIR is pointed somewhere else, that directory needs its own rule.
 app/data/
 # The demonstration database, at the launcher root rather than under `app`. It is
 # a generated artefact like the real one - rebuilt by `npm run seed:demo` or by the

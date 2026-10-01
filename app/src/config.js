@@ -102,11 +102,25 @@ function loadDotEnv(file) {
 }
 
 export function loadConfig(overrides = {}) {
+  // Before anything is read, not after. KIP_DATA_DIR decides where the database,
+  // the session secret, the lock file and the backups directory live, so it is the
+  // one setting that is useless in a .env file: reading it first and the file
+  // second means a .env saying KIP_DATA_DIR=/var/lib/kampala is silently ignored
+  // and the install quietly writes to ./data instead. Every other value is read
+  // from the environment only after this line, so ordering is loadDotEnv first.
+  //
+  // `envFile` exists because there are two legitimate reasons to point the file
+  // somewhere other than APP_ROOT: a deployment that keeps its configuration in
+  // /etc (where systemd's EnvironmentFile already puts it, and where a
+  // read-only app directory means APP_ROOT/.env is unwritable), and a test that
+  // needs to prove this ordering without every other test in the suite inheriting
+  // the values it wrote.
+  loadDotEnv(overrides.envFile ?? path.join(APP_ROOT, '.env'))
+
   const dataDir = path.resolve(
     overrides.dataDir ?? readString('KIP_DATA_DIR', path.join(APP_ROOT, 'data')),
   )
   fs.mkdirSync(dataDir, { recursive: true })
-  loadDotEnv(path.join(APP_ROOT, '.env'))
 
   const config = {
     env: readString('NODE_ENV', 'development'),
