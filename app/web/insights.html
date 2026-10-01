@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gaps &middot; Kampala Intelligence Platform</title>
+    <meta
+      name="description"
+      content="What Kampala and the districts around it are missing: the things people search for that no listing answers, ranked, each one carrying the sentence the engine ranked it by."
+    />
+    <!-- appearance read before paint, so a dark-mode visitor gets no flash -->
+    <script>
+      try {
+        var t = localStorage.getItem('kip-theme')
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/theme.css" />
+    <style>
+      /*
+       * Gaps page only. The tokens, the records and the controls all live in
+       * theme.css, so this page cannot drift away from the other four.
+       *
+       * There is no build step and no dependency. The server hands this folder out
+       * as static files, so anything this page needs it has to bring.
+       */
+
+      /*
+       * A finding wears its severity, and this is the fourth surface the documented
+       * colour mechanism reaches.
+       *
+       * The rule on the site is that exactly one thing is coloured per record and it
+       * is the thing being judged. On a directory result that is the branch its
+       * category sits under, on a queue row the state it is in, and here it is how
+       * bad the gap is - so this page sets `data-tone`, the attribute the dialogs and
+       * the decision pills already use, rather than inventing a fifth name for it.
+       * `[data-tone]` resolves to the same `--branch` and `--branch-wash` variables
+       * as `[data-branch]` and `[data-state]` do, so the three rules below are the
+       * two from theme.css plus a selector.
+       *
+       * Three of the four severities wear a tone and the fourth wears nothing:
+       *
+       *   critical, high -> danger. People are asking and there is nobody. This is
+       *                      the one thing on the page that is a red fact.
+       *   moderate       -> warning. Thin, and worth somebody's attention.
+       *   low            -> no attribute at all, so the plain card surface and no
+       *                      bar - the same rendering as a record with no attribute,
+       *                      and the honest one: a small gap is not a verdict, and
+       *                      giving it the same amber as `moderate` would spend the
+       *                      colour that says "look again" on a row that does not.
+       *
+       * The word is printed on the card whatever the colour is, so nothing here is
+       * decidable by hue, and a severity the map has not heard of falls through to
+       * the same plain card.
+       */
+      .card[data-tone] {
+        background: var(--branch-wash);
+        border-left: 3px solid var(--branch);
+        padding-left: var(--s4);
+      }
+
+      .card[data-tone]:hover {
+        background: color-mix(in srgb, var(--branch-wash) 55%, var(--card));
+        box-shadow: 0 0 0 8px color-mix(in srgb, var(--branch-wash) 55%, var(--card));
+      }
+
+      .card:not([data-tone]):hover {
+        background: var(--card);
+        box-shadow: 0 0 0 8px var(--card);
+      }
+
+      /*
+       * The severity, named.
+       *
+       * Read in the page's own ink rather than in the tone. At 0.8125rem a tone ink
+       * on its own wash does not clear 4.5:1, which is the same measurement that put
+       * the operator page's pills on the wash and the word in --ink, and the same
+       * reason: the wash and the bar are the signal, and the word is a word.
+       */
+      .sev {
+        color: var(--ink);
+        font-weight: 650;
+      }
+
+      /* The floor, stated where the numbers are. */
+      .floor {
+        margin-top: var(--s5);
+        padding: var(--s4) var(--s5);
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--info);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        font-size: 0.9375rem;
+        color: var(--muted);
+        max-width: 46rem;
+        text-wrap: pretty;
+      }
+
+      .floor strong {
+        color: var(--ink);
+        font-weight: 650;
+      }
+
+      /* The toggle that reveals the withheld findings, in the operator page's chip. */
+      .reveal {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--s2);
+        /* Two columns, because the sentence is longer than the filter labels beside
+           it and a pill with wrapped text is not a pill. A single-column grid clamps
+           the span to the one column it has. */
+        grid-column: span 2;
+        padding: var(--s2) var(--s3);
+        border: 1px solid var(--line-2);
+        border-radius: 999px;
+        background: var(--card);
+        color: var(--ink);
+        font-size: 0.8125rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .reveal input {
+        margin: 0;
+        accent-color: var(--ink-3);
+      }
+
+      .reveal:has(:checked) {
+        border-color: var(--rule);
+        box-shadow: 0 0 0 2px var(--card-2);
+      }
+
+      .reveal:hover {
+        background: var(--card-2);
+      }
+
+      .reveal:has(:focus-visible) {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="wordmark" href="/">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          Kampala Intelligence
+        </a>
+        <nav class="topnav">
+          <a href="/directory.html">Directory</a>
+          <a href="/insights.html" aria-current="page">Gaps</a>
+          <a href="/operator.html">Verification queue</a>
+          <button class="theme-toggle" type="button" hidden>
+            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <div class="masthead">
+        <div>
+          <h1>What Kampala is missing</h1>
+          <p class="sub">
+            Every search somebody makes here is recorded as an anonymised demand signal. Where
+            enough people ask for the same thing in the same place and nobody lists it, that is a
+            gap. This is the ranked list, and on every card, the sentence the engine ranked it by.
+          </p>
+        </div>
+      </div>
+
+      <form class="filters" id="filters">
+        <label>
+          Window
+          <select id="window">
+            <option value="30">The last 30 days</option>
+            <option value="90">The last 90 days</option>
+          </select>
+        </label>
+
+        <label>
+          Area
+          <select id="location">
+            <option value="">Everywhere</option>
+          </select>
+        </label>
+
+        <label>
+          How bad it looks
+          <select id="severity">
+            <option value="">Any</option>
+            <option value="critical">Critical &mdash; nobody is listed</option>
+            <option value="high">High</option>
+            <option value="moderate">Moderate</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+
+        <label>
+          Order
+          <select id="sort">
+            <option value="score">Biggest opportunity first</option>
+            <option value="severity">Worst first</option>
+            <option value="demand">Most searched for first</option>
+            <option value="newest">Newest first</option>
+          </select>
+        </label>
+
+        <label class="reveal" title="A finding computed over fewer than the floor of distinct people has its counts withheld. Turning this on shows that such findings exist, without publishing what they are.">
+          <input type="checkbox" id="withheld" />
+          Show the withheld ones
+        </label>
+
+        <button type="button" class="quiet clear" id="clear" title="Clear every filter and go back to the last 30 days">
+          Clear
+        </button>
+      </form>
+
+      <section class="section">
+        <h2 id="window-heading">Over the last 30 days, across every district</h2>
+        <div class="counts" id="counts">
+          <div class="count"><b>&mdash;</b><span>Searches recorded</span></div>
+          <div class="count"><b>&mdash;</b><span>Came back empty</span></div>
+          <div class="count"><b>&mdash;</b><span>Found nothing nearby</span></div>
+          <div class="count"><b>&mdash;</b><span>Gaps in this view</span></div>
+        </div>
+        <p class="problem" id="counts-problem" role="status"></p>
+        <p class="floor" id="floor">
+          Every number above is an aggregate over searches from many people. Anything computed
+          over fewer than <strong id="k">the number of distinct people this install requires</strong>
+          is withheld rather than rounded, capped or approximated: the engine has the measurement,
+          and it tells the caller the measurement is not publishable yet. A handful of searches
+          cannot be subtracted back out of a total of three, so the floor is what makes the rest
+          of this page worth reading.
+        </p>
+      </section>
+
+      <section class="section">
+        <div class="summary">
+          <h2>The gaps, ranked</h2>
+          <p id="count" role="status" aria-live="polite"></p>
+          <span class="spacer"></span>
+          <p class="problem" id="problem" role="alert"></p>
+        </div>
+
+        <ul class="results" id="results"></ul>
+
+        <p class="empty" id="empty" hidden></p>
+
+        <div class="pager" id="pager" hidden>
+          <button type="button" class="quiet" id="previous">Previous</button>
+          <span id="range"></span>
+          <button type="button" class="quiet" id="next">Next</button>
+          <span class="spacer"></span>
+        </div>
+
+        <p class="note">
+          A finding is a hypothesis with a stated reason, not a promise. The engine counts the
+          demand, counts the supply that answers it, scores the difference and stores the
+          sentence it wrote next to the number &mdash; so a conclusion stays explainable after the
+          data underneath it has moved on. Following a gap's keyword runs a search in the
+          <a href="/directory.html">directory</a>, and like every search on this site that is
+          recorded as a demand signal, from this page as much as from any other.
+        </p>
+      </section>
+    </main>
+
+    <script src="/theme.js"></script>
+    <script>
+      /*
+       * One endpoint does the work: GET /insights/opportunities, plus
+       * GET /insights/summary for the three window figures above it.
+       *
+       * Both are reads, so this page records nothing of its own. That is deliberate:
+       * a page about demand that manufactured demand every time it was opened would
+       * be measuring its own readers, and the one link on a card that does record
+       * something says so in the note under the list rather than hiding it.
+       *
+       * Nothing here writes with innerHTML. The rationale and the keyword are engine
+       * output derived from what people typed into a search box, which is text, and
+       * the same rule the directory and the operator page follow applies.
+       */
+      const API = '/api/v1'
+      /** Cards, not rows: a finding is a paragraph, so a page of twelve is a screen and a half. */
+      const PAGE_SIZE = 12
+
+      const els = {
+        filters: document.getElementById('filters'),
+        window: document.getElementById('window'),
+        location: document.getElementById('location'),
+        severity: document.getElementById('severity'),
+        sort: document.getElementById('sort'),
+        withheld: document.getElementById('withheld'),
+        clear: document.getElementById('clear'),
+        windowHeading: document.getElementById('window-heading'),
+        counts: document.getElementById('counts'),
+        countsProblem: document.getElementById('counts-problem'),
+        k: document.getElementById('k'),
+        count: document.getElementById('count'),
+        problem: document.getElementById('problem'),
+        results: document.getElementById('results'),
+        empty: document.getElementById('empty'),
+        pager: document.getElementById('pager'),
+        previous: document.getElementById('previous'),
+        next: document.getElementById('next'),
+        range: document.getElementById('range'),
+      }
+
+      /**
+       * Everything on screen, and the only thing allowed to decide what is on
+       * screen. The url is the third source of truth: read on load, written on every
+       * change, so a view of the gap list is a link somebody can send.
+       */
+      const state = {
+        windowDays: 30,
+        locationId: '',
+        severity: '',
+        sort: 'score',
+        withheld: false,
+        offset: 0,
+        total: 0,
+        /** id -> "District, Sub-county, Ward" for the area filter. */
+        locationPaths: new Map(),
+        /** The floor in force, or null when /meta could not be reached. */
+        kThreshold: null,
+        loading: false,
+        failed: false,
+        referenceProblem: '',
+        /**
+         * The window figures, by window.
+         *
+         * They depend on the window and on nothing else on this page, so they are
+         * fetched when the window changes and read from here afterwards. Without the
+         * cache, choosing a severity would re-request the same three numbers the
+         * window has not changed.
+         */
+        counts: new Map(),
+      }
+
+      /** One request helper, so every call agrees on errors. */
+      async function api(path) {
+        const response = await fetch(path, {
+          credentials: 'same-origin',
+          headers: { accept: 'application/json' },
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(payload?.error?.message ?? 'The engine could not be reached.')
+          error.status = response.status
+          throw error
+        }
+        return payload
+      }
+
+      const say = (element, message) => {
+        element.textContent = message ?? ''
+      }
+
+      /**
+       * Numbers, formatted, or a dash.
+       *
+       * A dash for anything that is not a number. The engine sends null for a count
+       * it could not compute, and a cell that prints `0` for a count it does not have
+       * is the single most damaging thing this page could do - a zero here reads as
+       * "nobody searched for this" rather than "we cannot say", and the reader will
+       * act on it.
+       */
+      const number = (value) =>
+        typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '—'
+
+      /* --- reference data --------------------------------------------------- */
+
+      /**
+       * The area filter, and the floor in force.
+       *
+       * Neither is decoration: the filter needs ids to filter on, and the privacy
+       * statement needs a number or it is only a claim. If either fails the page says
+       * so and carries on, because a list of findings with no area filter and no floor
+       * printed is worth a great deal more than an error page - and because the
+       * alternative is a privacy promise the page cannot keep its own half of.
+       */
+      async function loadReference() {
+        const [locations, meta] = await Promise.allSettled([
+          api(`${API}/locations?limit=500`),
+          api(`${API}/meta`),
+        ])
+
+        if (locations.status === 'fulfilled') {
+          /*
+           * Grouped by kind, so a 32-row list can be read: the api hands back
+           * district, town, city, town, city, and a flat select scatters the levels
+           * through each other by name. Depth decides the order of the groups and
+           * first appearance decides the order inside one, both taken from the data
+           * rather than from a list of kinds written here, so a level added to the
+           * reference data later shows up without this file being edited.
+           */
+          const byKind = new Map()
+          for (const location of locations.value.data ?? []) {
+            state.locationPaths.set(location.id, location.pathNames ?? location.name)
+            if (!byKind.has(location.kind)) byKind.set(location.kind, [])
+            byKind.get(location.kind).push(location)
+          }
+          for (const [kind, rows] of [...byKind].sort((a, b) => a[1][0].depth - b[1][0].depth)) {
+            const group = document.createElement('optgroup')
+            group.label = groupLabel(kind)
+            for (const location of rows) {
+              const option = document.createElement('option')
+              option.value = location.id
+              option.textContent = location.pathNames ?? location.name
+              group.append(option)
+            }
+            els.location.append(group)
+          }
+        } else {
+          state.referenceProblem = `Areas unavailable: ${locations.reason.message}`
+        }
+
+        if (meta.status === 'fulfilled') {
+          state.kThreshold = meta.value.data?.privacy?.kThreshold ?? null
+        } else if (!state.referenceProblem) {
+          state.referenceProblem = `Privacy floor unavailable: ${meta.reason.message}`
+        }
+
+        renderFloor()
+      }
+
+      /**
+       * A heading for one level of the location tree.
+       *
+       * The same three irregular plurals the directory uses, and the same fallback
+       * for the rest. It is written out again rather than shared because there is no
+       * build step: a browser cannot import a module from this folder, so the two
+       * pages either share a file the server assembles or each carry the three lines.
+       * The first would be a new kind of request for a cosmetic gain.
+       */
+      const KIND_LABELS = Object.freeze({ country: 'countries', city: 'cities', subcounty: 'subcounties' })
+      const groupLabel = (kind) => KIND_LABELS[kind] ?? `${kind}s`
+
+      /**
+       * The floor, or the absence of one.
+       *
+       * The number comes from `/api/v1/meta`, which publishes the value actually in
+       * force rather than the one in the documentation. When it cannot be reached the
+       * sentence keeps its own wording and prints no number at all, because a privacy
+       * claim with an invented figure in it is worse than one with a blank in it.
+       *
+       * Written once at start-up rather than on every load: the floor does not change
+       * while somebody is reading.
+       */
+      function renderFloor() {
+        els.k.textContent = state.kThreshold
+          ? `${state.kThreshold} distinct people`
+          : 'the number of distinct people this install requires'
+      }
+
+      /* --- the url ---------------------------------------------------------- */
+
+      function readUrl() {
+        const params = new URLSearchParams(window.location.search)
+        const days = Number.parseInt(params.get('window') ?? '30', 10)
+        state.windowDays = days === 90 ? 90 : 30
+        state.locationId = params.get('area') ?? ''
+        state.severity = params.get('severity') ?? ''
+        const sort = params.get('sort') ?? ''
+        state.sort = sort || 'score'
+        state.withheld = params.get('withheld') === '1'
+        const offset = Number.parseInt(params.get('offset') ?? '0', 10)
+        state.offset = Number.isInteger(offset) && offset > 0 ? offset : 0
+      }
+
+      /**
+       * The state back into the url, with replaceState rather than pushState.
+       *
+       * This page is a place somebody settles into and reads down, the way the
+       * directory is. Pushing every filter change would make the back button walk
+       * backwards through their own narrowing instead of out of the page, and there is
+       * no submitted search here to be worth an entry of its own.
+       */
+      function writeUrl() {
+        const params = new URLSearchParams()
+        if (state.windowDays !== 30) params.set('window', String(state.windowDays))
+        if (state.locationId) params.set('area', state.locationId)
+        if (state.severity) params.set('severity', state.severity)
+        if (state.sort !== 'score') params.set('sort', state.sort)
+        if (state.withheld) params.set('withheld', '1')
+        if (state.offset > 0) params.set('offset', String(state.offset))
+        const url = params.toString() ? `?${params}` : window.location.pathname
+        window.history.replaceState({}, '', url)
+      }
+
+      function writeControls() {
+        els.window.value = String(state.windowDays)
+        els.location.value = state.locationId
+        els.severity.value = state.severity
+        els.sort.value = state.sort
+        els.withheld.checked = state.withheld
+        els.windowHeading.textContent = `Over the last ${state.windowDays} days, across every district`
+      }
+
+      /**
+       * Whether the reader has narrowed the list by asking for a place or a severity.
+       *
+       * The withheld toggle is deliberately not in here, because it does not narrow
+       * anything: it adds back the rows the floor withheld. "No finding matches this
+       * combination" and "the floor is not hiding anything at the moment" are answers
+       * to different questions, and the toggle is what tells them apart.
+       */
+      function hasFilters() {
+        return Boolean(state.locationId || state.severity)
+      }
+
+      /* --- loading ---------------------------------------------------------- */
+
+      async function run() {
+        state.loading = true
+        state.failed = false
+        writeUrl()
+        writeControls()
+        say(els.problem, state.referenceProblem)
+        renderPending()
+
+        const [findings, counts] = await Promise.all([loadFindings(), loadCounts()])
+
+        /*
+         * Cleared before the rows are drawn, and the ordering is the point: the
+         * count line and the empty panel both read `state.loading` to decide what to
+         * say about themselves, so a render issued while the flag is still true draws
+         * a page that is loading - forever, because nothing runs after it.
+         */
+        state.loading = false
+        state.failed = findings.error !== null
+        if (findings.error) {
+          say(
+            els.problem,
+            state.referenceProblem
+              ? `${state.referenceProblem} — ${findings.error.message}`
+              : findings.error.message,
+          )
+        } else {
+          state.total = findings.payload.meta?.total ?? 0
+        }
+
+        renderFindings(findings)
+        renderCounts(counts)
+        // Last, and from the findings answer: the figure belongs to the list above it,
+        // so it is written whenever the list is, and a failed list leaves it on a dash
+        // rather than showing the count of a view that is no longer on screen.
+        renderGapCount(findings.payload?.meta?.total ?? null)
+      }
+
+      /**
+       * Every load returns an answer rather than throwing, so one failing endpoint
+       * cannot empty the whole page. The findings are the page; the window figures are
+       * the frame around them, and a broken frame is not a reason to throw the picture
+       * away.
+       */
+      async function loadFindings() {
+        const params = new URLSearchParams({
+          limit: String(PAGE_SIZE),
+          offset: String(state.offset),
+          sort: state.sort,
+        })
+        if (state.locationId) params.set('locationId', state.locationId)
+        if (state.severity) params.set('severity', state.severity)
+        if (state.withheld) params.set('includeSuppressed', 'true')
+        try {
+          return { payload: await api(`${API}/insights/opportunities?${params}`), error: null }
+        } catch (error) {
+          return { payload: null, error }
+        }
+      }
+
+      async function loadCounts() {
+        const cached = state.counts.get(state.windowDays)
+        if (cached) return cached
+        // The window counts whole days back from today, in UTC, which is the day
+        // string the rollup is keyed on. It is a floor rather than a precise window:
+        // the engine measures over whole days, so counting from a partial one would
+        // put a fraction of a day in the numerator and none of it in the denominator.
+        const from = new Date(Date.now() - state.windowDays * 86400000).toISOString().slice(0, 10)
+        let answer
+        try {
+          answer = { payload: await api(`${API}/insights/summary?from=${from}`), error: null }
+        } catch (error) {
+          answer = { payload: null, error }
+        }
+        // A failure is not cached. The success is, because it cannot go stale while
+        // the rollup is written on a schedule; a failure can be a dropped connection,
+        // and a frame that stays broken for the rest of the visit is worse than a
+        // repeated request.
+        if (answer.error === null) state.counts.set(state.windowDays, answer)
+        return answer
+      }
+
+      /* --- rendering -------------------------------------------------------- */
+
+      function renderPending() {
+        say(els.count, 'Loading…')
+        // The list's own figure goes back to a dash for the length of the request, so
+        // the count from the previous view is never sitting under a list that has not
+        // arrived yet - which is the moment a reader is most likely to read it.
+        els.counts.children[3].querySelector('b').textContent = '—'
+        els.results.replaceChildren()
+        els.empty.hidden = true
+        els.pager.hidden = true
+      }
+
+      function renderFindings(answer) {
+        const rows = answer.payload?.data ?? null
+        say(els.count, rows === null ? '' : countPhrase(rows.length))
+        els.results.replaceChildren()
+        for (const row of rows ?? []) els.results.append(findingCard(row))
+        renderEmpty(rows)
+        renderPager()
+      }
+
+      function countPhrase(shown) {
+        if (state.loading) return 'Loading…'
+        if (state.total === 0) return ''
+        if (state.total <= shown) return `${state.total} finding${state.total === 1 ? '' : 's'}`
+        return `Showing ${state.offset + 1}–${state.offset + shown} of ${state.total}`
+      }
+
+      /**
+       * The three window figures.
+       *
+       * Written by position, because the labels stay where they were authored in the
+       * markup and the order of the cells is the order of the sentence in the
+       * heading above them. The fourth cell belongs to `renderGapCount`, which
+       * answers for the filtered list rather than for the window on its left.
+       *
+       * Nothing here can say how many findings there are. The summary is
+       * `/insights/summary`, and it answers with `single(data)` - no `meta` at all -
+       * so reading `meta.total` off it was a `undefined` dressed as a missing figure,
+       * and the cell sat on a dash for the whole visit.
+       */
+      function renderCounts(answer) {
+        const data = answer.payload?.data ?? null
+        say(
+          els.countsProblem,
+          answer.error ? `The window figures could not be read: ${answer.error.message}` : '',
+        )
+        const cells = [...els.counts.children]
+        cells[0].querySelector('b').textContent = number(data?.searches)
+        cells[1].querySelector('b').textContent = number(data?.unserved)
+        cells[2].querySelector('b').textContent = number(data?.quality?.none_in_area)
+      }
+
+      /**
+       * The fourth figure: how many findings this view holds.
+       *
+       * It is the findings response's own `meta.total`, which counts the rows that
+       * match the filters rather than the length of the page that came back, so it is
+       * the number the pager walks and the number the empty state is about. Labelled
+       * "in this view" because that is exactly what it is: with an area chosen it is
+       * not the platform's total and must not read as one.
+       *
+       * Written from the findings answer rather than from the window one, so the
+       * figure beside the list is always the list's own count and never a frame that
+       * survived a filter change.
+       */
+      function renderGapCount(total) {
+        els.counts.children[3].querySelector('b').textContent = number(total)
+      }
+
+      /* --- a finding -------------------------------------------------------- */
+
+      /**
+       * Severity to tone.
+       *
+       * `low` maps to null on purpose: it prints its word and keeps the plain card.
+       * See the note on `.card[data-tone]` in this file's stylesheet for why a small
+       * gap does not get the amber that says "look again".
+       */
+      const SEVERITY_TONES = Object.freeze({
+        critical: 'danger',
+        high: 'danger',
+        moderate: 'warning',
+        low: null,
+      })
+
+      /** Trend, in words. A direction the engine has not heard of is left off. */
+      const TREND_WORDS = Object.freeze({
+        rising: 'rising',
+        falling: 'falling',
+        edging_up: 'edging up',
+        edging_down: 'edging down',
+        flat: 'steady',
+        emerging: 'a new search pattern',
+      })
+
+      function findingCard(row) {
+        const card = document.createElement('li')
+        card.className = 'card'
+        // The one thing on a finding that is coloured is how bad the gap is. See the
+        // note on `.card[data-tone]` in this file's stylesheet.
+        const tone = SEVERITY_TONES[row.severity] ?? null
+        if (tone) card.dataset.tone = tone
+
+        const name = document.createElement('p')
+        name.className = 'name'
+        if (row.suppressed) {
+          /*
+           * A withheld finding is text, not a link.
+           *
+           * Its counts are not published, and the one thing a reader can do with a
+           * phrase is search for it - which is a recorded demand signal, produced by
+           * somebody who was only looking at a list. The link stays on the findings
+           * that can be acted on.
+           */
+          name.textContent = row.keyword
+        } else {
+          const link = document.createElement('a')
+          // Into the directory, scoped to the same place when the finding is about
+          // one, because "is anybody in Entebbe listed for granite" is the question
+          // and a countrywide search does not answer it.
+          const params = new URLSearchParams({ q: row.keyword })
+          if (row.locationId) params.set('location', row.locationId)
+          link.href = `/directory.html?${params}`
+          link.textContent = row.keyword
+          name.append(link)
+        }
+        card.append(name)
+
+        card.append(place(row))
+
+        const blurb = document.createElement('p')
+        blurb.className = 'blurb'
+        if (row.suppressed) {
+          blurb.textContent =
+            'Withheld. Fewer people asked for this than the privacy floor requires, so the counts behind it are not published. The engine has the measurement and will show it here once enough people are asking.'
+        } else {
+          // The engine's own sentence, stored beside the score when the row was
+          // written. Not a summary of it, and not a second wording of it: a
+          // conclusion nobody can quote the reasoning for is a number.
+          blurb.textContent = row.rationale ?? ''
+        }
+        card.append(blurb)
+
+        card.append(facts(row))
+        return card
+      }
+
+      /**
+       * Where the demand was, and the two cases are two different things.
+       *
+       * A place is a place. No place is not a missing address: a search somebody
+       * made without naming one is a countrywide finding, which is a real scope and
+       * not an omission in the record. So it says so, rather than wearing the
+       * "not recorded" mark the directory puts on an absent address - that mark means
+       * "we have this listing and its address is unknown", and here it would mean
+       * "this demand is unattributed", which is not what happened.
+       */
+      function place(row) {
+        const line = document.createElement('p')
+        line.className = 'where'
+        line.textContent = row.locationName || 'Not tied to one place'
+        return line
+      }
+
+      /**
+       * The numbers the score was computed from.
+       *
+       * A withheld row gets one line and no figures, so the shape of the page does
+       * not change when the floor is doing its work: the reader can see that a
+       * finding exists, and cannot read anything about how small it is.
+       *
+       * A count the engine could not compute is named as missing rather than
+       * printed as a zero, and never as a number with a dash in it. "about —
+       * searches a month" is not a fact, it is a hole wearing the shape of one.
+       */
+      function facts(row) {
+        const line = document.createElement('p')
+        line.className = 'meta'
+
+        if (row.suppressed) {
+          line.append(span('absent', 'Counts withheld'))
+          return line
+        }
+
+        line.append(row.severity ? span('sev', row.severity) : span('absent', 'severity not set'))
+        line.append(rule())
+
+        // `estimatedMonthlySearches` is a rounded projection of the window, not a
+        // count of searches, so it is introduced as one. Calling it a count is the
+        // kind of small overclaim that makes the number beside it suspect.
+        line.append(
+          span(
+            null,
+            row.estimatedMonthlySearches == null
+              ? 'search volume not counted'
+              : `about ${number(row.estimatedMonthlySearches)} searches a month`,
+          ),
+        )
+        // The actor count is a sum of daily buckets, so one person searching on three
+        // days counts three times. It can over-count and never under-count, which is
+        // the safe direction to be wrong in - but it is not a count of people, so it
+        // is not called one here either.
+        line.append(
+          span(
+            null,
+            row.distinctActors == null
+              ? 'contributor count not counted'
+              : `${number(row.distinctActors)} counted`,
+          ),
+        )
+        line.append(span(null, supply(row.supplyCount)))
+
+        const trend = TREND_WORDS[row.trendDirection]
+        if (trend) {
+          line.append(rule())
+          line.append(span(null, trend))
+        }
+        if (row.state === 'acted_on') {
+          line.append(rule())
+          line.append(span(null, 'acted on'))
+        }
+        return line
+      }
+
+      /** The separator between facts in a record, hidden from the screen reader. */
+      function rule() {
+        const element = document.createElement('span')
+        element.className = 'rule'
+        element.setAttribute('aria-hidden', 'true')
+        return element
+      }
+
+      function span(className, value) {
+        const element = document.createElement('span')
+        if (className) element.className = className
+        element.textContent = value
+        return element
+      }
+
+      /**
+       * What is already answering the demand, in words.
+       *
+       * Zero gets its own sentence rather than a "0". "0 listings" and "nobody is
+       * listed" are the same number and not the same claim: the first is a count of
+       * rows somebody happened to match, the second is the finding the page exists
+       * to make.
+       */
+      function supply(count) {
+        if (typeof count !== 'number') return 'supply not counted'
+        if (count === 0) return 'nobody is listed'
+        return `${number(count)} listed here`
+      }
+
+      /* --- empty, pager ----------------------------------------------------- */
+
+      function renderEmpty(rows) {
+        els.empty.replaceChildren()
+        const nothing = (rows ?? []).length === 0
+        // A request that failed is not an empty list. The problem line above already
+        // says what went wrong, and an empty panel printed under it would claim that
+        // Kampala has been surveyed and found complete.
+        els.empty.hidden = !nothing || state.loading || state.failed
+        if (els.empty.hidden) return
+
+        const lead = document.createElement('strong')
+        const body = document.createElement('p')
+        const close = document.createElement('p')
+        const here = document.createElement('a')
+        here.href = window.location.pathname
+        here.textContent = 'Show every finding'
+        close.append(here, '.')
+
+        if (hasFilters()) {
+          lead.textContent = 'No finding matches this combination.'
+          body.textContent =
+            'An area or a severity is usually the filter that is too narrow rather than the engine having nothing to say about that part of the city.'
+        } else if (state.withheld) {
+          lead.textContent = 'Nothing here, withheld or otherwise.'
+          body.textContent =
+            'The floor is not hiding anything on this install at the moment: every finding the engine has written is big enough to publish.'
+        } else {
+          lead.textContent = 'The engine has not measured anything yet.'
+          body.textContent =
+            'These findings are written by the gap engine, which runs on a schedule with the server and on demand from the command line. An empty list means nobody has run it, not that Kampala is complete - the directory is empty too, until somebody walks it.'
+        }
+
+        els.empty.append(lead, body, close)
+      }
+
+      function renderPager() {
+        const hasMore = state.offset + PAGE_SIZE < state.total
+        // A pager with both buttons greyed out, under a page that already shows
+        // everything there is, is a control that cannot be used. It appears once there
+        // is a second page to reach and stays for the rest of the walk, including the
+        // last page where only Previous works.
+        //
+        // A failed load hides it rather than leaving the last good range on screen.
+        // The total in `state` is the previous request's, so a pager drawn from it
+        // would be a confident "1-12 of 20" printed under a list that just emptied -
+        // and the range is the one number on the page a reader is most likely to
+        // trust without checking.
+        els.pager.hidden = state.failed || state.total === 0 || (state.offset === 0 && !hasMore)
+        els.previous.disabled = state.loading || state.offset === 0
+        els.next.disabled = state.loading || !hasMore
+        const first = state.total === 0 ? 0 : state.offset + 1
+        const last = Math.min(state.offset + PAGE_SIZE, state.total)
+        say(els.range, state.total === 0 ? '' : `${first}–${last} of ${state.total}`)
+      }
+
+      /* --- events ----------------------------------------------------------- */
+
+      // The panel is a form so the controls are real form controls, and a form on a
+      // page with no other input must not navigate on Enter: that would reload the
+      // page and drop the state this file keeps in memory.
+      els.filters.addEventListener('submit', (event) => {
+        event.preventDefault()
+      })
+
+      for (const control of [els.window, els.location, els.severity, els.sort]) {
+        control.addEventListener('change', () => {
+          const previousWindow = state.windowDays
+          state.windowDays = Number.parseInt(els.window.value, 10) === 90 ? 90 : 30
+          state.locationId = els.location.value
+          state.severity = els.severity.value
+          state.sort = els.sort.value
+          // A new window is a new question, so the figures above are re-read. The
+          // cache is keyed on the window, so the fetch happens once per window
+          // rather than once per filter change.
+          if (previousWindow !== state.windowDays) state.counts.clear()
+          state.offset = 0
+          run()
+        })
+      }
+
+      els.withheld.addEventListener('change', () => {
+        state.withheld = els.withheld.checked
+        state.offset = 0
+        run()
+      })
+
+      els.clear.addEventListener('click', () => {
+        /*
+         * Everything the bar controls, the window included.
+         *
+         * The button sits in the filter bar and the url is the description of the
+         * view, so "clear" that left a 90-day window behind would produce a url that
+         * still says the reader chose something. Resetting the window is also cheap:
+         * its figures are cached, so going back to 30 days is a request either way.
+         */
+        state.windowDays = 30
+        state.locationId = ''
+        state.severity = ''
+        state.sort = 'score'
+        state.withheld = false
+        state.offset = 0
+        writeControls()
+        run()
+      })
+
+      els.previous.addEventListener('click', () => {
+        state.offset = Math.max(0, state.offset - PAGE_SIZE)
+        run()
+      })
+
+      els.next.addEventListener('click', () => {
+        state.offset += PAGE_SIZE
+        run()
+      })
+
+      // A back button is a set of controls to apply rather than a page to reload, so
+      // the same code answers it as answers a shared link.
+      window.addEventListener('popstate', () => {
+        readUrl()
+        run()
+      })
+
+      /* --- start ------------------------------------------------------------ */
+
+      loadReference()
+        .then(() => {
+          readUrl()
+          return run()
+        })
+        .catch((error) => {
+          // `loadReference` settles its own requests, so reaching here means the
+          // page could not be wired at all. Say so rather than showing an empty
+          // panel, which reads as a finding of "nothing is missing".
+          state.referenceProblem = `The gap list could not be set up: ${error.message}`
+          readUrl()
+          return run()
+        })
+    </script>
+  </body>
+</html>

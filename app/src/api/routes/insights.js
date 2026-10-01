@@ -60,7 +60,16 @@ export default async function insightRoutes(fastify, { config, app }) {
             severity: { type: 'string', enum: [...GAP_SEVERITIES] },
             includeDismissed: { type: 'boolean' },
             includeSuppressed: { type: 'boolean' },
-            sort: { type: 'string', enum: ['score', 'recent', 'demand', 'severity'] },
+            // `recent` was here while `OPPORTUNITY_SORTS` is keyed `newest`, and nothing
+            // connected the two. The request passed validation, `resolveOrder` found
+            // no key it knew and fell back to `score`, so "Newest first" came back
+            // ordered by score with nothing in the response to say otherwise.
+            // `newest` is the word `/businesses` and `/requests` already use for the
+            // same order, so the two surfaces are made to agree here rather than one
+            // of them taught a synonym. A test reads this enum, the repository's
+            // allowlist and the page's own dropdown, and asserts every one of them
+            // names an order that can actually be performed.
+            sort: { type: 'string', enum: ['score', 'newest', 'demand', 'severity'] },
             limit: { type: 'integer', minimum: 1, maximum: 100 },
             offset: { type: 'integer', minimum: 0 },
           },
@@ -70,16 +79,26 @@ export default async function insightRoutes(fastify, { config, app }) {
     },
     async (request) => {
       const page = toPage(request.query)
+      const kThreshold = config.privacy.kThreshold
+      const includeSuppressed =
+        toBoolean(request.query.includeSuppressed, 'includeSuppressed') ?? false
       const result = app.intelligence.opportunities({
         locationId: request.query.locationId ?? null,
         state: request.query.state ?? null,
         severity: request.query.severity ?? null,
         includeDismissed: toBoolean(request.query.includeDismissed, 'includeDismissed') ?? false,
+        // The floor goes down to the repository as well as staying here, for the
+        // reason documented there: a page filtered after the query cannot report how
+        // many rows it started with, so `total` and `hasMore` would both be fiction.
+        // The threshold is this config value passed in rather than read from a second
+        // place, so the rows that are left out and the rows that are marked can never
+        // be two different sets.
+        includeSuppressed,
+        kThreshold,
         sort: request.query.sort ?? 'score',
         ...page,
       })
 
-      const kThreshold = config.privacy.kThreshold
       const items = result.items.map((row) => {
         const verdict = suppressIfBelowK(row, kThreshold)
         return {
@@ -94,14 +113,21 @@ export default async function insightRoutes(fastify, { config, app }) {
         }
       })
 
-      // The page is filtered after the query, so the total has to be recounted
-      // rather than reported, or `hasMore` would promise rows that are not there.
-      const visible = toBoolean(request.query.includeSuppressed, 'includeSuppressed')
+      /*
+       * The withheld rows are already gone by this point, so the filter below only
+       * ever has nothing to remove, and the total is the repository's count of the
+       * rows that match. It is left in place because it is the decision that has to
+       * be true of the response, not because it is load-bearing: a page that arrives
+       * with a withheld row in it - because a caller reached this repository
+       * directly, or because a future change loosens the WHERE - must not publish it
+       * on the strength of the query having been right.
+       */
+      const visible = includeSuppressed
         ? items
         : items.filter((row) => !row.suppressed)
 
       return collection(visible, {
-        total: visible.length,
+        total: result.total,
         limit: page.limit,
         offset: page.offset,
       })

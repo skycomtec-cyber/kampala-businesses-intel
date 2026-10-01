@@ -38,6 +38,19 @@ const GAP_SORTS = Object.freeze({
 const OPPORTUNITY_SORTS = Object.freeze({
   score: 'score DESC',
   newest: 'created_at DESC',
+  // The route has always advertised `sort=demand`, and until this line existed
+  // there was nothing behind it: `resolveOrder` falls back to the default for a
+  // key it does not know, so the request succeeded and the rows came back ordered
+  // by score. An order that is silently the wrong one is worse than a refused
+  // one, because a reader who asked for "most searched first" is shown a ranking
+  // and has no way to know it is not the one they asked for.
+  //
+  // `estimated_monthly_searches` is the demand measure the row actually carries.
+  // It is a projection rather than a count, which is why the id is a tiebreak: a
+  // phrase nobody has claimed and one that is claimed on the same day are
+  // otherwise indistinguishable, and the newest claim is the more useful of the
+  // two to show first.
+  demand: 'estimated_monthly_searches DESC, created_at DESC',
   severity: `CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                               WHEN 'moderate' THEN 2 WHEN 'low' THEN 3 ELSE 4 END ASC`,
 })
@@ -571,6 +584,8 @@ export function createIntelligenceRepository(db, config) {
       severity,
       locationId,
       includeDismissed = false,
+      includeSuppressed = false,
+      kThreshold = null,
       sort = 'score',
       limit,
       offset,
@@ -598,6 +613,41 @@ export function createIntelligenceRepository(db, config) {
       }
       if (!includeDismissed) {
         conditions.push(`o.state <> 'dismissed'`)
+      }
+
+      /*
+       * The floor is applied to the rows as well as to the answer about them.
+       *
+       * `suppressIfBelowK` is where the decision is made, and the route calls it on
+       * every row to decide what may leave. But a filter that runs after the query
+       * cannot say how many rows there were: the route used to report the length of
+       * the page it had just filtered as the total, so the response said `total: 12`
+       * for the first page and `total: 12` again for the second, with `hasMore`
+       * false both times, and a client could read the first twelve gaps with nothing
+       * in the answer to tell it twenty were waiting.
+       *
+       * Worse, offset paging over a post-filter is not merely short, it is a loop:
+       * a page of twelve where the last row is below the floor comes back with
+       * eleven, `hasMore` is computed from a total that counts the withheld row, and
+       * a client that follows it asks for the next offset and gets the same thing
+       * again.
+       *
+       * So the same predicate is a WHERE clause as well. It is the same decision,
+       * not a second one: `suppressIfBelowK` withholds exactly when
+       * `distinctActors < kThreshold`, reading a missing count as zero, and
+       * `distinct_actors` has been `NOT NULL DEFAULT 0` since migration 011, so
+       * there is no row the two could read differently. The route still calls the
+       * function on every row it returns - that is where the `suppressed` flag and
+       * the withheld count come from, and it remains the authority. This clause only
+       * keeps the withheld rows out of the page in the first place, so `total` and
+       * `hasMore` can finally be true.
+       *
+       * No threshold means no filtering here, which is what a caller that wants
+       * every row - the seeders, the maintenance reports, a future export - asks for.
+       */
+      if (!includeSuppressed && kThreshold !== null) {
+        conditions.push('o.distinct_actors >= @kThreshold')
+        params.kThreshold = kThreshold
       }
 
       const whereSql = where(conditions)
