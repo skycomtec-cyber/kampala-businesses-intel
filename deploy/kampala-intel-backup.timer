@@ -1,0 +1,38 @@
+# Kampala Businesses Intel - nightly backup schedule
+#
+# 03:47, after the maintenance timer at 03:17. The ordering is the point: a backup
+# taken before the daily rollup contains yesterday's demand, so a restore from it
+# loses a day of signals. Taken after, it contains the morning's work.
+#
+#   sudo cp deploy/kampala-intel-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kampala-intel-backup.timer
+#
+# Backups on this disk are not a backup. They protect against a bad migration or a
+# mistaken restore; they do not protect against losing the disk. Copy
+# <dataDir>/backups off the host, or point --dir at a mounted volume.
+
+[Unit]
+Description=Back up the Kampala Businesses Intel database nightly
+Documentation=file:/srv/kampala-intel/app/README.md
+
+[Timer]
+OnCalendar=*-*-* 03:47:00
+
+# If the machine was off at 03:47, take the backup on the next boot anyway. The
+# alternative is that a single unattended reboot silently ends the backup
+# schedule, and nothing reports it: the platform keeps accepting searches and
+# keeps answering them from a database nobody has copied since Tuesday.
+Persistent=true
+AccuracySec=1m
+RandomizedDelaySec=300
+
+# After the maintenance timer, when both are installed. `After=` on a timer only
+# orders the jobs if they are triggered in the same transaction; being explicit
+# here means a boot that catches up both timers runs maintenance first.
+After=kampala-intel-maintenance.timer
+
+Unit=kampala-intel-backup.service
+
+[Install]
+WantedBy=timers.target

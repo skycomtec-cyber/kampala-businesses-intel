@@ -1,0 +1,68 @@
+# Kampala Businesses Intel - nightly maintenance
+#
+# The engine work that cannot run inside a request: rolling search events up into
+# daily demand, measuring the gaps, and enforcing the retention windows.
+#
+# Without this, the public opportunity view stays permanently empty no matter how
+# many people search, and the one table that can identify a person is never
+# purged. Both are described in scripts/maintenance.js.
+#
+# Install alongside the service:
+#   sudo cp deploy/kampala-intel-maintenance.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kampala-intel-maintenance.timer
+#
+# Check what it did:
+#   systemctl list-timers kampala-intel-maintenance.timer
+#   journalctl -u kampala-intel-maintenance -n 50
+
+[Unit]
+Description=Kampala Businesses Intel nightly maintenance
+Documentation=file:/srv/kampala-intel/app/README.md
+After=kampala-intel.service
+
+[Service]
+Type=oneshot
+User=kampala
+Group=kampala
+WorkingDirectory=/srv/kampala-intel/app
+
+Environment=NODE_ENV=production
+Environment=KIP_DATA_DIR=/var/lib/kampala-intel
+
+# `--days 3` rather than the default. The default covers yesterday and today, which
+# is right for a laptop that runs this by hand, but a machine that was off at
+# midnight has a gap the next run would only partly close. Three days means one
+# missed night is absorbed silently.
+ExecStart=/usr/bin/node scripts/maintenance.js --days 3
+
+# The engine does real work: one FTS query per measured phrase, up to
+# KIP_GAP_MAX_SIGNALS of them, against a database that is also being written to.
+# Letting it run to completion matters more than finishing quickly.
+TimeoutStartSec=1800
+
+# Same hardening as the service, because it is the same code and the same data.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+ReadWritePaths=/var/lib/kampala-intel
+
+# The default would kill the job partway if it were still running at the next
+# night's fire. A killed maintenance run leaves a half-rolled-up day, which the
+# next run's `--days 3` picks up, but it also means two runs can overlap and
+# SQLite would serialise them. Waiting is the correct behaviour here.
+TimeoutStopSec=600

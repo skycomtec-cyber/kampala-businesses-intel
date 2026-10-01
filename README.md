@@ -95,11 +95,27 @@ Override anything through the environment:
 KIP_PORT=5000 KIP_K_THRESHOLD=10 npm start
 ```
 
+### Configuration
+
+Every setting is in `app/.env.example`, which is the annotated reference and the file to copy:
+
+```bash
+cd app
+cp .env.example .env    # then edit it
+```
+
+Anything already in the environment wins over `.env`, so a systemd `EnvironmentFile`, a Compose
+`env_file`, or `docker run -e` all override it without editing the file. A test asserts that the
+example and `src/config.js` agree in both directions, so a variable added to one and not the other
+fails CI rather than being silently ignored.
+
+The ones that matter most:
+
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `KIP_HOST` | `127.0.0.1` | Bind address. Keep it on loopback. |
 | `KIP_PORT` | `4310` | Port to listen on. |
-| `KIP_DATA_DIR` | `app/data` | Where the database and the session secret live. |
+| `KIP_DATA_DIR` | `app/data` | Where the database, session secret, live-process lock and backups live. The only path worth setting on a server. |
 | `KIP_DB_FILE` | `<data dir>/kampala.db` | SQLite file. |
 | `KIP_K_THRESHOLD` | `5` | Distinct actors required before an aggregate is published. |
 | `KIP_RAW_SEARCH_RETENTION_DAYS` | `30` | How long raw query text survives. Must stay within the event window; see the privacy notes. |
@@ -109,10 +125,65 @@ KIP_PORT=5000 KIP_K_THRESHOLD=10 npm start
 | `KIP_TRUST_PROXY` | `false` | Honour `X-Forwarded-For`. Only enable behind a proxy you control. |
 | `KIP_LOG_LEVEL` | `info` | Pino log level. |
 | `KIP_SEED_REFERENCE` | `true` | Import reference data on start. |
+| `KIP_SEED_CATALOGUE_DEMO` | `true` | Import the one demonstration organisation. Turn off once the install has its own listing. |
 | `KIP_GAP_WINDOW_DAYS` | `30` | Default window the gap engine measures. |
 | `KIP_GAP_TREND_WINDOW_DAYS` | `7` | Days on each side of a window's midpoint used to detect rising or falling demand. |
 | `KIP_GAP_MAX_SIGNALS` | `200` | Most signals a single run will measure, highest-searching first. |
 | `KIP_GAP_OPPORTUNITY_FLOOR` | `moderate` | Lowest severity promoted to an opportunity. Below it, a gap stays a gap. |
+
+`KIP_HOST` and `KIP_TRUST_PROXY` are the two that are dangerous to set carelessly. `KIP_HOST=0.0.0.0`
+puts the operator sign-in on every address the machine has, and `KIP_TRUST_PROXY=true` with nothing
+in front actually setting `X-Forwarded-For` lets a client forge its own address past the per-IP rate
+limiter. Both are correct only in the specific deployment they describe.
+
+### Backups
+
+```bash
+npm run backup                      # -> <data dir>/backups, keeping 14
+npm run backup -- --list            # what is there, and whether each file is sound
+npm run backup -- --verify          # check every backup, write nothing
+npm run backup -- --dir /mnt/backups --keep 30
+```
+
+The command is safe to run while the server is up, because it does not copy the file. `kampala.db`
+runs in WAL mode, so recent writes live in a side file until a checkpoint, and `cp kampala.db` gives
+you a file that opens cleanly, passes an integrity check and is missing every write since the last
+checkpoint — silently, with nothing about the copy to say so. This uses SQLite's online backup API
+instead: it reads through a consistent snapshot while the server keeps serving, and writes a single
+complete file with no siblings to lose.
+
+Every backup gets a `.json` manifest beside it recording the schema it was taken at, row counts, the
+k-anonymity floor in force when it was measured, and a SHA-256 of the file. The backup verifies itself
+immediately after writing, and `restore` refuses anything whose checksum does not match, so a file
+that is a good copy of the wrong thing cannot replace a good database. The manifest also states what
+is *not* in the backup: the session secret.
+
+Pruning is on by default rather than being a flag, because a backup directory nobody prunes is a full
+disk discovered at the worst time.
+
+### Restoring
+
+Stop the server first. The restore refuses while a process holds the data directory, because
+replacing the file under a running server succeeds on Linux and produces the worst possible outcome:
+the rename works, the server keeps serving from its open handle to a file that is no longer on disk,
+and the platform reports a successful restore while serving a database that does not exist.
+
+```bash
+npm run restore -- --list
+npm run restore -- --file kampala-20261001T031500Z.db
+npm run restore -- --latest
+```
+
+It then:
+
+1. Verifies the file — integrity check plus checksum — *before* touching anything.
+2. Moves the current database to `kampala.db.replaced-<timestamp>` rather than deleting it, and prints
+   the path. A restore you cannot undo is not a recovery step.
+3. Deletes the session secret, so every operator signs in again. This is deliberate: keeping the old
+   secret would leave every session cookie signed before the restore still valid after it, which is the
+   wrong direction for the operation you reach for after an incident.
+
+Start the server afterwards and it migrates the restored database to the current schema.
 
 ### Scheduled work
 
@@ -427,7 +498,7 @@ closures it causes itself and spends that count instead of settling on it.
 
 ### The pages, and what they share
 
-Four static files, no build step, no framework, served from the same origin as the api and linked
+Five static files, no build step, no framework, served from the same origin as the api and linked
 from the same topbar, so any of them can be bookmarked or reloaded on its own:
 
 | Page | What it is for |
@@ -435,9 +506,15 @@ from the same topbar, so any of them can be bookmarked or reloaded on its own:
 | `/` | The front door: what the platform is, and the sequence a listing goes through to get published |
 | `/directory.html` | Public search. Filters, then the results list, then a page for one listing |
 | `/business.html?b=<slug>` | One listing: contacts marked public or private, services, skills, and the source it came from |
+| `/insights.html` | The ranked gaps: what people search for and nobody lists, each card carrying the sentence it was ranked by |
 | `/operator.html` | The review queue, above |
 
-Everything the four pages agree on lives in `app/web/theme.css` as tokens, so light and dark are two
+`/insights.html` is the other half of `/directory.html`, and reads the same
+`/api/v1/insights/opportunities` the api documents. Its floor toggle is the page form of
+`?includeSuppressed=true`: on, it lists the findings computed over too few distinct people and withholds
+their counts, which is what the flag means everywhere else in this platform.
+
+Everything the five pages agree on lives in `app/web/theme.css` as tokens, so light and dark are two
 readings of one set of rules rather than two stylesheets, and a page cannot drift from its neighbours.
 `theme.js` only reads and writes the saved appearance; the choice is inlined into each page's `<head>`
 so a dark-mode visitor never sees a white flash, and with JavaScript off the rest of each page still
@@ -450,15 +527,18 @@ no runtime CDN dependency.
 Both long lists on this site — public results and the review queue — are rows that all look alike, and
 on both of them the row's own attribute is the thing being judged. A result card is filed under a
 category; a queue row is at some point in a review. Colouring a row by anything else would be
-decoration, so exactly one thing is coloured, and it is that.
+decoration, so exactly one thing is coloured, and it is that. The gaps page is a third long list and
+follows the same rule, colouring by severity: the question a reader asks of a gap is how bad it is, so
+that is what the bar answers.
 
-One attribute, one rule, three surfaces:
+One attribute, one rule, four surfaces:
 
 | Attribute | Set on | Reads as |
 | --- | --- | --- |
 | `data-branch` | a result card, from the branch its category sits under | which of the five top-level categories this is |
 | `data-state` | a queue row, from `verificationState` | how far through review it is |
-| `data-tone` | a dialog, an outcome line, a decision pill | what the action it offers does |
+| `data-tone` | a dialog, an outcome line, a decision pill, a gap card from its severity | what the action it offers does, or how bad the gap is |
+| — (`data-tone` absent) | a `low` gap, and any record with no attribute | plain card surface, no bar |
 
 All three resolve to the same two variables, `--branch` and `--branch-wash`, and one rule paints the
 bar and the fill. That is the whole mechanism, and it is why the pill offering "Reject" and the box
@@ -785,28 +865,132 @@ created.raise_for_status()
 print(created.json()["data"]["slug"])
 ```
 
+## Deploying it
+
+The platform is one Node process and one SQLite file, so "deploying" is mostly deciding where that
+file lives and what is in front of it. Three ways, in increasing order of what they ask of you.
+
+### A container
+
+```bash
+cp app/.env.example app/.env    # then edit it
+docker compose up -d
+docker compose logs -f
+```
+
+The image is a two-stage build: dependencies including the native `better-sqlite3` are compiled in a
+builder, and the runtime stage carries the app, `tini` and nothing else. It runs as the unprivileged
+`node` user, binds `0.0.0.0` because that is the only address reachable from outside the container,
+and healthchecks `/api/v1/meta` — the endpoint that returns the configuration in force, so the check
+fails when the database is unreachable rather than merely when the process exists.
+
+One named volume, `kampala-data`, holds the database, the session secret, the live-process lock and
+the backups. Everything else in the image is rebuilt from this repository, so `docker compose down`
+loses nothing. **`docker compose down -v` deletes the database.**
+
+The Compose file publishes no host port by default. The app has an operator sign-in and is built to
+sit behind a proxy that terminates TLS, so exposing 4310 puts that sign-in on whatever firewall
+happens to be in front of it. Uncomment the `127.0.0.1:4310:4310` mapping once a proxy on the same
+host is actually there.
+
+### A systemd service
+
+```bash
+sudo useradd --system --home /srv/kampala-intel --shell /usr/sbin/nologin kampala
+sudo mkdir -p /srv/kampala-intel /var/lib/kampala-intel
+sudo chown -R kampala:kampala /var/lib/kampala-intel
+sudo -u kampala git clone <repo> /srv/kampala-intel/app
+cd /srv/kampala-intel/app && sudo -u kampala npm ci
+
+sudo cp deploy/kampala-intel.service /etc/systemd/system/
+sudo cp deploy/kampala-intel-maintenance.{service,timer} /etc/systemd/system/
+sudo cp deploy/kampala-intel-backup.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now kampala-intel.service
+sudo systemctl enable --now kampala-intel-maintenance.timer kampala-intel-backup.timer
+```
+
+Five units, because there are two different kinds of work here and conflating them is how one gets
+missed:
+
+| Unit | When | What |
+| --- | --- | --- |
+| `kampala-intel.service` | always | The HTTP server. |
+| `kampala-intel-maintenance.timer` | 03:17 nightly | Roll up demand, measure gaps, enforce retention. |
+| `kampala-intel-backup.timer` | 03:47 nightly | Copy the database and verify the copy. |
+
+The ordering matters: maintenance before backup, so a nightly copy contains the morning's rolled-up
+day rather than yesterday's. Both timers carry `Persistent=true`, so a machine that was off at 03:17
+runs the job at the next boot — without that, one unattended reboot silently ends the schedule and
+nothing reports it.
+
+The service runs as a dedicated unprivileged user with `ProtectSystem=strict` and a single
+`ReadWritePaths` entry for the data directory. The code directory is read-only to it, so a
+compromised request handler cannot rewrite the server it is running in. Backups land inside the data
+directory for the same reason: a backup written outside the writable path is one the unit cannot write
+at all.
+
+Set the session secret in a root-owned file if you want a rebuild not to sign every operator out:
+
+```bash
+sudo install -m 600 -o root -g kampala /dev/null /etc/kampala-intel.env
+sudo editor /etc/kampala-intel.env     # KIP_SESSION_SECRET=...
+# then uncomment EnvironmentFile= in the unit
+```
+
+### Behind a proxy
+
+`deploy/nginx-kampala-intel.conf` is a working nginx site: TLS, a redirect from port 80, HSTS, and
+per-endpoint rate limits that match the ones in the app — tightest on sign-in, so a script walking
+passwords sees a 429 rather than a login form.
+
+Set `KIP_TRUST_PROXY=true` once nginx is actually in front. The rate limiter counts per address, and
+without `X-Forwarded-For` nginx sends its own address, which makes every visitor on the internet
+count as one client. The reverse is also true: enabling it with no proxy in front is the same as
+having no rate limit at all.
+
+### What a deployment does not include
+
+There is no TLS termination, no firewall, no reverse proxy and no automated deploy in this
+repository. Those depend on the host and belong to whoever operates it, and a checked-in default for
+any of them is a guess that looks like a decision. What is here is the application, the units that
+run it, and the nginx site that makes the two settings which are dangerous in isolation
+(`KIP_HOST`, `KIP_TRUST_PROXY`) correct in the deployment they describe.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs the suite on Node 20.11, 22 and 24; checks that `.env.example` and
+`src/config.js` still agree; and builds the container, waits for its own healthcheck, asserts on
+`/api/v1/meta`, stops it and checks the WAL was checkpointed rather than left for recovery. It runs
+on push, on pull requests, and nightly — a platform with a daily rollup and a nightly engine has
+code paths that only execute once a day in production, so a suite that only runs on push misses a
+class of breakage entirely.
+
 ## Layout
 
 ```
 .
 ├── app/                      the app, self-contained
 │   ├── package.json
+│   ├── .env.example          every setting, annotated, commented out where secret
+│   ├── Dockerfile            two stages: native build, then runtime with tini
 │   ├── src/
 │   │   ├── config.js         every value resolvable from the environment
 │   │   ├── core/             domain rules: auth, demand, privacy, identifiers, errors
-│   │   ├── db/               driver, migrations, repositories
+│   │   ├── db/               driver, migrations, repositories, backup.js
 │   │   ├── seed/             idempotent reference import
 │   │   ├── import/           csv reader, row resolution, the importer itself
 │   │   ├── api/              plugins, routes, response envelope
 │   │   └── server.js         the process
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
-│   │                         import, analyse, and the one-off repairs
+│   │                         import, backup, restore, and the one-off repairs
 │   │                         — backfill-provenance, add-sources
-│   ├── test/                 124 tests, no network, temporary folders only
-│   └── web/                  the four pages, and the stylesheet they share
+│   ├── test/                 176 tests, no network, temporary folders only
+│   └── web/                  the five pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
 │       ├── business.html         one listing, with its contacts, services and provenance
+│       ├── insights.html         the ranked gaps, and what the engine withheld
 │       ├── operator.html         the review queue
 │       ├── theme.css             every shared token and component, light and dark
 │       ├── theme.js              the appearance toggle, and nothing else
@@ -814,6 +998,9 @@ print(created.json()["data"]["slug"])
 │       ├── fonts.css             self-hosted Figtree and IBM Plex Mono, no CDN
 │       ├── fonts/                the woff2 subsets and their OFL notices
 │       └── img/                  the hero photograph, and CREDITS.md for its licence
+├── deploy/                   systemd units, the nginx site
+├── .github/workflows/ci.yml
+├── docker-compose.yml        container, one named volume, no published port by default
 ├── install.js                Pinokio: dependencies, migrations, reference data, tests
 ├── start.js                  Pinokio: maintenance, then the server
 ├── create-admin.js           Pinokio: the only way an account is created
@@ -823,8 +1010,10 @@ print(created.json()["data"]["slug"])
 └── pinokio.json              metadata
 ```
 
-`app/data/` holds the SQLite database and the generated session secret. Both are disposable: delete
-the folder and run `npm run bootstrap` to get the same platform back with no listings.
+`app/data/` holds the SQLite database, the generated session secret, the live-process lock while the
+server is up, and `backups/`. The database and the listings are disposable: delete the folder and run
+`npm run bootstrap` to get the same platform back with no listings. The backups are not — they are
+the only copy of anything you have not re-imported.
 
 ## Tests
 
@@ -833,7 +1022,7 @@ cd app
 npm test
 ```
 
-124 tests, no network access, each against its own temporary database. The API tests mount the real
+176 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule
@@ -842,7 +1031,16 @@ points, the capability table, the rate limiter, that every documented filter act
 undocumented one is refused, that every signed-in route refuses an anonymous caller, that a bug in
 our own code is answered as a 500 rather than as the caller's mistake, that every location level the
 data holds is filterable, and the rule that a bad sign-in cannot be used to find out which addresses
-exist. The CLI tests run `create-admin` and `import` as real child processes, since the interesting
+exist.
+
+The backup tests are written around the failure they exist to prevent, which is that a copy of a WAL
+database looks complete and is missing every write since the last checkpoint. So the assertions are
+that a backup taken from a connection that never stopped contains a row written *after* it was taken,
+that the result is a single file with no `-wal` sibling to lose, that a byte-flipped file is refused
+by the checksum rather than restored over a good database, that a restore refuses while a live pid
+holds the data directory but not after a crashed one left its lock behind, and that the displaced
+database is kept. The CLI tests run `create-admin`, `import`, `backup` and `restore` as real child
+processes, since the interesting
 ways for them to fail — a launcher step that pipes nothing, a piped email with no password, an import
 whose sheet has one bad row in it — are all about how they read stdin and what they do with a file
 somebody else wrote.
@@ -853,7 +1051,7 @@ batch, and reading the rows back. That pass is what caught `preHandler` being wr
 `schema` object, where Fastify ignored it and four routes answered anonymous callers.
 
 The colour is checked the same way, and the check is over computed values rather than over the hex in
-the stylesheet: every element carrying text on all four pages, in both themes, with the background it
+the stylesheet: every element carrying text on all five pages, in both themes, with the background it
 actually paints against resolved through the ancestors rather than read off its own rule. The states
 the signed-in pages render are injected with the attributes the real page gives them, which measures the
 same computed values without needing an account — the styling is attribute-driven, so that is not a

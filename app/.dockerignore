@@ -1,0 +1,45 @@
+# The build context is `./app`, so these paths are relative to it.
+
+# Dependencies are reinstalled inside the image. Sending a host `node_modules`
+# in is slower, and it would send the wrong thing anyway: a native module built
+# against the host's Node and libc does not run in the image.
+node_modules
+npm-debug.log*
+
+# Tests are not shipped, but they should still not bloat the context upload on a
+# machine that has been running them.
+test/
+
+# The real database, its WAL siblings, and the backups directory. None of it
+# belongs in an image: it is per-install state, it is volume-mounted, and an
+# image that embeds a developer's listings gets pushed to a registry.
+data/
+data-demo/
+*.db
+*.db-wal
+*.db-shm
+*.db.partial
+
+# A developer's real configuration must never end up baked into an image that
+# somebody else pulls. `.env.example` is deliberately kept - it is documentation.
+.env
+.env.*
+!.env.example
+
+# VCS and editor state
+.git
+.gitignore
+.github
+.vscode
+.idea
+*.swp
+.DS_Store
+Thumbs.db
+
+# Anything an agent or editor leaves behind
+.agents/
+.claude/
+.cursor/
+.cache/
+coverage/
+*.log

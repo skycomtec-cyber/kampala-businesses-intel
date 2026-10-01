@@ -1,0 +1,85 @@
+# Kampala Businesses Intel - container deployment
+#
+#   cp app/.env.example app/.env      # then edit it
+#   docker compose up -d
+#   docker compose logs -f
+#
+# The named volume is the only thing that matters here. Everything else in the
+# image is rebuilt from this repository, so `docker compose down` plus a rebuild
+# loses nothing; `docker compose down -v` deletes the database. That is the one
+# command on this page that is not reversible.
+
+services:
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: kampala-intelligence-platform:local
+    container_name: kampala-intel
+    restart: unless-stopped
+    # No port mapping by default on the compose file itself - see the note below.
+    #
+    # Publishing 4310 on the host puts the operator sign-in on the internet with
+    # whatever firewall happens to be in front of it. This app is built to sit
+    # behind a proxy that terminates TLS, so the default here is
+    # `expose` (internal only) and uncomment the block below when you have a
+    # proxy on the same host.
+    expose:
+      - "4310"
+    # ports:
+    #   - "127.0.0.1:4310:4310"
+    # Optional. Every setting has a default that works, so a fresh clone runs
+    # without this file at all. Create it when you have something to change:
+    #
+    #   cp app/.env.example app/.env
+    #
+    # The long form with `required: false` rather than the short list form,
+    # because the short form makes a missing file a hard error - which would mean
+    # the first thing a new user has to do is create a file they do not need.
+    env_file:
+      - path: ./app/.env
+        required: false
+    environment:
+      # These override app/.env, because Compose applies `environment` last and
+      # they are not things an operator should be able to get wrong by editing
+      # the file: inside a container the data directory is the volume, and
+      # binding 0.0.0.0 is the only address that is reachable from outside.
+      KIP_DATA_DIR: /data
+      KIP_HOST: 0.0.0.0
+      KIP_PORT: "4310"
+      # Trusting X-Forwarded-For is correct exactly when a real proxy sets it.
+      # Left off here because `expose` alone means no proxy is in front yet, and
+      # turning it on without one lets a client forge its own address past the
+      # per-IP rate limiter on sign-in.
+      KIP_TRUST_PROXY: "false"
+    volumes:
+      # The database, the session secret, the live-process lock and the backups.
+      # Keeping the secret on this volume is what stops a rebuild from signing
+      # every operator out.
+      - kampala-data:/data
+    # SQLite wants the directory it is in to be writable, and the named volume
+    # starts out owned by root. This makes the volume match the user the image
+    # runs as before the process first touches it.
+    user: node
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4310/api/v1/meta"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # `SIGTERM` is what `docker stop` sends, and src/server.js handles it by
+    # closing Fastify and checkpointing SQLite. The default 10s is enough; the
+    # explicit value documents that the clean path is being relied on rather
+    # than a SIGKILL.
+    stop_signal: SIGTERM
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  kampala-data:

@@ -1,0 +1,32 @@
+# Kampala Businesses Intel - nightly maintenance schedule
+#
+# 03:17 rather than 03:00. The engine's retention purge deletes expired rows and
+# the gap measurement is a few hundred queries; at exactly 03:00 on a host where
+# something else also runs hourly it competes for the disk, and every backup or
+# timer on a default Debian or Ubuntu image is at :00.
+
+[Unit]
+Description=Run Kampala Businesses Intel maintenance nightly
+Documentation=file:/srv/kampala-intel/app/README.md
+
+[Timer]
+# Daily. The work is a daily rollup of daily demand, so an hourly run would
+# measure the same day repeatedly for no new information.
+OnCalendar=*-*-* 03:17:00
+
+# A laptop or a server that was powered off at 03:17 should run this on the next
+# boot. Without these two lines, a missed night is a missed night: the demand
+# history has a hole and the retention windows go unenforced until somebody
+# notices. Both are what the engine's `--days 3` window exists to absorb.
+Persistent=true
+AccuracySec=1m
+
+# Spread the load. On a host with many timers, `RandomizedDelaySec` stops every
+# one of them from hitting the disk in the same second. Capped at five minutes so
+# it stays a nightly job and does not drift into the working day.
+RandomizedDelaySec=300
+
+Unit=kampala-intel-maintenance.service
+
+[Install]
+WantedBy=timers.target

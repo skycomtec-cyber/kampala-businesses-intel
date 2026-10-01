@@ -1,0 +1,99 @@
+# Kampala Businesses Intel - HTTP service
+#
+# Install:
+#   sudo useradd --system --home /srv/kampala-intel --shell /usr/sbin/nologin kampala
+#   sudo mkdir -p /srv/kampala-intel /var/lib/kampala-intel
+#   sudo chown -R kampala:kampala /var/lib/kampala-intel
+#   sudo -u kampala git clone <repo> /srv/kampala-intel/app
+#   sudo cp deploy/kampala-intel.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kampala-intel
+#
+# The unit runs as a dedicated unprivileged user, not root and not the account you
+# happen to be logged in as. The only writable path is the data directory; the
+# code directory is owned by root and read-only to this service, so a compromised
+# request handler cannot rewrite the server it is running in.
+
+[Unit]
+Description=Kampala Businesses Intelligence Platform
+Documentation=file:/srv/kampala-intel/app/README.md
+After=network-online.target
+Wants=network-online.target
+
+# SQLite lives on a local filesystem here. If you moved KIP_DATA_DIR onto NFS,
+# add the mount unit to After= and Requires= - SQLite's locking is not safe over
+# a network filesystem and will corrupt the database rather than fail.
+
+[Service]
+Type=simple
+User=kampala
+Group=kampala
+WorkingDirectory=/srv/kampala-intel/app
+
+# The config. Anything set here wins over the .env file in the app folder, which
+# is what you want: the checked-out .env is for development and this file is what
+# the deployed service actually reads.
+Environment=NODE_ENV=production
+Environment=KIP_DATA_DIR=/var/lib/kampala-intel
+Environment=KIP_HOST=127.0.0.1
+Environment=KIP_PORT=4310
+
+# Secrets are not in this file. Drop an EnvironmentFile= pointing at a root-owned
+# 0600 file if you need to pin KIP_SESSION_SECRET, so that a rebuild does not
+# invalidate every session:
+#   sudo install -m 600 -o root -g kampala /dev/null /etc/kampala-intel.env
+#   sudo editor /etc/kampala-intel.env
+# EnvironmentFile=/etc/kampala-intel.env
+
+ExecStart=/usr/bin/node src/server.js
+
+# The service restarts on failure but not on a clean exit. Restart=on-failure
+# rather than =always, because a configuration mistake should stay down and be
+# readable in `journalctl` instead of looping every 90 seconds forever.
+Restart=on-failure
+RestartSec=5
+
+# SIGTERM is what `systemctl stop` sends, and src/server.js handles it by closing
+# Fastify and checkpointing SQLite. Giving it 30s means the clean path is always
+# taken; a SIGKILL here would leave a WAL file to be recovered on next start.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Unbuffered, so `journalctl -f` shows output as it happens rather than in
+# 4 KiB chunks. Without this a slow engine run looks like a hung service.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kampala-intel
+
+# --- Hardening -----------------------------------------------------------
+# Nothing below changes how the app works. Each line removes a capability the
+# service has no use for.
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+# The one path the process may write to. Everything ProtectSystem=strict makes
+# read-only, this one opens back up. Backups land in here too, which is the
+# point: a backup written outside the data directory is a backup nobody finds.
+ReadWritePaths=/var/lib/kampala-intel
+
+[Install]
+WantedBy=multi-user.target

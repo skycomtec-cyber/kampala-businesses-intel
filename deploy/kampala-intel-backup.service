@@ -1,0 +1,62 @@
+# Kampala Businesses Intel - nightly backup
+#
+# Runs after the maintenance job, so the backup contains a freshly rolled-up day
+# rather than yesterday's. Without this the platform has a database and no way
+# back from a bad migration, a mistaken restore, or a disk that filled up.
+#
+#   sudo cp deploy/kampala-intel-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kampala-intel-backup.timer
+
+[Unit]
+Description=Back up the Kampala Businesses Intel database
+Documentation=file:/srv/kampala-intel/app/README.md
+After=kampala-intel.service
+
+[Service]
+Type=oneshot
+User=kampala
+Group=kampala
+WorkingDirectory=/srv/kampala-intel/app
+
+Environment=NODE_ENV=production
+Environment=KIP_DATA_DIR=/var/lib/kampala-intel
+
+# `--keep 14` is the default and is spelled out here because the number is the
+# decision, not the mechanism. Fourteen daily copies on this scale is a few
+# hundred megabytes; the unit below has room to raise it.
+#
+# The backup is taken with SQLite's online backup API, so the server does not need
+# to be stopped and the copy contains every write since the last checkpoint.
+# That is the property a plain file copy of a WAL database does not have.
+ExecStart=/usr/bin/node scripts/backup.js --keep 14
+
+# Verifying after writing, inside the same run. A backup nobody has read back is a
+# backup of unknown contents, and discovering that during a restore is the worst
+# possible time. The command already verifies; this is the setting that lets a
+# large one finish.
+TimeoutStartSec=900
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+# Backups are written beside the database, in <dataDir>/backups. To put them on a
+# different disk, add `--dir /mnt/backups` to ExecStart above and add that path to
+# ReadWritePaths here - ProtectSystem=strict makes everything else read-only, so a
+# backup written outside the data directory is a backup this unit cannot write.
+ReadWritePaths=/var/lib/kampala-intel
