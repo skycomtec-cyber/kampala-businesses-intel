@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Reference data for the platform.
  *
  * This file holds places and classifications, not businesses. Nothing here is
@@ -159,6 +159,7 @@ export const CATEGORIES = [
           { path: 'services/trades-and-construction/painting-and-finishing' },
           { path: 'services/trades-and-construction/welding-and-metalwork' },
           { path: 'services/trades-and-construction/roofing' },
+          { path: 'services/trades-and-construction/building-contractors' },
           { path: 'services/trades-and-construction/landscaping-and-groundworks' },
         ],
       },
@@ -192,6 +193,7 @@ export const CATEGORIES = [
         path: 'services/it-and-digital',
         children: [
           { path: 'services/it-and-digital/networking-and-internet' },
+          { path: 'services/it-and-digital/information-technology-services' },
           { path: 'services/it-and-digital/web-and-software' },
           { path: 'services/it-and-digital/mobile-money-and-payments' },
           { path: 'services/it-and-digital/cybersecurity' },
@@ -213,6 +215,7 @@ export const CATEGORIES = [
           { path: 'services/hospitality-and-food/catering' },
           { path: 'services/hospitality-and-food/hotels-and-lodging' },
           { path: 'services/hospitality-and-food/bars-and-nightlife' },
+          { path: 'services/hospitality-and-food/food-services' },
         ],
       },
       {
@@ -227,6 +230,7 @@ export const CATEGORIES = [
       { path: 'services/security-services' },
       { path: 'services/event-services' },
       { path: 'services/real-estate' },
+      { path: 'services/real-estate/property-sales-and-leasing' },
       { path: 'services/agricultural-services' },
     ],
   },
@@ -352,3 +356,7 @@ export const SKILLS = [
 export function verticalForCategoryPath(categoryPath) {
   return categoryPath.startsWith(`${SECOND_LIFE_PREFIX}/`) ? SECOND_LIFE_PREFIX : null
 }
+
+
+
+
