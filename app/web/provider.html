@@ -76,6 +76,11 @@
         min-width: 12rem;
       }
 
+      .desk-head .business-site {
+        margin-bottom: var(--s1);
+        font-size: 0.875rem;
+      }
+
       /* A matching request: the request, then the one form that answers it. */
       .work {
         padding: var(--s4) 0;
@@ -226,6 +231,7 @@
             Answering as
             <select id="business"></select>
           </label>
+          <a class="business-site" id="business-site" target="_blank" rel="noopener noreferrer" hidden></a>
           <button type="button" class="quiet" id="refresh">Refresh</button>
         </div>
 
@@ -515,6 +521,36 @@
           state.businesses.find((business) => business.id === remembered) ?? state.businesses[0]
         els.business.value = chosen.id
         state.business = chosen
+        renderBusinessSite()
+      }
+
+      /**
+       * The website of the business being answered for, offered as a link so an
+       * operator can look at what they are promising on behalf of before they
+       * promise anything.
+       *
+       * The same guard as the public business page applies: only an absolute
+       * http(s) url can become a link, because the value came from an editor
+       * once and has to stay inert even if a database edit puts something else
+       * in the column.
+       */
+      function renderBusinessSite() {
+        const link = document.getElementById('business-site')
+        const value = state.business?.website
+        const ok = typeof value === 'string' && /^https?:\/\//i.test(value)
+        link.hidden = !ok
+        link.removeAttribute('href')
+        link.textContent = ''
+        if (!ok) return
+        let host = value
+        try {
+          host = new URL(value).hostname
+        } catch {
+          link.hidden = true
+          return
+        }
+        link.href = value
+        link.textContent = `Visit ${host}`
       }
 
       function rememberBusiness(id) {
@@ -530,6 +566,7 @@
         if (!chosen) return
         state.business = chosen
         rememberBusiness(chosen.id)
+        renderBusinessSite()
         loadDesk()
       })
 
