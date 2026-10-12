@@ -81,6 +81,25 @@ test('create-admin takes a password from the environment when a launcher supplie
   }
 })
 
+test('create-admin takes both answers from the environment when a launcher supplies them', async () => {
+  // The launcher collects the email and password with Pinokio's `input` API and
+  // hands them over through the environment, so the CLI never touches the shell
+  // or stdin. This is the exact shape of that call.
+  const dataDir = freshDataDir()
+  try {
+    const result = await run([], {
+      dataDir,
+      env: { KIP_ADMIN_EMAIL: 'launcher@kampala.test', KIP_ADMIN_PASSWORD: password },
+    })
+    assert.equal(result.code, 0, result.stderr)
+    const [user] = readAccounts(dataDir)
+    assert.equal(user.email, 'launcher@kampala.test')
+    assert.equal(user.role, 'admin')
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
 test('create-admin takes both answers from piped stdin', async () => {
   const dataDir = freshDataDir()
   try {

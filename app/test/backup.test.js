@@ -418,7 +418,9 @@ test('the backup command runs, verifies, and prunes as a cron job would', async 
   const dataDir = freshDataDir(t)
   openSeeded(dataDir).close()
 
-  const first = await runScript(backupScript, ['--keep', '2'], { KIP_DATA_DIR: dataDir })
+  const first = await runScript(backupScript, ['--date', '2026-10-01T00:00:00Z', '--keep', '2'], {
+    KIP_DATA_DIR: dataDir,
+  })
   assert.equal(first.code, 0, first.stderr)
   assert.match(first.stdout, /Backup written:/)
   assert.match(first.stdout, /Verified: integrity check passed/, 'it says what it checked')

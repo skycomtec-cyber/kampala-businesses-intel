@@ -7,9 +7,16 @@
  * kind of data it exists not to collect. Every account is created here, by
  * somebody with shell access, which is a far higher bar than an email form.
  *
- * The password comes from KIP_ADMIN_PASSWORD, or from the first line of stdin, or
- * from a prompt with echo switched off. It is never accepted as an argument,
- * because an argument is visible in the process table and lands in shell history.
+ * The email comes from --email, or from KIP_ADMIN_EMAIL, or from the first line
+ * of stdin, or from a prompt. The password comes from KIP_ADMIN_PASSWORD, or from
+ * the second line of stdin, or from a prompt with echo switched off. It is never
+ * accepted as an argument, because an argument is visible in the process table
+ * and lands in shell history.
+ *
+ * The launcher collects both answers with Pinokio's `input` API and passes them
+ * through KIP_ADMIN_EMAIL and KIP_ADMIN_PASSWORD, so neither touches the terminal
+ * (which the CLI cannot drive reliably under the launcher's shell) or the command
+ * line.
  */
 
 import process from 'node:process'
@@ -51,6 +58,8 @@ const log = (message) => {
   if (!options.quiet) process.stdout.write(`${message}\n`)
 }
 
+const envEmail = process.env.KIP_ADMIN_EMAIL
+
 const config = loadConfig()
 const app = openApp({ config })
 
@@ -59,7 +68,7 @@ try {
 
   if (app.users.list().length === 0) {
     log('No accounts exist yet. The first one is an admin.')
-  } else if (!options.email) {
+  } else if (!options.email && !envEmail) {
     log(
       'Accounts already exist. Create another with:\n' +
         '  npm run create-admin -- --email you@example.com [--role editor]',
@@ -69,8 +78,11 @@ try {
 
   // Exactly one thing may own stdin. Reading piped input and the interactive
   // prompt attached at the same time split the input between them, and the
-  // account then gets created with half an email address.
-  const piped = options.email || process.stdin.isTTY ? [] : await readStdinLines()
+  // account then gets created with half an email address. An email supplied by
+  // --email or by the environment is the whole email, so nothing is read from
+  // stdin in that case.
+  const piped =
+    options.email || envEmail || process.stdin.isTTY ? [] : await readStdinLines()
   const suppliedPassword = process.env.KIP_ADMIN_PASSWORD ?? piped[1]
   const reader = process.stdin.isTTY ? createReader() : null
 
@@ -85,7 +97,7 @@ try {
     return reader.ask(question, askOptions)
   }
 
-  const email = (options.email ?? piped[0] ?? (await askFor('Email: '))).trim()
+  const email = (options.email ?? envEmail ?? piped[0] ?? (await askFor('Email: '))).trim()
   const password =
     suppliedPassword ??
     (await askFor(`Password (min ${config.auth.minPasswordLength} characters): `, {

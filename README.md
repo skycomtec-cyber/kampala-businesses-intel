@@ -73,8 +73,9 @@ This is the part worth reading before deploying it anywhere public.
 
 1. **Install** from the menu. This installs dependencies, applies migrations, imports the
    reference data and runs the test suite so you know the install works.
-2. **Create Admin Account** from the menu. There is no public sign-up; this prompts for an email
-   and a password (typed characters are not echoed) and is the only way an account is created.
+2. **Create Admin Account** from the menu. There is no public sign-up; this opens a form for the
+   operator's email and password (the password is masked) and is the only way an account is created.
+   The form's answers are handed to the CLI through the environment, so nothing is typed into a shell.
 3. **Start** from the menu. Pinokio assigns a free port and opens the front page.
 
 Menu items: `Start`, `Create Admin Account`, `Update`, `Reset`. Stopping the server is done from
@@ -89,11 +90,23 @@ npm run bootstrap     # migrations + reference data + the first-admin instructio
 npm start             # http://127.0.0.1:4310
 ```
 
-Override anything through the environment:
+Overriding `npm start` through the environment:
 
 ```bash
 KIP_PORT=5000 KIP_K_THRESHOLD=10 npm start
 ```
+
+Creating the first account from a shell. The password is never an argument, because an argument is
+visible in the process table and lands in shell history, so it is passed through the environment (or
+piped, or typed at a hidden prompt):
+
+```bash
+cd app
+KIP_ADMIN_EMAIL=you@example.com KIP_ADMIN_PASSWORD='at-least-12-characters' npm run create-admin
+```
+
+`--email` and `KIP_ADMIN_EMAIL` are interchangeable; the same applies to the password's sources. The
+Pinokio launcher uses the environment pair so that neither answer touches the command line.
 
 ### Configuration
 
