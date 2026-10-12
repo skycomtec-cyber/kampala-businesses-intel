@@ -661,6 +661,7 @@ API version is deployed to know whether the process is alive.
 | `GET` | `/api/v1/requests/:reference` | One request, its items, its offers, its status history. |
 | `POST` | `/api/v1/requests` | Post a request. No account needed. |
 | `POST` | `/api/v1/requests/:reference/withdraw` | With your access token, or as the signed-in requester. |
+| `POST` | `/api/v1/requests/:reference/offers/:offerId/accept` | Accept one offer. With your access token, or as the signed-in requester. |
 | `POST` | `/api/v1/auth/login` | Returns a bearer token and sets a session cookie. |
 | `POST` | `/api/v1/auth/logout` | Ends the session. |
 | `POST` | `/api/v1/auth/change-password` | Requires the current password. |
@@ -685,6 +686,10 @@ API version is deployed to know whether the process is alive.
 | `POST`/`PATCH`/`DELETE` | `/api/v1/admin/businesses/:id/products[/:productId]` | `business:write` |
 | `POST`/`PATCH`/`DELETE` | `/api/v1/admin/businesses/:id/contacts[/:contactId]` | `business:write` |
 | `POST`/`DELETE` | `/api/v1/admin/businesses/:id/skills[/:skillId]` | `business:write` |
+| `GET` | `/api/v1/admin/businesses/:id/offers` | `business:read` (offers a business has made) |
+| `GET` | `/api/v1/admin/businesses/:id/matching-requests` | `business:read` (open requests it has not answered) |
+| `POST` | `/api/v1/requests/:reference/offers` | `business:write` (offer as a published business; `businessId` in the body) |
+| `POST` | `/api/v1/requests/:reference/offers/:offerId/withdraw` | `business:write` (retract one of its offers) |
 | `GET` | `/api/v1/admin/imports/businesses/schema` | `import:read` |
 | `POST` | `/api/v1/admin/imports/businesses` | `import:write` |
 | `POST` | `/api/v1/admin/reference/locations` | `reference:write` |
@@ -754,7 +759,7 @@ Fixed windows, in process memory, keyed by account when signed in and by address
 | Scope | Limit |
 | --- | --- |
 | Sign-in and password reset | 10 per 15 minutes |
-| `POST /requests`, withdraw | 5 per minute |
+| `POST /requests`, withdraw, offers, accept | 5 per minute |
 | `GET /search` | 30 per minute |
 | Everything else | 240 per minute |
 
@@ -794,10 +799,32 @@ curl -s -H "authorization: Bearer $TOKEN" \
 # What is missing there, including the gaps too small to publish
 curl -s "$BASE/api/v1/insights/opportunities?locationId=$LOCATION&includeSuppressed=true"
 
-# Post a request without an account, keep the token
-curl -s -X POST $BASE/api/v1/requests \
+# Post a request without an account, and keep both what it returns: the
+# reference is what a provider is told on the phone, and the token is what the
+# requester keeps to prove the request is theirs.
+REQUEST=$(curl -s -X POST $BASE/api/v1/requests \
   -H 'content-type: application/json' \
-  -d "{\"title\":\"Borehole pump needed for a school\",\"categoryId\":\"$CATEGORY\",\"locationId\":\"$LOCATION\"}"
+  -d "{\"title\":\"Borehole pump needed for a school\",\"categoryId\":\"$CATEGORY\",\"locationId\":\"$LOCATION\"}")
+REFERENCE=$(echo "$REQUEST" | jq -r .data.reference)
+ACCESS=$(echo "$REQUEST" | jq -r .data.accessToken)
+
+# The other half of the marketplace: a signed-in operator offers on the request
+# as a business it manages. The business has to be published (active and
+# approved) - an offer from a listing the public cannot see is never shown.
+BUSINESS=<a published business id>
+OFFER=$(curl -s -X POST $BASE/api/v1/requests/$REFERENCE/offers \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d "{\"businessId\":\"$BUSINESS\",\"price\":150000,\"message\":\"Can install this week.\"}")
+OFFER_ID=$(echo "$OFFER" | jq -r .data.id)
+
+# A provider can see its own pipeline, and the open work it could still answer.
+curl -s -H "authorization: Bearer $TOKEN" "$BASE/api/v1/admin/businesses/$BUSINESS/offers"
+curl -s -H "authorization: Bearer $TOKEN" "$BASE/api/v1/admin/businesses/$BUSINESS/matching-requests"
+
+# The requester, not the platform, decides which offer wins. Accepting declines
+# the rest and moves the request to in_progress, all in one write.
+curl -s -X POST $BASE/api/v1/requests/$REFERENCE/offers/$OFFER_ID/accept \
+  -H 'content-type: application/json' -d "{\"accessToken\":\"$ACCESS\"}"
 ```
 
 ### JavaScript

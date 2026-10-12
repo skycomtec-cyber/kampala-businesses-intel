@@ -78,6 +78,27 @@ function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
+/**
+ * Runs a business through the review pipeline until the public can see it.
+ *
+ * `verify` implies a claim and then the check; `approve` is the separate decision
+ * to publish. Both are done through the api so the test's setup is bound by the
+ * same pipeline a real listing travels.
+ */
+async function publish(ctx, business, headers) {
+  for (const action of ['verify', 'approve']) {
+    const response = await ctx.server.inject({
+      method: 'POST',
+      url: `/api/v1/admin/businesses/${business.id}/verification`,
+      headers,
+      payload: { action, reason: 'Test setup.' },
+    })
+    assert.equal(response.statusCode, 200, response.body)
+  }
+  return business
+}
+
+
 test('health, meta and the reference endpoints answer without a session', async (t) => {
   const ctx = await freshServer()
   t.after(() => ctx.cleanup())
@@ -1017,6 +1038,217 @@ test('a marketplace request is anonymous, and only its access token can withdraw
   assert.equal(withdrawn.statusCode, 200, withdrawn.body)
   assert.equal(withdrawn.json().data.status, 'cancelled')
 })
+
+test('a provider offers on a request, and only the requester can accept it', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const admin = await signIn(ctx, { email: 'provider@kampala.test' })
+  const category = leafCategory(ctx.app)
+  const [district] = ctx.app.locations.byKind('district')
+
+  // Two businesses in the same category and place. One is published and may
+  // offer; the other is still in the review queue and must be refused, because
+  // an offer from a listing the public cannot see is an offer nobody can accept.
+  const published = await publish(
+    ctx,
+    ctx.app.businesses.create({
+      name: 'Kampala Fixers',
+      categoryId: category.id,
+      locationId: district.id,
+      status: 'active',
+    }),
+    admin.headers,
+  )
+  const unlisted = ctx.app.businesses.create({
+    name: 'Unlisted Repairs',
+    categoryId: category.id,
+    locationId: district.id,
+    status: 'active',
+  })
+
+  const posted = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/requests',
+    payload: {
+      title: 'Replace a cracked laptop screen',
+      categoryId: category.id,
+      locationId: district.id,
+    },
+  })
+  const { reference, accessToken } = posted.json().data
+
+  // Signed out is told to sign in, not that the route is merely closed.
+  const anonymous = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers`,
+    payload: { businessId: published.id },
+  })
+  assert.equal(anonymous.statusCode, 401)
+  assert.equal(anonymous.json().error.code, 'unauthenticated')
+
+  // A viewer may read businesses but not act for one, and the two answers differ.
+  const { token: viewerToken } = await signIn(ctx, {
+    email: 'viewer-offers@kampala.test',
+    role: 'viewer',
+  })
+  const refused = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers`,
+    headers: { authorization: `Bearer ${viewerToken}` },
+    payload: { businessId: published.id },
+  })
+  assert.equal(refused.statusCode, 403)
+  assert.equal(refused.json().error.code, 'forbidden')
+
+  const hidden = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers`,
+    headers: admin.headers,
+    payload: { businessId: unlisted.id },
+  })
+  assert.equal(hidden.statusCode, 409)
+  assert.equal(hidden.json().error.code, 'conflict')
+
+  const offered = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers`,
+    headers: admin.headers,
+    payload: { businessId: published.id, message: 'I can do it today.', price: 90000 },
+  })
+  assert.equal(offered.statusCode, 201, offered.body)
+  const offer = offered.json().data
+  assert.equal(offer.status, 'submitted')
+  assert.equal(offer.businessId, published.id)
+
+  // The public view names the business but never the message it sent.
+  const publicView = await ctx.server.inject({ method: 'GET', url: `/api/v1/requests/${reference}` })
+  assert.equal(publicView.json().data.offers.length, 1)
+  assert.equal(publicView.json().data.offers[0].businessName, 'Kampala Fixers')
+  assert.equal(publicView.json().data.offers[0].message, null)
+  // The public view is safe to cache in front of the database.
+  assert.match(publicView.headers['cache-control'], /^public/)
+
+  // The requester reading their own request with the token from creation is the
+  // one place an offer's own words are readable before a decision is made.
+  const ownerView = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/requests/${reference}`,
+    headers: { 'x-request-token': accessToken },
+  })
+  assert.equal(ownerView.json().data.offers[0].message, 'I can do it today.')
+  // The owner's view is not a public document, and the token is not part of
+  // `vary`, so it must never be stored by a shared cache.
+  assert.equal(ownerView.headers['cache-control'], 'no-store')
+
+  // A token that proves nothing does not widen the view; it falls back to the
+  // public one rather than being told it was wrong.
+  const wrongToken = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/requests/${reference}`,
+    headers: { 'x-request-token': 'a-token-that-was-never-issued' },
+  })
+  assert.equal(wrongToken.json().data.offers[0].message, null)
+
+  // A stranger holding neither the token nor the requester's session cannot accept.
+  const stranger = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers/${offer.id}/accept`,
+    payload: { accessToken: 'a-token-that-was-never-issued' },
+  })
+  assert.equal(stranger.statusCode, 400)
+
+  const accepted = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers/${offer.id}/accept`,
+    payload: { accessToken },
+  })
+  assert.equal(accepted.statusCode, 200, accepted.body)
+  assert.equal(accepted.json().data.status, 'in_progress')
+  // The requester's own view is the one place the message is readable.
+  assert.equal(accepted.json().data.offers[0].message, 'I can do it today.')
+})
+
+test('a business can read its pipeline, and only the business that owns an offer can withdraw it', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const admin = await signIn(ctx, { email: 'pipeline@kampala.test' })
+  const category = leafCategory(ctx.app)
+  const [district] = ctx.app.locations.byKind('district')
+  const business = await publish(
+    ctx,
+    ctx.app.businesses.create({
+      name: 'Entebbe Fixers',
+      categoryId: category.id,
+      locationId: district.id,
+      status: 'active',
+    }),
+    admin.headers,
+  )
+
+  const posted = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/requests',
+    payload: {
+      title: 'Bicycle puncture repair needed',
+      categoryId: category.id,
+      locationId: district.id,
+    },
+  })
+  const { reference } = posted.json().data
+
+  const before = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/admin/businesses/${business.id}/matching-requests`,
+    headers: admin.headers,
+  })
+  assert.equal(before.statusCode, 200, before.body)
+  assert.equal(before.json().data.length, 1)
+
+  const offered = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers`,
+    headers: admin.headers,
+    payload: { businessId: business.id, price: 70000 },
+  })
+  const offer = offered.json().data
+
+  // A request a business has already answered is no longer offered to it.
+  const after = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/admin/businesses/${business.id}/matching-requests`,
+    headers: admin.headers,
+  })
+  assert.equal(after.json().data.length, 0)
+
+  const pipeline = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/admin/businesses/${business.id}/offers`,
+    headers: admin.headers,
+  })
+  assert.equal(pipeline.json().data.length, 1)
+  assert.equal(pipeline.json().data[0].requestReference, reference)
+
+  // Naming a business that does not own the offer is refused rather than applied.
+  const wrongBusiness = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers/${offer.id}/withdraw`,
+    headers: admin.headers,
+    payload: { businessId: '00000000-0000-0000-0000-000000000000' },
+  })
+  assert.equal(wrongBusiness.statusCode, 403)
+
+  const withdrawn = await ctx.server.inject({
+    method: 'POST',
+    url: `/api/v1/requests/${reference}/offers/${offer.id}/withdraw`,
+    headers: admin.headers,
+    payload: { businessId: business.id },
+  })
+  assert.equal(withdrawn.statusCode, 200, withdrawn.body)
+  assert.equal(withdrawn.json().data.status, 'withdrawn')
+})
+
 
 test('an unknown route and a schema violation both answer with the error envelope', async (t) => {
   const ctx = await freshServer()

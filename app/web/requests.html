@@ -1,0 +1,1182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Requests &middot; Kampala Intelligence Platform</title>
+    <meta
+      name="description"
+      content="What people in Kampala are asking for, posted without an account, and the businesses that offer to fulfil them."
+    />
+    <!-- appearance read before paint, so a dark-mode visitor gets no flash -->
+    <script>
+      try {
+        var t = localStorage.getItem('kip-theme')
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/theme.css" />
+    <style>
+      /*
+       * The two halves of the marketplace on one page: what people are asking
+       * for, and the form that asks. They are separate views rather than a list
+       * with a form stapled to it, because writing a request is a task with a
+       * beginning and an end, not a filter over the list.
+       */
+
+      .filters {
+        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+      }
+
+      /* Two or three related fields on one line, wrapping on their own. */
+      .row-2,
+      .row-3 {
+        display: grid;
+        gap: var(--s4);
+      }
+
+      .row-2 {
+        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+      }
+
+      .row-3 {
+        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+      }
+
+      textarea {
+        min-height: 4.5rem;
+        resize: vertical;
+      }
+
+      /* The items the requester adds to a request: a small editing list. */
+      .items {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--s2);
+      }
+
+      .items li {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--s2);
+        padding: 0.15rem 0.35rem 0.15rem 0.6rem;
+        border-radius: 999px;
+        background: var(--card);
+        border: 1px solid var(--line-2);
+        font-size: 0.8125rem;
+      }
+
+      .items button {
+        min-height: 1.5rem;
+        padding: 0 0.4rem;
+        border-radius: 999px;
+        border-color: transparent;
+        color: var(--muted);
+      }
+
+      /* The urgency of a request is a fact about it, so it wears a chip rather
+         than colouring the whole row; the row keeps the branch colouring. */
+      .urgency {
+        text-transform: capitalize;
+      }
+
+      /* A request row: the same ruled ledger line the directory uses. */
+      .card .meta {
+        gap: var(--s2) var(--s3);
+      }
+
+      /* The reference and the access token are things to keep, so they are set
+         in mono and given room to be read back. */
+      .credentials {
+        display: grid;
+        gap: var(--s2);
+      }
+
+      .credentials code {
+        font-size: 0.9375rem;
+        padding: 0.35rem 0.55rem;
+        word-break: break-all;
+      }
+
+      .credentials .pair {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+        flex-wrap: wrap;
+      }
+
+      /* An offer, read by the requester: the business, its price, and the one
+         thing only the requester is shown, its message. */
+      .offer-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--s2) var(--s3);
+        padding: var(--s4) 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .offer-row:last-child {
+        border-bottom: 0;
+      }
+
+      .offer-row .who {
+        flex: 1 1 16rem;
+        min-width: 0;
+      }
+
+      .offer-row .price {
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .offer-row .message {
+        flex: 1 1 100%;
+        color: var(--ink-2);
+        font-size: 0.9375rem;
+        max-width: 46rem;
+        text-wrap: pretty;
+      }
+
+      /* History is a record of what happened, so it is a numbered ledger. */
+      .history li {
+        display: grid;
+        grid-template-columns: 8.5rem 1fr;
+        gap: var(--s4);
+        padding: var(--s3) 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.9375rem;
+      }
+
+      .history li:last-child {
+        border-bottom: 0;
+      }
+
+      .history time {
+        color: var(--faint);
+        font-size: 0.8125rem;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .history .what {
+        color: var(--ink-2);
+      }
+
+      @media (max-width: 34rem) {
+        .history li {
+          grid-template-columns: 1fr;
+          gap: var(--s1);
+        }
+      }
+
+      .stack-sm > * + * {
+        margin-top: var(--s3);
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="wordmark" href="/">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          Kampala Intelligence
+        </a>
+        <nav class="topnav">
+          <a href="/">Engine</a>
+          <a href="/directory.html">Directory</a>
+          <a href="/insights.html">Gaps</a>
+          <a href="/requests.html" aria-current="page">Requests</a>
+          <a href="/operator.html">Verification queue</a>
+          <button class="theme-toggle" type="button" hidden>
+            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <!-- The list of open requests --------------------------------------- -->
+      <section id="view-list">
+        <div class="masthead">
+          <div>
+            <h1>What people are asking for</h1>
+            <p class="sub">
+              Requests posted by anybody in Kampala, and the businesses that answer them. Posting
+              never needs an account; a request that cannot be found is a gap in the city.
+            </p>
+          </div>
+          <nav>
+            <button type="button" id="go-post">Ask for something</button>
+          </nav>
+        </div>
+
+        <form class="filters" id="filters">
+          <label>
+            Category
+            <select id="f-category">
+              <option value="">any category</option>
+            </select>
+          </label>
+          <label>
+            Place
+            <select id="f-location">
+              <option value="">anywhere</option>
+            </select>
+          </label>
+          <label>
+            Urgency
+            <select id="f-urgency">
+              <option value="">any urgency</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+          <label>
+            Search
+            <input type="search" id="f-search" maxlength="120" autocomplete="off" placeholder="A word from the request&hellip;" />
+          </label>
+          <button type="button" class="quiet clear" id="f-clear">Clear</button>
+        </form>
+
+        <div class="summary">
+          <h2>Open requests</h2>
+          <p id="count"></p>
+        </div>
+        <p class="problem" id="problem" role="alert"></p>
+        <ul class="results" id="results"></ul>
+        <p class="empty" id="empty" hidden>
+          Nothing is open here right now. A request appears the moment somebody posts one, so an
+          empty list means nobody has asked for anything in this category or place yet.
+        </p>
+        <div class="pager" id="pager" hidden>
+          <button type="button" class="quiet" id="previous">Previous</button>
+          <button type="button" class="quiet" id="next">Next</button>
+          <span id="range"></span>
+        </div>
+      </section>
+
+      <!-- The form that asks ------------------------------------------------ -->
+      <section id="view-post" hidden>
+        <div class="masthead">
+          <div>
+            <h1>Ask for something</h1>
+            <p class="sub">
+              Say what you need and where. Published businesses in that category and place are told
+              there is work, and they answer with an offer you can accept.
+            </p>
+          </div>
+          <nav>
+            <button type="button" class="quiet" id="post-back">Back to requests</button>
+          </nav>
+        </div>
+
+        <p class="problem" id="post-problem" role="alert"></p>
+
+        <form id="post-form" class="stack-lg">
+          <label>
+            What do you need?
+            <input
+              type="text"
+              id="p-title"
+              required
+              minlength="6"
+              maxlength="160"
+              autocomplete="off"
+              placeholder="Borehole pump needed for a school"
+            />
+          </label>
+          <label>
+            Any more detail (optional)
+            <textarea id="p-description" maxlength="2000" placeholder="The old pump stopped in March and the well is still good&hellip;"></textarea>
+          </label>
+          <div class="row-2">
+            <label>
+              Category
+              <select id="p-category" required>
+                <option value="">choose a category</option>
+              </select>
+            </label>
+            <label>
+              Place
+              <select id="p-location" required>
+                <option value="">choose a place</option>
+              </select>
+            </label>
+          </div>
+          <div class="row-3">
+            <label>
+              Urgency
+              <select id="p-urgency">
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+            <label>
+              Budget from, UGX (optional)
+              <input type="number" id="p-budget-min" min="0" step="1000" inputmode="numeric" />
+            </label>
+            <label>
+              Budget to, UGX (optional)
+              <input type="number" id="p-budget-max" min="0" step="1000" inputmode="numeric" />
+            </label>
+          </div>
+          <label>
+            Wanted by (optional)
+            <input type="date" id="p-wanted-by" />
+          </label>
+
+          <div>
+            <p class="label">Specific items (optional)</p>
+            <div class="field">
+              <input type="text" id="p-item-name" maxlength="120" autocomplete="off" placeholder="Phone screen" />
+              <input type="number" id="p-item-qty" min="1" max="999" value="1" inputmode="numeric" style="max-width: 6rem" />
+              <button type="button" class="quiet" id="p-item-add">Add item</button>
+            </div>
+            <ul class="items" id="p-items"></ul>
+          </div>
+
+          <p class="note">
+            Your request is anonymous. When it is posted you get a reference to share with a
+            provider and a private token to accept an offer later. Keep the token; it is the only
+            thing that proves the request is yours.
+          </p>
+
+          <button type="submit" id="p-submit">Post the request</button>
+        </form>
+
+        <div class="note credentials" id="post-result" hidden></div>
+      </section>
+
+      <!-- One request, read in full ---------------------------------------- -->
+      <section id="view-detail" hidden>
+        <div class="masthead">
+          <div>
+            <h1 id="d-title">Request</h1>
+            <p class="where" id="d-where"></p>
+          </div>
+          <nav>
+            <button type="button" class="quiet" id="detail-back">All open requests</button>
+          </nav>
+        </div>
+
+        <p class="problem" id="detail-problem" role="alert"></p>
+        <p class="lede" id="d-description" hidden></p>
+        <dl class="facts" id="d-facts"></dl>
+        <p class="note" id="d-owner" hidden></p>
+        <p class="note" id="d-token-hint" hidden></p>
+
+        <section class="section" id="d-items-section" hidden>
+          <h2>What is needed</h2>
+          <ul class="offers" id="d-items"></ul>
+        </section>
+
+        <section class="section" id="d-offers-section" hidden>
+          <h2>Offers</h2>
+          <ul id="d-offers"></ul>
+        </section>
+
+        <section class="section" id="d-history-section" hidden>
+          <h2>History</h2>
+          <ol class="history" id="d-history"></ol>
+        </section>
+      </section>
+    </main>
+
+    <script src="/theme.js"></script>
+    <script src="/sheet.js"></script>
+    <script>
+      /*
+       * The marketplace, from the public side.
+       *
+       * Three jobs: browse the open requests, post one, and follow the one you
+       * posted. The third is the only one that needs anything held locally: an
+       * anonymous requester is proved by the access token issued at creation, so
+       * the token is kept against its reference and sent back as `x-request-token`
+       * when reading. Holding it is the price of not having an account, and the
+       * page says so plainly instead of pretending the request is recoverable
+       * without it.
+       *
+       * Every value that came from the api is written with textContent, never
+       * with innerHTML: a request title and an offer message are somebody else's
+       * words, and this is a page anyone can be sent a link to.
+       */
+      const API = '/api/v1'
+      const TOKENS_KEY = 'kip-request-tokens'
+      const PAGE_SIZE = 25
+
+      const URGENCY_LABELS = { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Urgent' }
+      const STATUS_LABELS = {
+        open: 'Open',
+        matched: 'Matched',
+        in_progress: 'In progress',
+        fulfilled: 'Fulfilled',
+        cancelled: 'Cancelled',
+        expired: 'Expired',
+      }
+      const OFFER_LABELS = {
+        submitted: 'Offered',
+        accepted: 'Accepted',
+        declined: 'Declined',
+        withdrawn: 'Withdrawn',
+        completed: 'Completed',
+      }
+
+      const els = {
+        list: document.getElementById('view-list'),
+        post: document.getElementById('view-post'),
+        detail: document.getElementById('view-detail'),
+      }
+
+      const state = {
+        categoryNames: new Map(),
+        locationNames: new Map(),
+        categoryOptions: [],
+        locationOptions: [],
+        me: null,
+        /** The offers the requester is drafting on the post form. */
+        items: [],
+        filters: { categoryId: '', locationId: '', urgency: '', search: '' },
+        offset: 0,
+        total: 0,
+        loading: false,
+      }
+
+      /* --- helpers -------------------------------------------------------- */
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          credentials: 'same-origin',
+          // The public cache marks anonymous reads cacheable for 30s, which is
+          // right for the directory and wrong here: a request list and a request
+          // detail are live, and the page that just posted something must see it.
+          cache: 'no-store',
+          headers: {
+            accept: 'application/json',
+            ...(options.body ? { 'content-type': 'application/json' } : {}),
+            ...(options.headers ?? {}),
+          },
+          method: options.method ?? 'GET',
+          body: options.body ? JSON.stringify(options.body) : undefined,
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(payload?.error?.message ?? 'The request could not be completed.')
+          error.status = response.status
+          throw error
+        }
+        return payload
+      }
+
+      const say = (element, message) => {
+        element.textContent = message ?? ''
+      }
+
+      function span(className, value) {
+        const node = document.createElement('span')
+        if (className) node.className = className
+        node.textContent = value
+        return node
+      }
+
+      function rule() {
+        const node = document.createElement('span')
+        node.className = 'rule'
+        node.setAttribute('aria-hidden', 'true')
+        return node
+      }
+
+      function when(value) {
+        if (!value) return ''
+        const at = new Date(value)
+        if (Number.isNaN(at.getTime())) return String(value)
+        return at.toLocaleString(undefined, {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      }
+
+      function money(value, currency) {
+        if (!Number.isFinite(value)) return null
+        return `${value.toLocaleString()}${currency ? ` ${currency}` : ''}`
+      }
+
+      /* --- the token a requester keeps ------------------------------------ */
+
+      /**
+       * The access tokens held in this browser, keyed by request reference.
+       *
+       * Stored in localStorage rather than memory so a requester who closes the
+       * tab can come back and accept an offer. It is a real secret, so it is
+       * never put in a url; it is only ever sent back as a request header.
+       */
+      function tokensInThisBrowser() {
+        try {
+          const raw = JSON.parse(localStorage.getItem(TOKENS_KEY))
+          return raw && typeof raw === 'object' ? raw : {}
+        } catch {
+          return {}
+        }
+      }
+
+      function rememberToken(reference, token) {
+        if (!reference || !token) return
+        const all = tokensInThisBrowser()
+        all[reference] = token
+        try {
+          localStorage.setItem(TOKENS_KEY, JSON.stringify(all))
+        } catch {
+          // A browser that refuses storage still works for this session; it just
+          // cannot remember the token for the next one.
+        }
+      }
+
+      const tokenFor = (reference) => tokensInThisBrowser()[reference] ?? null
+
+      /* --- reference names ------------------------------------------------ */
+
+      async function loadReference() {
+        const [categories, locations] = await Promise.all([
+          api(`${API}/categories`).then((body) => body.data ?? []),
+          api(`${API}/locations?limit=500`).then((body) => body.data ?? []),
+        ])
+
+        const flatten = (nodes, depth) => {
+          for (const node of nodes ?? []) {
+            state.categoryNames.set(node.id, node.name)
+            state.categoryOptions.push({ id: node.id, label: `${'— '.repeat(depth)}${node.name}` })
+            flatten(node.children, depth + 1)
+          }
+        }
+        flatten(categories, 0)
+
+        for (const location of locations) {
+          state.locationNames.set(location.id, location.name)
+          state.locationOptions.push({
+            id: location.id,
+            label: location.pathNames ?? location.name,
+          })
+        }
+      }
+
+      function fillSelect(select, options, placeholder) {
+        const chosen = select.value
+        select.replaceChildren()
+        if (placeholder) {
+          const first = document.createElement('option')
+          first.value = ''
+          first.textContent = placeholder
+          select.append(first)
+        }
+        for (const option of options) {
+          const node = document.createElement('option')
+          node.value = option.id
+          node.textContent = option.label
+          select.append(node)
+        }
+        select.value = chosen
+      }
+
+      /* --- routing -------------------------------------------------------- */
+
+      function route() {
+        const reference = new URLSearchParams(window.location.search).get('r')
+        if (reference) {
+          show(els.detail)
+          loadDetail(reference).catch((error) => say(document.getElementById('detail-problem'), error.message))
+        } else {
+          show(els.list)
+          loadList()
+        }
+      }
+
+      function show(view) {
+        for (const section of [els.list, els.post, els.detail]) section.hidden = section !== view
+        window.scrollTo({ top: 0 })
+      }
+
+      function goToList() {
+        window.history.pushState({}, '', window.location.pathname)
+        show(els.list)
+        loadList()
+      }
+
+      /* --- the list of open requests -------------------------------------- */
+
+      async function loadList() {
+        state.loading = true
+        renderList()
+        let page = { data: [], meta: {} }
+        let failure = null
+        try {
+          page = await api(`${API}/requests?${listQuery()}`)
+        } catch (error) {
+          failure = error
+        }
+        state.loading = false
+        state.total = page.meta?.total ?? 0
+        say(document.getElementById('problem'), failure ? failure.message : '')
+        renderList(page.data ?? [])
+        renderPager()
+      }
+
+      function listQuery() {
+        const params = new URLSearchParams({
+          status: 'open',
+          sort: 'newest',
+          limit: String(PAGE_SIZE),
+          offset: String(state.offset),
+        })
+        const { categoryId, locationId, urgency, search } = state.filters
+        if (categoryId) params.set('categoryId', categoryId)
+        if (locationId) params.set('locationId', locationId)
+        if (urgency) params.set('urgency', urgency)
+        if (search) params.set('search', search)
+        return params
+      }
+
+      function renderList(rows) {
+        const count = document.getElementById('count')
+        if (state.loading) say(count, 'Loading…')
+        else if (state.total === 0) say(count, '')
+        else if (state.total <= PAGE_SIZE && state.offset === 0) {
+          say(count, `${state.total} request${state.total === 1 ? '' : 's'}`)
+        } else {
+          say(count, `Showing ${state.offset + 1}–${state.offset + (rows ?? []).length} of ${state.total}`)
+        }
+
+        const results = document.getElementById('results')
+        results.replaceChildren()
+        for (const request of rows ?? []) results.append(requestCard(request))
+
+        document.getElementById('empty').hidden =
+          state.loading || state.total !== 0 || (rows ?? []).length > 0 || !!document.getElementById('problem').textContent
+      }
+
+      function requestCard(request) {
+        const card = document.createElement('li')
+        card.className = 'card'
+
+        const name = document.createElement('p')
+        name.className = 'name'
+        const link = document.createElement('a')
+        link.href = `/requests.html?r=${encodeURIComponent(request.reference)}`
+        link.textContent = request.title
+        name.append(link)
+        card.append(name)
+
+        // The place and the category decide whether the request is answerable, so
+        // both are on the card rather than one page away.
+        const where = document.createElement('p')
+        where.className = 'where'
+        const bits = []
+        const category = state.categoryNames.get(request.categoryId)
+        bits.push(category ? { text: category } : { text: 'No category', absent: true })
+        const place = state.locationNames.get(request.locationId)
+        bits.push(place ? { text: place } : { text: 'Place not recorded', absent: true })
+        bits.forEach((bit, index) => {
+          if (index > 0) where.append(rule())
+          where.append(span(bit.absent ? 'absent' : null, bit.text))
+        })
+        card.append(where)
+
+        if (request.description) {
+          const blurb = document.createElement('p')
+          blurb.className = 'blurb'
+          blurb.textContent =
+            request.description.length > 160 ? `${request.description.slice(0, 160)}…` : request.description
+          card.append(blurb)
+        }
+
+        const meta = document.createElement('p')
+        meta.className = 'meta'
+        meta.append(span('chip urgency', URGENCY_LABELS[request.urgency] ?? request.urgency))
+        const budget = budgetLine(request)
+        if (budget) meta.append(span(null, budget))
+        if (request.createdAt) meta.append(span('kind', when(request.createdAt)))
+        card.append(meta)
+
+        return card
+      }
+
+      function budgetLine(request) {
+        const min = Number.isFinite(request.budgetMin) ? request.budgetMin : null
+        const max = Number.isFinite(request.budgetMax) ? request.budgetMax : null
+        if (min === null && max === null) return null
+        const currency = request.currency ?? ''
+        if (min !== null && max !== null) return `Budget ${min.toLocaleString()}–${max.toLocaleString()} ${currency}`.trim()
+        if (min !== null) return `Budget from ${min.toLocaleString()} ${currency}`.trim()
+        return `Budget up to ${max.toLocaleString()} ${currency}`.trim()
+      }
+
+      function renderPager() {
+        const pager = document.getElementById('pager')
+        const hasMore = state.offset + PAGE_SIZE < state.total
+        pager.hidden = state.total === 0 || (state.offset === 0 && !hasMore)
+        document.getElementById('previous').disabled = state.loading || state.offset === 0
+        document.getElementById('next').disabled = state.loading || !hasMore
+        const last = Math.min(state.offset + PAGE_SIZE, state.total)
+        say(document.getElementById('range'), state.total === 0 ? '' : `${state.offset + 1}–${last} of ${state.total}`)
+      }
+
+      /* --- following one request ------------------------------------------ */
+
+      async function loadDetail(reference) {
+        setText('d-title', 'Request')
+        say(document.getElementById('detail-problem'), '')
+        const token = tokenFor(reference)
+        const body = await api(`${API}/requests/${encodeURIComponent(reference)}`, {
+          headers: token ? { 'x-request-token': token } : {},
+        })
+        renderDetail(reference, body.data, token)
+      }
+
+      const setText = (id, value) => {
+        document.getElementById(id).textContent = value
+      }
+
+      function renderDetail(reference, request, token) {
+        const isOwner =
+          !!token ||
+          (state.me && request.requesterUserId && state.me.id === request.requesterUserId)
+
+        document.title = `${request.title} · Kampala Intelligence Platform`
+        setText('d-title', request.title)
+
+        const where = document.getElementById('d-where')
+        where.replaceChildren()
+        const category = state.categoryNames.get(request.categoryId)
+        const place = state.locationNames.get(request.locationId)
+        const bits = []
+        if (category) bits.push(category)
+        if (place) bits.push(place)
+        bits.push(URGENCY_LABELS[request.urgency] ?? request.urgency)
+        bits.forEach((text, index) => {
+          if (index > 0) where.append(rule())
+          where.append(span(null, text))
+        })
+
+        const description = document.getElementById('d-description')
+        description.textContent = request.description ?? ''
+        description.hidden = !request.description
+
+        renderFacts(request)
+
+        // The owner's line. It states what this browser can do with the request
+        // rather than assuming the reader knows why the buttons are here.
+        const owner = document.getElementById('d-owner')
+        const hint = document.getElementById('d-token-hint')
+        if (isOwner) {
+          owner.hidden = false
+          owner.replaceChildren()
+          owner.append(
+            document.createTextNode('You posted this request. '),
+            span(null, 'Accepting an offer declines the rest and moves the request to in progress.'),
+          )
+          if (request.status === 'open' || request.status === 'matched') {
+            const withdraw = document.createElement('button')
+            withdraw.type = 'button'
+            withdraw.className = 'quiet'
+            withdraw.textContent = 'Withdraw this request'
+            withdraw.style.marginLeft = 'var(--s3)'
+            withdraw.addEventListener('click', () => withdrawRequest(reference, token))
+            owner.append(withdraw)
+          }
+        } else {
+          owner.hidden = true
+        }
+
+        // A requester who has lost their token is told so rather than left to
+        // wonder why the offers are silent.
+        if (request.offers?.length > 0 && !isOwner) {
+          hint.hidden = false
+          hint.textContent =
+            'Offers name the business that made them. The message an offer carries is shown to the requester only; open this page from the device that posted the request, or with the token it returned, to read them.'
+        } else {
+          hint.hidden = true
+        }
+
+        renderItems(request)
+        renderOffers(reference, request, isOwner, token)
+        renderHistory(request)
+      }
+
+      function renderFacts(request) {
+        const facts = document.getElementById('d-facts')
+        facts.replaceChildren()
+        const rows = [
+          ['Reference', request.reference],
+          ['Status', STATUS_LABELS[request.status] ?? request.status],
+          ['Urgency', URGENCY_LABELS[request.urgency] ?? request.urgency],
+        ]
+        const budget = budgetLine(request)
+        if (budget) rows.push(['Budget', budget])
+        if (request.wantedBy) rows.push(['Wanted by', request.wantedBy])
+        if (request.createdAt) rows.push(['Posted', when(request.createdAt)])
+        for (const [term, value] of rows) {
+          const dt = document.createElement('dt')
+          dt.textContent = term
+          const dd = document.createElement('dd')
+          dd.textContent = value
+          facts.append(dt, dd)
+        }
+      }
+
+      function renderItems(request) {
+        const section = document.getElementById('d-items-section')
+        const list = document.getElementById('d-items')
+        const items = request.items ?? []
+        section.hidden = items.length === 0
+        list.replaceChildren()
+        for (const item of items) {
+          const row = document.createElement('li')
+          row.className = 'offer'
+          const name = document.createElement('p')
+          name.className = 'name'
+          name.textContent = item.quantity > 1 ? `${item.name} × ${item.quantity}` : item.name
+          row.append(name)
+          if (item.notes) row.append(span('detail', item.notes))
+          list.append(row)
+        }
+      }
+
+      function renderOffers(reference, request, isOwner, token) {
+        const section = document.getElementById('d-offers-section')
+        const list = document.getElementById('d-offers')
+        const offers = request.offers ?? []
+        section.hidden = offers.length === 0
+        list.replaceChildren()
+        for (const offer of offers) list.append(offerRow(reference, request, offer, isOwner, token))
+      }
+
+      function offerRow(reference, request, offer, isOwner, token) {
+        const row = document.createElement('li')
+        row.className = 'offer-row'
+
+        const who = document.createElement('div')
+        who.className = 'who'
+        const name = document.createElement('p')
+        name.className = 'name'
+        const link = document.createElement('a')
+        link.href = `/business.html?b=${encodeURIComponent(offer.businessSlug ?? offer.businessId)}`
+        link.textContent = offer.businessName
+        name.append(link)
+        who.append(name)
+        row.append(who)
+
+        const price = money(offer.price, request.currency)
+        if (price) row.append(span('price', price))
+        row.append(span('chip', OFFER_LABELS[offer.status] ?? offer.status))
+
+        // The message is the requester's. On the public view the api already
+        // strips it, so this only ever renders for the owner.
+        if (offer.message) {
+          const message = document.createElement('p')
+          message.className = 'message'
+          message.textContent = offer.message
+          row.append(message)
+        }
+
+        if (isOwner && request.status === 'open' && offer.status === 'submitted') {
+          const accept = document.createElement('button')
+          accept.type = 'button'
+          accept.textContent = 'Accept this offer'
+          accept.addEventListener('click', () => acceptOffer(reference, offer, token))
+          row.append(accept)
+        }
+
+        return row
+      }
+
+      function renderHistory(request) {
+        const section = document.getElementById('d-history-section')
+        const list = document.getElementById('d-history')
+        const history = request.history ?? []
+        section.hidden = history.length === 0
+        list.replaceChildren()
+        for (const event of history) {
+          const row = document.createElement('li')
+          const time = document.createElement('time')
+          time.textContent = when(event.createdAt)
+          const what = document.createElement('span')
+          what.className = 'what'
+          const moved = event.toStatus ? STATUS_LABELS[event.toStatus] ?? event.toStatus : ''
+          what.textContent = [event.note, moved && `→ ${moved}`].filter(Boolean).join(' ')
+          row.append(time, what)
+          list.append(row)
+        }
+      }
+
+      /* --- the requester's two writes ------------------------------------- */
+
+      async function acceptOffer(reference, offer, token) {
+        const facts = [['Business', offer.businessName]]
+        const price = money(offer.price)
+        if (price) facts.push(['Price', price])
+        const confirmed = await kipSheet.open({
+          tone: 'success',
+          title: 'Accept this offer?',
+          body:
+            'Accepting this offer declines every other offer on the request and moves it to in progress. This cannot be undone.',
+          facts,
+          confirm: 'Accept',
+          cancel: 'Go back',
+        })
+        if (!confirmed) return
+        try {
+          await api(`${API}/requests/${reference}/offers/${offer.id}/accept`, {
+            method: 'POST',
+            body: token ? { accessToken: token } : {},
+          })
+          await loadDetail(reference)
+        } catch (error) {
+          say(document.getElementById('detail-problem'), error.message)
+        }
+      }
+
+      async function withdrawRequest(reference, token) {
+        const confirmed = await kipSheet.open({
+          tone: 'warning',
+          title: 'Withdraw this request?',
+          body: 'The request is closed and no longer shown to businesses. Its history is kept.',
+          confirm: 'Withdraw',
+          cancel: 'Go back',
+        })
+        if (!confirmed) return
+        try {
+          await api(`${API}/requests/${reference}/withdraw`, {
+            method: 'POST',
+            body: token ? { accessToken: token } : {},
+          })
+          await loadDetail(reference)
+        } catch (error) {
+          say(document.getElementById('detail-problem'), error.message)
+        }
+      }
+
+      /* --- posting a request ---------------------------------------------- */
+
+      function renderItemsDraft() {
+        const list = document.getElementById('p-items')
+        list.replaceChildren()
+        state.items.forEach((item, index) => {
+          const row = document.createElement('li')
+          row.append(document.createTextNode(item.name + (item.quantity > 1 ? ` × ${item.quantity}` : '')))
+          const remove = document.createElement('button')
+          remove.type = 'button'
+          remove.setAttribute('aria-label', `Remove ${item.name}`)
+          remove.textContent = '×'
+          remove.addEventListener('click', () => {
+            state.items.splice(index, 1)
+            renderItemsDraft()
+          })
+          row.append(remove)
+          list.append(row)
+        })
+      }
+
+      document.getElementById('p-item-add').addEventListener('click', () => {
+        const name = document.getElementById('p-item-name').value.trim()
+        if (name.length < 2) return
+        const quantity = Math.max(1, Math.min(999, Number(document.getElementById('p-item-qty').value) || 1))
+        state.items.push({ name, quantity })
+        document.getElementById('p-item-name').value = ''
+        document.getElementById('p-item-qty').value = '1'
+        renderItemsDraft()
+        document.getElementById('p-item-name').focus()
+      })
+
+      document.getElementById('post-form').addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const button = document.getElementById('p-submit')
+        const problem = document.getElementById('post-problem')
+        say(problem, '')
+        button.disabled = true
+        try {
+          const payload = {
+            title: document.getElementById('p-title').value.trim(),
+            description: document.getElementById('p-description').value.trim() || undefined,
+            categoryId: document.getElementById('p-category').value,
+            locationId: document.getElementById('p-location').value,
+            urgency: document.getElementById('p-urgency').value,
+          }
+          const min = document.getElementById('p-budget-min').value
+          const max = document.getElementById('p-budget-max').value
+          if (min !== '') payload.budgetMin = Number(min)
+          if (max !== '') payload.budgetMax = Number(max)
+          const wantedBy = document.getElementById('p-wanted-by').value
+          if (wantedBy) payload.wantedBy = wantedBy
+          if (state.items.length > 0) payload.items = state.items
+
+          const created = await api(`${API}/requests`, { method: 'POST', body: payload })
+          const { reference, accessToken } = created.data
+          rememberToken(reference, accessToken)
+          showPosted(reference, accessToken)
+        } catch (error) {
+          say(problem, error.message)
+          button.disabled = false
+        }
+      })
+
+      function showPosted(reference, accessToken) {
+        document.getElementById('post-form').hidden = true
+        const result = document.getElementById('post-result')
+        result.hidden = false
+        result.replaceChildren()
+
+        const heading = document.createElement('strong')
+        heading.textContent = 'Your request is posted.'
+        result.append(heading)
+
+        const lead = document.createElement('p')
+        lead.textContent =
+          'Give the reference to a provider. Keep the token; it is what lets you accept an offer from this device. It is shown once.'
+        result.append(lead)
+
+        const credentials = document.createElement('div')
+        credentials.className = 'credentials'
+        credentials.append(referenceLine('Reference', reference))
+        if (accessToken) credentials.append(referenceLine('Access token', accessToken, true))
+        result.append(credentials)
+
+        const actions = document.createElement('p')
+        actions.className = 'stack-sm'
+        const view = document.createElement('a')
+        view.href = `/requests.html?r=${encodeURIComponent(reference)}`
+        view.textContent = 'View this request'
+        actions.append(view)
+        result.append(actions)
+      }
+
+      function referenceLine(label, value, copyable) {
+        const pair = document.createElement('div')
+        pair.className = 'pair'
+        const name = document.createElement('span')
+        name.className = 'label'
+        name.textContent = label
+        const code = document.createElement('code')
+        code.textContent = value
+        pair.append(name, code)
+        if (copyable) {
+          const copy = document.createElement('button')
+          copy.type = 'button'
+          copy.className = 'quiet'
+          copy.textContent = 'Copy'
+          copy.addEventListener('click', async () => {
+            try {
+              await navigator.clipboard.writeText(value)
+              copy.textContent = 'Copied'
+              window.setTimeout(() => (copy.textContent = 'Copy'), 1500)
+            } catch {
+              // Clipboard access can be refused; the value is on screen anyway.
+            }
+          })
+          pair.append(copy)
+        }
+        return pair
+      }
+
+      /* --- wiring --------------------------------------------------------- */
+
+      document.getElementById('go-post').addEventListener('click', () => {
+        // The form and the receipt for the last post are two states of the same
+        // view, so returning here starts from the form again rather than from
+        // whichever one the previous visit ended on.
+        const form = document.getElementById('post-form')
+        const result = document.getElementById('post-result')
+        form.hidden = false
+        result.hidden = true
+        result.replaceChildren()
+        say(document.getElementById('post-problem'), '')
+        show(els.post)
+        document.getElementById('p-title').focus()
+      })
+
+      document.getElementById('post-back').addEventListener('click', goToList)
+      document.getElementById('detail-back').addEventListener('click', goToList)
+
+      for (const control of ['f-category', 'f-location', 'f-urgency']) {
+        document.getElementById(control).addEventListener('change', () => {
+          state.filters.categoryId = document.getElementById('f-category').value
+          state.filters.locationId = document.getElementById('f-location').value
+          state.filters.urgency = document.getElementById('f-urgency').value
+          state.offset = 0
+          loadList()
+        })
+      }
+
+      let searchTimer = null
+      document.getElementById('f-search').addEventListener('input', (event) => {
+        window.clearTimeout(searchTimer)
+        const term = event.target.value.trim()
+        searchTimer = window.setTimeout(() => {
+          state.filters.search = term
+          state.offset = 0
+          loadList()
+        }, 250)
+      })
+
+      document.getElementById('f-clear').addEventListener('click', () => {
+        state.filters = { categoryId: '', locationId: '', urgency: '', search: '' }
+        document.getElementById('f-category').value = ''
+        document.getElementById('f-location').value = ''
+        document.getElementById('f-urgency').value = ''
+        document.getElementById('f-search').value = ''
+        state.offset = 0
+        loadList()
+      })
+
+      document.getElementById('previous').addEventListener('click', () => {
+        state.offset = Math.max(0, state.offset - PAGE_SIZE)
+        loadList()
+      })
+
+      document.getElementById('next').addEventListener('click', () => {
+        state.offset += PAGE_SIZE
+        loadList()
+      })
+
+      window.addEventListener('popstate', route)
+
+      /* --- start ---------------------------------------------------------- */
+
+      async function start() {
+        // The session is optional. It lets a signed-in requester manage requests
+        // they posted with an account, where no token exists to hold.
+        state.me = await api(`${API}/auth/me`)
+          .then((body) => body.data.user)
+          .catch(() => null)
+
+        try {
+          await loadReference()
+        } catch {
+          // Reference names failing is not fatal: the pages still work, they just
+          // cannot name a category or a place.
+        }
+        fillSelect(document.getElementById('f-category'), state.categoryOptions, 'any category')
+        fillSelect(document.getElementById('f-location'), state.locationOptions, 'anywhere')
+        fillSelect(document.getElementById('p-category'), state.categoryOptions, 'choose a category')
+        fillSelect(document.getElementById('p-location'), state.locationOptions, 'choose a place')
+
+        route()
+      }
+
+      start().catch((error) => say(document.getElementById('problem'), error.message))
+    </script>
+  </body>
+</html>

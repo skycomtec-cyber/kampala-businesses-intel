@@ -28,11 +28,18 @@ async function securityPlugin(fastify) {
     // anything that changes state. Search results are the exception: they are
     // public, identical for everyone, and caching them is the difference between
     // a usable API and one that hammers SQLite.
-    const cacheable = request.method === 'GET' && !request.authenticated
-    reply.header(
-      'cache-control',
-      cacheable ? 'public, max-age=30' : 'no-store',
-    )
+    //
+    // A route that has already decided gets to keep its decision. A marketplace
+    // request read whose owner is proven by an access token is neither a session
+    // nor a public document, and only the route knows that, so it sets its own
+    // `no-store` and is not overruled here.
+    if (!reply.hasHeader('cache-control')) {
+      const cacheable = request.method === 'GET' && !request.authenticated
+      reply.header(
+        'cache-control',
+        cacheable ? 'public, max-age=30' : 'no-store',
+      )
+    }
     reply.header('vary', 'cookie, authorization')
 
     // HSTS only once we know the caller is actually on TLS. Sending it over plain
