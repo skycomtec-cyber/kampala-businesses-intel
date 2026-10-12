@@ -1062,7 +1062,7 @@ cd app
 npm test
 ```
 
-176 tests, no network access, each against its own temporary database. The API tests mount the real
+179 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule
@@ -1099,4 +1099,32 @@ weaker claim than signing in. 400 text nodes, none under 4.5:1. Asserting agains
 `rgb(230, 243, 236)` instead would look like an assertion about meaning and would be an assertion about
 one particular palette; it fails the next time a wash is retuned, which is exactly what happened when
 these were strengthened.
+
+### The marketplace pages, driven through a real Chromium
+
+The two marketplace pages have no build step and therefore no unit tests either, so the flows that are
+decisions — an anonymous requester posting a request and reading it back with the token, a provider
+answering, the accept-one-declines-the-other rule, withdrawing an offer, withdrawing a request — are
+driven the only way that says anything: Playwright against a real server on a throwaway database.
+
+```bash
+cd app
+npm run test:e2e
+```
+
+The runner (`app/scripts/run-e2e.mjs`) starts the real server on a free port for each pass, waits for it
+to listen, deletes the temporary database afterwards, and exits non-zero if either pass does. The
+requests pass runs against an empty database (which is what makes its `empty state` and
+`list now shows one request` assertions mean anything); the provider pass seeds the demonstration —
+36 businesses and the one admin account — and exercises two businesses answering the same request,
+a requester choosing between offers, and both kinds of withdrawal.
+
+Prereqs: a Python 3 interpreter with the `playwright` package and its Chromium:
+
+```bash
+pip install playwright && python -m playwright install chromium
+```
+
+Override the interpreter and the demo admin credentials with `KIP_E2E_PYTHON`,
+`KIP_DEMO_ADMIN_EMAIL` and `KIP_DEMO_ADMIN_PASSWORD` if your environment needs them.
 

@@ -20,7 +20,8 @@
     "bootstrap": "node scripts/bootstrap.js",
     "maintenance": "node scripts/maintenance.js",
     "analyse": "node scripts/analyse.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:e2e": "node scripts/run-e2e.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
