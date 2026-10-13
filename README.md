@@ -38,6 +38,10 @@ nothing leaves the machine.
   back to the asker so a misreading is visible rather than silent. Nothing leaves the machine.
 - **Operator accounts with capabilities.** No public registration. Accounts are created by whoever
   has shell access, and every editorial action is written to an audit log with a before and after.
+- **Provider self-service.** A business owner claims their own listing without signing up, an
+  operator decides from the evidence, and only a grant creates the account and hands over the
+  listing. The owner then maintains its details and its contacts, services and products — and only
+  ever those listings.
 
 ## The privacy contract
 
@@ -716,6 +720,42 @@ location as filters; a `count` question returns the number and no rows. Either w
 recorded as an anonymised demand signal exactly as a search is, because a question is what a person
 wanted and the gap engine should see it. The public page is `/ask.html`.
 
+## Provider self-service
+
+A business owner can ask to look after their own listing. This is the one place a member of the
+public becomes an account holder, and it is deliberately indirect, because this platform does not do
+public registration.
+
+The flow is: **claim → review → grant → sign in → maintain**. A claimant does not sign up for
+anything. They state who they are and how they can be reached (`POST /api/v1/claims`), prove the
+claim is theirs with a token returned exactly once, and an operator decides from the evidence whether
+to believe them. Only a **grant** creates the account and hands over the listing. There is no route
+that turns a submission into ownership on its own.
+
+- **One open claim per listing.** A pending or granted claim blocks a new one, so a listing cannot be
+  flooded and "the pending claim" is a singular thing a reviewer can point at.
+- **The evidence is snapshotted.** At submission the repository records `matchesContact`: did the
+  claimant's own phone or email already appear on the listing? It is stored, never recomputed, so an
+  operator editing the contact points afterwards cannot manufacture a match after the fact.
+- **A grant is a decision with consequences.** It creates a `provider` account (the narrowest role
+  there is), sets the listing's `capabilityLevel` to `claimed` when it was `unverified`, and issues a
+  one-time password-reset token. The password itself is random and discarded — the only way in is the
+  reset token, which is returned to the approving operator once because **no mail transport exists
+  yet**. Hand it to the owner out of band.
+- **Revoking** takes the listing back and returns the capability level to `unverified`, but leaves the
+  account in place, because an owner may hold more than one listing.
+
+A provider may only ever reach the listings it owns. It does not get `business:read` — granting that
+would open the admin routes, which return unpublished contact points for *any* business. Instead it
+holds `provider:write`, and every `/provider/*` route additionally checks ownership against the
+claims table. The desk is also narrower than an editor's: a provider may edit the words that describe
+their business and maintain contacts, services and products, but **not** rename it, move it, change
+its status, its review state or its capability level. Those are decisions about what the directory
+is, and the platform does not delegate them to the person with an interest in the answer.
+
+The public pages are `/claim.html` (claim, and follow a claim by reference) and `/my-business.html`
+(the signed-in desk).
+
 ## API
 
 Base URL `http://127.0.0.1:4310`. Every response uses the same envelope:
@@ -763,6 +803,26 @@ API version is deployed to know whether the process is alive.
 | `GET` | `/api/v1/auth/me` | The signed-in operator. |
 | `GET` | `/api/v1/auth/roles` | Roles and their capabilities. |
 | `GET` | `/api/v1/counts` | Supply counts for `?categoryId=` and/or `?locationId=`, optionally `?includeSubtree=true`. |
+| `POST` | `/api/v1/claims` | Claim a listing as its owner. No account needed; body names `businessId`, `claimedAs`, `relation` and optionally `contactEmail`, `contactPhone`, `evidence`. Returns a `reference` and a one-time `accessToken`. |
+| `GET` | `/api/v1/claims/:reference` | Follow a claim. Send `x-claim-token` with the token to see your own contact details and evidence. |
+| `POST` | `/api/v1/claims/:reference/withdraw` | Withdraw a pending claim, with your token (header or body) or as the signed-in owner. |
+| `GET` | `/api/v1/claims/status/:businessId` | Whether a listing is open to a new claim. |
+
+### Provider (capability `provider:write`, plus per-listing ownership)
+
+A provider is a business owner, not staff. Every route below additionally refuses a listing the
+caller does not own, and the reachable surface is narrower than an editor's: a provider edits the
+words that describe the business and its contacts, services and products, but cannot rename it, move
+it, or change its status, review state or capability level.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `GET` | `/api/v1/provider/businesses` | The listings this provider owns. |
+| `GET` | `/api/v1/provider/businesses/:id` | One own listing, including its private contact points. |
+| `PATCH` | `/api/v1/provider/businesses/:id` | Edit `description`, `website`, `foundedYear` only. Anything else is refused. |
+| `POST`/`PATCH`/`DELETE` | `/api/v1/provider/businesses/:id/contacts[/:contactId]` | Contact points. New ones are public by default; patch `isPublic`/`isPrimary`. |
+| `POST`/`PATCH`/`DELETE` | `/api/v1/provider/businesses/:id/services[/:serviceId]` | Services. |
+| `POST`/`PATCH`/`DELETE` | `/api/v1/provider/businesses/:id/products[/:productId]` | Products. |
 
 ### Operator (capability required)
 
@@ -804,6 +864,9 @@ API version is deployed to know whether the process is alive.
 | `POST` | `/api/v1/admin/catalogue/intake` | `business:write` |
 | `POST` | `/api/v1/admin/catalogue/records/:id/review` | `business:verify` (actions: `claim`, `submit`, `verify`, `approve`*, `unapprove`*, `reject`, `archive`, `reopen`; *requires `business:publish`) |
 | `GET` | `/api/v1/admin/catalogue/records/:id/history` | `business:read` |
+| `GET` | `/api/v1/admin/claims` | `business:read` (`?status=`, `?businessId=`, `?search=`, `?sort=`) |
+| `GET` | `/api/v1/admin/claims/:id` | `business:read` |
+| `POST` | `/api/v1/admin/claims/:id/decide` | `business:verify`, plus `user:write` for `grant`/`revoke` (a grant creates an account). Body `decision` (`grant`, `reject`, `revoke`); `reason` required for reject and revoke. A grant returns the new `owner` and a one-time `passwordResetToken`. |
 
 Roles, from `GET /api/v1/auth/roles`:
 
@@ -813,6 +876,7 @@ Roles, from `GET /api/v1/auth/roles`:
 | `editor` | Read, write and verify businesses; read requests and analytics; import. |
 | `analyst` | Read-only: businesses, requests, analytics, lab, opportunities. |
 | `viewer` | Read-only businesses and analytics. |
+| `provider` | `provider:write` only — the listings the account owns, and nothing else. |
 
 A missing session is `401 unauthenticated`. A session without the capability is `403 forbidden`, so
 a client can always tell "sign in" from "you may not".
@@ -860,6 +924,7 @@ Fixed windows, in process memory, keyed by account when signed in and by address
 | --- | --- |
 | Sign-in and password reset | 10 per 15 minutes |
 | `POST /requests`, withdraw, offers, accept | 5 per minute |
+| `POST /claims`, withdraw | 5 per minute (the same budget as a marketplace request: anything the public can post in bulk gets posted in bulk) |
 | `GET /search` | 30 per minute |
 | `GET /ask` | 30 per minute (the search budget: every question is a demand signal) |
 | Everything else | 240 per minute |
@@ -926,6 +991,29 @@ curl -s -H "authorization: Bearer $TOKEN" "$BASE/api/v1/admin/businesses/$BUSINE
 # the rest and moves the request to in_progress, all in one write.
 curl -s -X POST $BASE/api/v1/requests/$REFERENCE/offers/$OFFER_ID/accept \
   -H 'content-type: application/json' -d "{\"accessToken\":\"$ACCESS\"}"
+
+# Provider self-service. An owner claims a listing without an account, keeps the
+# token to follow it, and an operator decides. Only a grant creates the account.
+CLAIM=$(curl -s -X POST $BASE/api/v1/claims \
+  -H 'content-type: application/json' \
+  -d "{\"businessId\":\"$BUSINESS\",\"claimedAs\":\"Aisha Nakato\",\"relation\":\"owner\",\"contactEmail\":\"aisha@example.com\"}")
+CLAIM_REF=$(echo "$CLAIM" | jq -r .data.reference)   # CLM-2026-00001
+CLAIM_TOKEN=$(echo "$CLAIM" | jq -r .data.accessToken)
+
+# Follow it publicly, or privately with the token.
+curl -s $BASE/api/v1/claims/$CLAIM_REF
+curl -s -H "x-claim-token: $CLAIM_TOKEN" $BASE/api/v1/claims/$CLAIM_REF
+
+# An operator grants it, which creates the provider account and returns the
+# one-time reset token to hand to the owner (nothing sends mail).
+curl -s -X POST $BASE/api/v1/admin/claims/<claim-id>/decide \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"decision":"grant","reason":"Matched the listed phone number on a call."}'
+
+# The owner signs in with the reset token, then maintains only their own listing.
+curl -s -X POST $BASE/api/v1/auth/password-reset/confirm \
+  -H 'content-type: application/json' -d '{"token":"<reset-token>","newPassword":"Your-New-Password-2026"}'
+curl -s -H "authorization: Bearer $OWNER_TOKEN" $BASE/api/v1/provider/businesses
 ```
 
 ### JavaScript
@@ -965,6 +1053,14 @@ const publishable = gaps.filter((gap) => !gap.suppressed)
 for (const gap of publishable) {
   console.log(gap.score, gap.keyword, gap.locationName, gap.severity, gap.rationale)
 }
+
+// Claim a listing as its owner. No account yet: the token is the only proof
+// until an operator decides, and it is returned exactly once.
+const { data: claim } = await api('/api/v1/claims', {
+  method: 'POST',
+  body: { businessId: BUSINESS_ID, claimedAs: 'Aisha Nakato', relation: 'owner', contactEmail: 'aisha@example.com' },
+})
+console.log(claim.reference, claim.accessToken)
 ```
 
 ### Python
@@ -1004,6 +1100,21 @@ created = session.post(f"{BASE}/api/v1/admin/businesses", json={
 }, headers={"authorization": f"Bearer {token}"})
 created.raise_for_status()
 print(created.json()["data"]["slug"])
+
+# Provider self-service: an owner claims a listing, then follows it with the
+# token. Only a grant (an operator decision) creates the account.
+claim = session.post(f"{BASE}/api/v1/claims", json={
+    "businessId": BUSINESS_ID,
+    "claimedAs": "Aisha Nakato",
+    "relation": "owner",
+    "contactEmail": "aisha@example.com",
+}).json()["data"]
+
+followed = session.get(
+    f"{BASE}/api/v1/claims/{claim['reference']}",
+    headers={"x-claim-token": claim["accessToken"]},
+).json()["data"]
+print(followed["status"], followed.get("contactEmail"))
 ```
 
 ## Deploying it
@@ -1126,16 +1237,18 @@ class of breakage entirely.
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
 │   │                         import, backup, restore, and the one-off repairs
 │   │                         — backfill-provenance, add-sources
-│   ├── test/                 194 tests, no network, temporary folders only
+│   ├── test/                 201 tests, no network, temporary folders only
 │   └── web/                  the website pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
 │       ├── business.html         one listing, with its contacts, services and provenance
 │       ├── insights.html         the ranked gaps, and what the engine withheld
 │       ├── requests.html         the marketplace of requests
-│       ├── provider.html         the provider desk
+│       ├── provider.html         the marketplace provider desk
 │       ├── ask.html              Ask Kampala, with the reading of the question
 │       ├── second-life.html      the Second Life Electronics vertical
+│       ├── claim.html            claim a listing, and follow a claim by reference
+│       ├── my-business.html      the signed-in desk for a business owner
 │       ├── operator.html         the review queue
 │       ├── theme.css             every shared token and component, light and dark
 │       ├── theme.js              the appearance toggle, and nothing else
@@ -1167,7 +1280,7 @@ cd app
 npm test
 ```
 
-194 tests, no network access, each against its own temporary database. The API tests mount the real
+201 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule
@@ -1179,7 +1292,11 @@ data holds is filterable, and the rule that a bad sign-in cannot be used to find
 exist. The Second Life vertical is pinned at both levels — the pure rules (the one-way stage order,
 the activity/category mapping, the data-wipe rule) against `core/secondLife.js`, and a full device
 lifecycle against the api — and Ask Kampala is pinned the same way: the parser's reading against
-`core/ask.js`, and a count and a find question end to end through `/api/v1/ask`.
+`core/ask.js`, and a count and a find question end to end through `/api/v1/ask`. Provider
+self-service is pinned at both levels too: the one-way claim lifecycle and the contact normalisation
+against `core/claims.js`, and the whole flow — submit, follow with and without the token, withdraw,
+one-open-claim-per-listing, reject needs a reason, grant creates the provider account and sets the
+capability level, and the desk refuses a listing the caller does not own — against the api.
 
 The backup tests are written around the failure they exist to prevent, which is that a copy of a WAL
 database looks complete and is missing every write since the last checkpoint. So the assertions are

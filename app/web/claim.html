@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claim a listing &middot; Kampala Intelligence Platform</title>
+    <meta
+      name="description"
+      content="Ask to look after your own business listing: state who you are and how you can be reached, and an operator decides."
+    />
+
+    <!-- appearance read before paint, so a dark-mode visitor gets no flash -->
+    <script>
+      try {
+        var t = localStorage.getItem('kip-theme')
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/theme.css" />
+    <style>
+      /* Page-specific only. Everything shared lives in theme.css. */
+
+      .panel {
+        margin-top: var(--s5);
+        padding: var(--s5);
+        border: 1px solid var(--line-2);
+        border-radius: var(--radius-lg);
+        background: var(--card);
+        max-width: 44rem;
+      }
+
+      .panel h2 {
+        margin-top: 0;
+      }
+
+      .form {
+        display: grid;
+        gap: var(--s4);
+        margin-top: var(--s4);
+        max-width: 34rem;
+      }
+
+      .form .two {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        gap: var(--s4);
+      }
+
+      .form textarea {
+        min-height: 6rem;
+        resize: vertical;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--s3);
+        align-items: center;
+      }
+
+      .outcome {
+        margin-top: var(--s5);
+        padding: var(--s5);
+        border: 1px solid var(--line-2);
+        border-left: 3px solid var(--ink);
+        border-radius: var(--radius);
+        background: var(--card);
+        max-width: 44rem;
+      }
+
+      .outcome .ref {
+        font-family: var(--mono);
+        font-size: 1.35rem;
+        letter-spacing: 0.02em;
+        display: inline-block;
+        margin: var(--s2) 0;
+      }
+
+      .token {
+        display: block;
+        font-family: var(--mono);
+        font-size: 0.8125rem;
+        padding: var(--s3);
+        border: 1px dashed var(--line-2);
+        border-radius: var(--radius);
+        background: var(--paper);
+        word-break: break-all;
+        margin-top: var(--s2);
+      }
+
+      .state {
+        margin-top: var(--s3);
+        padding: var(--s3) var(--s4);
+        border-radius: var(--radius);
+        font-size: 0.9375rem;
+      }
+
+      .state.ok {
+        background: color-mix(in srgb, var(--ink) 6%, transparent);
+      }
+
+      .state.bad {
+        border: 1px solid var(--line-2);
+        color: var(--muted);
+      }
+
+      .results {
+        margin-top: var(--s4);
+      }
+
+      .result-row {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--s4);
+        padding: var(--s3) 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .result-row span {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.8125rem;
+      }
+
+      .section {
+        margin-top: var(--s7);
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="wordmark" href="/">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          Kampala Intelligence
+        </a>
+        <nav class="topnav">
+          <a href="/">Engine</a>
+          <a href="/directory.html">Directory</a>
+          <a href="/insights.html">Gaps</a>
+          <a href="/requests.html">Requests</a>
+          <a href="/ask.html">Ask</a>
+          <a href="/second-life.html">Second Life</a>
+          <a href="/claim.html" aria-current="page">Claim</a>
+          <a href="/my-business.html">My business</a>
+          <a href="/operator.html">Verification queue</a>
+          <button class="theme-toggle" type="button" hidden>
+            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <h1>Claim your business</h1>
+        <p>
+          If a listing is yours, you can ask to look after it. Tell us who you are and how you can
+          be reached; an operator checks it against the listing and decides. There is no sign-up
+          here &mdash; the account only appears once your claim is approved.
+        </p>
+      </section>
+
+      <section class="section" id="pick">
+        <h2>Find the listing</h2>
+        <p class="sub">
+          Search the directory by name, or open the claim page from a listing itself.
+        </p>
+        <form class="field" id="search-form">
+          <input
+            type="search"
+            id="search-input"
+            name="q"
+            placeholder="e.g. Kibuli Phone Repair"
+            aria-label="Search the directory"
+            autocomplete="off"
+          />
+          <button type="submit" class="btn-primary">Search</button>
+        </form>
+        <div class="results" id="search-results"></div>
+      </section>
+
+      <section class="panel" id="claim-panel" hidden>
+        <h2 id="panel-title">Claim this listing</h2>
+        <p class="sub" id="panel-business"></p>
+        <div class="state" id="panel-state" hidden></div>
+
+        <form class="form" id="claim-form">
+          <label>
+            Who is claiming?
+            <input type="text" name="claimedAs" maxlength="160" required placeholder="Your full name" />
+          </label>
+          <label>
+            How are you connected to the business?
+            <input type="text" name="relation" maxlength="240" required placeholder="Owner, manager, authorised agent&hellip;" />
+          </label>
+          <div class="two">
+            <label>
+              Email
+              <input type="email" name="contactEmail" maxlength="254" placeholder="you@example.com" />
+            </label>
+            <label>
+              Phone
+              <input type="text" name="contactPhone" maxlength="40" placeholder="0772 123 456" />
+            </label>
+          </div>
+          <label>
+            Anything that helps us check it
+            <textarea name="evidence" maxlength="2000" placeholder="A number already on the listing, a trading licence, a link to your page&hellip;"></textarea>
+          </label>
+          <p class="note" style="margin: 0">
+            An email is needed if you want an account, because that is how you will sign in. The
+            phone and email you give here are evidence for the reviewer; they are not published.
+          </p>
+          <div class="actions">
+            <button type="submit" class="btn-primary">Submit claim</button>
+            <button type="button" class="btn" id="start-over" hidden>Start over</button>
+          </div>
+          <p class="state bad" id="form-error" hidden></p>
+        </form>
+      </section>
+
+      <div class="outcome" id="outcome" hidden>
+        <h2 style="margin-top: 0">Claim submitted</h2>
+        <p class="sub">Quote this reference if you get in touch about it.</p>
+        <span class="ref" id="outcome-ref"></span>
+        <p id="outcome-body"></p>
+        <p class="note" style="margin-top: var(--s3)">
+          Keep this access token private. It is shown once and is the only way to follow or withdraw
+          the claim without an account:
+        </p>
+        <code class="token" id="outcome-token"></code>
+        <div class="actions" style="margin-top: var(--s4)">
+          <a class="btn" id="outcome-link" href="#">Follow this claim &rarr;</a>
+          <a class="btn" href="/my-business.html">Sign in to my business</a>
+        </div>
+      </div>
+
+      <section class="section" id="status">
+        <h2>Follow a claim</h2>
+        <p class="sub">
+          Enter the reference you were given. Add your access token to see the details you sent.
+        </p>
+        <form class="form" id="status-form" style="max-width: 34rem">
+          <div class="two">
+            <label>
+              Reference
+              <input type="text" name="reference" placeholder="CLM-2026-00001" required />
+            </label>
+            <label>
+              Access token (optional)
+              <input type="text" name="token" autocomplete="off" />
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn">Check status</button>
+          </div>
+        </form>
+        <div class="outcome" id="status-outcome" hidden style="margin-top: var(--s4)">
+          <h3 style="margin-top: 0" id="status-heading"></h3>
+          <dl class="facts" id="status-facts"></dl>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Already claimed?</h2>
+        <p class="prose" style="color: var(--muted)">
+          A claim that has been approved creates an account for you. Sign in with the reset link the
+          operator gave you, then manage the listing from
+          <a href="/my-business.html">My business</a>.
+        </p>
+      </section>
+    </main>
+
+    <script src="/theme.js"></script>
+    <script>
+      /*
+       * Everything here is the public claim api: no account, one open claim per
+       * listing, and an opaque token that is the claimant's only proof until an
+       * operator approves them. The token is shown once and never stored by this
+       * page, which is why the outcome block tells the person to keep it.
+       */
+      const API = '/api/v1'
+      const params = new URLSearchParams(window.location.search)
+
+      const els = {
+        pick: document.getElementById('pick'),
+        searchForm: document.getElementById('search-form'),
+        searchInput: document.getElementById('search-input'),
+        searchResults: document.getElementById('search-results'),
+        panel: document.getElementById('claim-panel'),
+        panelTitle: document.getElementById('panel-title'),
+        panelBusiness: document.getElementById('panel-business'),
+        panelState: document.getElementById('panel-state'),
+        form: document.getElementById('claim-form'),
+        startOver: document.getElementById('start-over'),
+        formError: document.getElementById('form-error'),
+        outcome: document.getElementById('outcome'),
+        outcomeRef: document.getElementById('outcome-ref'),
+        outcomeBody: document.getElementById('outcome-body'),
+        outcomeToken: document.getElementById('outcome-token'),
+        outcomeLink: document.getElementById('outcome-link'),
+        statusForm: document.getElementById('status-form'),
+        statusOutcome: document.getElementById('status-outcome'),
+        statusHeading: document.getElementById('status-heading'),
+        statusFacts: document.getElementById('status-facts'),
+      }
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          credentials: 'same-origin',
+          headers: { accept: 'application/json', 'content-type': 'application/json' },
+          ...options,
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(payload?.error?.message ?? 'That did not work.')
+          error.status = response.status
+          throw error
+        }
+        return payload
+      }
+
+      let selected = null
+
+      /** Loads the listing behind ?b=, and says up front whether it is open. */
+      async function loadListing(target) {
+        els.pick.hidden = true
+        els.outcome.hidden = true
+        els.formError.hidden = true
+
+        let business
+        try {
+          business = (await api(`${API}/businesses/${encodeURIComponent(target)}`)).data
+        } catch (error) {
+          els.panel.hidden = false
+          els.form.hidden = true
+          els.panelTitle.textContent = 'Listing not found'
+          els.panelBusiness.textContent = ''
+          showState(
+            error.status === 404
+              ? 'There is no published listing at that address. It may be unverified, withdrawn, or simply not exist.'
+              : error.message,
+            'bad',
+          )
+          return
+        }
+
+        selected = business
+        els.panel.hidden = false
+        els.form.hidden = false
+        els.panelTitle.textContent = 'Claim this listing'
+        els.panelBusiness.textContent = business.name
+        document.title = `Claim ${business.name} · Kampala Intelligence Platform`
+        els.startOver.hidden = false
+
+        try {
+          const status = (await api(`${API}/claims/status/${business.id}`)).data
+          if (!status.claimable) {
+            els.form.hidden = true
+            showState(status.reason, 'bad')
+          } else {
+            showState('This listing is open to a claim.', 'ok')
+          }
+        } catch (error) {
+          showState(error.message, 'bad')
+        }
+      }
+
+      function showState(message, kind) {
+        els.panelState.textContent = message ?? ''
+        els.panelState.className = `state ${kind}`
+        els.panelState.hidden = !message
+      }
+
+      async function runSearch(term) {
+        els.searchResults.replaceChildren()
+        if (!term) return
+        try {
+          const body = await api(
+            `${API}/search?q=${encodeURIComponent(term)}&sourceTypes=business&limit=10`,
+          )
+          const seen = new Set()
+          for (const hit of body.data ?? []) {
+            const slug = hit.path ?? hit.sourceId
+            if (!slug || seen.has(slug)) continue
+            seen.add(slug)
+            const row = document.createElement('div')
+            row.className = 'result-row'
+            const link = document.createElement('a')
+            link.href = `/claim.html?b=${encodeURIComponent(slug)}`
+            link.textContent = hit.title
+            const kind = document.createElement('span')
+            kind.textContent = 'listing'
+            row.append(link, kind)
+            els.searchResults.append(row)
+          }
+          if (els.searchResults.childElementCount === 0) {
+            const none = document.createElement('p')
+            none.className = 'note'
+            none.textContent = 'No listing matched. Try the directory, or a different spelling.'
+            els.searchResults.append(none)
+          }
+        } catch (error) {
+          const note = document.createElement('p')
+          note.className = 'note'
+          note.textContent = error.message
+          els.searchResults.append(note)
+        }
+      }
+
+      els.searchForm.addEventListener('submit', (event) => {
+        event.preventDefault()
+        runSearch(els.searchInput.value.trim())
+      })
+
+      els.startOver.addEventListener('click', () => {
+        window.location.href = '/claim.html'
+      })
+
+      els.form.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        els.formError.hidden = true
+        const data = new FormData(els.form)
+        const payload = {
+          businessId: selected.id,
+          claimedAs: String(data.get('claimedAs') ?? '').trim(),
+          relation: String(data.get('relation') ?? '').trim(),
+        }
+        const email = String(data.get('contactEmail') ?? '').trim()
+        const phone = String(data.get('contactPhone') ?? '').trim()
+        const evidence = String(data.get('evidence') ?? '').trim()
+        if (email) payload.contactEmail = email
+        if (phone) payload.contactPhone = phone
+        if (evidence) payload.evidence = evidence
+
+        try {
+          const created = (await api(`${API}/claims`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          })).data
+          showOutcome(created)
+        } catch (error) {
+          els.formError.textContent = error.message
+          els.formError.hidden = false
+        }
+      })
+
+      function showOutcome(created) {
+        els.panel.hidden = true
+        els.outcome.hidden = false
+        els.outcomeRef.textContent = created.reference
+        els.outcomeBody.textContent =
+          'An operator will review it. You can follow its status with the link below.'
+        els.outcomeToken.textContent = created.accessToken
+        els.outcomeLink.href = `/claim.html?ref=${encodeURIComponent(created.reference)}#status`
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
+
+      const target = params.get('b')
+      if (target) loadListing(target)
+
+      /* --- following a claim ------------------------------------------------- */
+
+      const STATUS_LABELS = {
+        pending: 'Waiting for review',
+        granted: 'Approved — this listing is yours',
+        withdrawn: 'Withdrawn',
+        rejected: 'Not approved',
+        revoked: 'Ownership ended',
+      }
+
+      async function follow(reference, token) {
+        const headers = token ? { 'x-claim-token': token } : {}
+        const response = await fetch(`${API}/claims/${encodeURIComponent(reference)}`, {
+          headers: { accept: 'application/json', ...headers },
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(payload?.error?.message ?? 'That reference could not be found.')
+        }
+        return payload.data
+      }
+
+      function renderStatus(claim) {
+        els.statusHeading.textContent = STATUS_LABELS[claim.status] ?? claim.status
+        els.statusFacts.replaceChildren()
+        const rows = [
+          ['Reference', claim.reference],
+          ['Business', claim.business?.name],
+          ['Claimed by', claim.claimedAs],
+          ['After', claim.relation],
+        ]
+        if (claim.contactEmail) rows.push(['Email you gave', claim.contactEmail])
+        if (claim.contactPhone) rows.push(['Phone you gave', claim.contactPhone])
+        if (claim.reason) rows.push(['Note from the reviewer', claim.reason])
+        for (const [term, value] of rows) {
+          if (!value) continue
+          const row = document.createElement('div')
+          const dt = document.createElement('dt')
+          dt.textContent = term
+          const dd = document.createElement('dd')
+          dd.textContent = value
+          row.append(dt, dd)
+          els.statusFacts.append(row)
+        }
+        els.statusOutcome.hidden = false
+      }
+
+      els.statusForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const data = new FormData(els.statusForm)
+        try {
+          const claim = await follow(
+            String(data.get('reference') ?? '').trim().toUpperCase(),
+            String(data.get('token') ?? '').trim(),
+          )
+          renderStatus(claim)
+        } catch (error) {
+          els.statusOutcome.hidden = false
+          els.statusHeading.textContent = 'Not found'
+          els.statusFacts.replaceChildren()
+          const row = document.createElement('div')
+          const dt = document.createElement('dt')
+          dt.textContent = 'Message'
+          const dd = document.createElement('dd')
+          dd.textContent = error.message
+          row.append(dt, dd)
+          els.statusFacts.append(row)
+        }
+      })
+
+      const ref = params.get('ref')
+      if (ref) {
+        els.statusForm.elements.reference.value = ref.toUpperCase()
+        follow(ref, '').then(renderStatus).catch(() => {})
+      }
+    </script>
+  </body>
+</html>

@@ -11,7 +11,7 @@ import { ValidationError } from './errors.js'
  * memory-hard KDF, which is the property that actually matters here.
  */
 
-export const ROLES = Object.freeze(['admin', 'editor', 'analyst', 'viewer'])
+export const ROLES = Object.freeze(['admin', 'editor', 'analyst', 'viewer', 'provider'])
 
 /**
  * Role capabilities.
@@ -63,6 +63,13 @@ export const CAPABILITIES = Object.freeze({
     'source:read',
   ],
   viewer: ['business:read', 'analytics:read'],
+  // A provider owns the listings they have been granted through a business claim,
+  // which is a different trust completely: it is true for the businesses they own
+  // and false for every other row in the directory. `provider:write` is therefore
+  // the only capability granted, and ownership is checked per listing by the
+  // provider routes. Notably absent is `business:read`: granting it would open the
+  // admin routes, which return unpublished contact points for any business.
+  provider: ['provider:write'],
 })
 
 export const SCRYPT_PARAMS = Object.freeze({

@@ -17,6 +17,8 @@ import marketplaceRoutes from './routes/marketplace.js'
 import secondLifeRoutes from './routes/second-life.js'
 import askRoutes from './routes/ask.js'
 import insightRoutes from './routes/insights.js'
+import claimRoutes from './routes/claims.js'
+import providerRoutes from './routes/provider.js'
 import adminBusinessRoutes from './routes/admin/businesses.js'
 import adminImportRoutes from './routes/admin/imports.js'
 import adminReferenceRoutes from './routes/admin/reference.js'
@@ -110,6 +112,8 @@ export async function buildApi({ app, config, logger = true, web = true }) {
       await api.register(secondLifeRoutes, { app })
       await api.register(askRoutes, { app })
       await api.register(insightRoutes, { config, app })
+      await api.register(claimRoutes, { app })
+      await api.register(providerRoutes, { app })
       await api.register(adminBusinessRoutes, { app })
       await api.register(adminImportRoutes, { app })
       await api.register(adminReferenceRoutes, { app })

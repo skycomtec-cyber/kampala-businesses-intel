@@ -8,6 +8,7 @@ import { createDemandRepository } from './demand.js'
 import { createMarketplaceRepository } from './marketplace.js'
 import { createIntelligenceRepository } from './intelligence.js'
 import { createSecondLifeRepository } from './secondLife.js'
+import { createClaimsRepository } from './claims.js'
 
 /**
  * Repository wiring.
@@ -38,6 +39,10 @@ export function createRepositories(db, config) {
   const marketplace = createMarketplaceRepository(db, config)
   const intelligence = createIntelligenceRepository(db, config)
   const secondLife = createSecondLifeRepository(db, config)
+  // Claims depend on the three things a grant touches: the listing being claimed,
+  // the account it creates and the reset token that delivers it. It is wired last
+  // so all three already exist.
+  const claims = createClaimsRepository(db, config, { businesses, users, passwordResets })
 
   return {
     db,
@@ -55,6 +60,7 @@ export function createRepositories(db, config) {
     marketplace,
     intelligence,
     secondLife,
+    claims,
 
     /**
      * Runs a unit of work atomically.

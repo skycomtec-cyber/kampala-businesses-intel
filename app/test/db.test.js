@@ -105,6 +105,7 @@ test('migrations are idempotent and recorded', () => {
       '010_opportunity_identity',
       '011_opportunity_actor_count',
       '012_second_life',
+      '013_provider_claims',
     ]
 
     // Re-running the migrator on an up-to-date database must be a no-op, or the
@@ -137,10 +138,16 @@ test('011 backfills the actor count onto opportunities that predate the column',
   const before = fs.mkdtempSync(path.join(os.tmpdir(), 'kip-before-'))
   for (const name of fs.readdirSync(migrations)) {
     // Stage the schema as it stood before 011, so 011 (and anything added after
-    // it, like 012) is genuinely pending when the full directory is applied. The
-    // migrator refuses out-of-order history, which is why the newer migration has
-    // to be left out here rather than copied in and applied later.
-    if (name === '011_opportunity_actor_count.sql' || name === '012_second_life.sql') continue
+    // it) is genuinely pending when the full directory is applied. The migrator
+    // refuses out-of-order history, which is why the newer migrations have to be
+    // left out here rather than copied in and applied later.
+    if (
+      name === '011_opportunity_actor_count.sql' ||
+      name === '012_second_life.sql' ||
+      name === '013_provider_claims.sql'
+    ) {
+      continue
+    }
     fs.copyFileSync(path.join(migrations, name), path.join(before, name))
   }
 
@@ -185,7 +192,7 @@ test('011 backfills the actor count onto opportunities that predate the column',
     const results = migrate(db)
     assert.deepEqual(
       results.filter((row) => row.status !== 'skipped').map((row) => row.id),
-      ['011_opportunity_actor_count', '012_second_life'],
+      ['011_opportunity_actor_count', '012_second_life', '013_provider_claims'],
       'the upgrade applies every migration added after the staged schema',
     )
 

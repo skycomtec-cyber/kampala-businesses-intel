@@ -119,6 +119,8 @@
           <a href="/requests.html">Requests</a>
           <a href="/ask.html">Ask</a>
           <a href="/second-life.html">Second Life</a>
+          <a href="/claim.html">Claim</a>
+          <a href="/my-business.html">My business</a>
           <a href="/operator.html">Verification queue</a>
           <button class="theme-toggle" type="button" hidden>
             <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -187,6 +189,10 @@
         surveyed &mdash; the directory does not distinguish those from the outside, on purpose.
       </p>
 
+      <p class="note" id="claim-line" hidden>
+        Is this your business? <a id="claim-link" href="/claim.html">Claim this listing &rarr;</a>
+      </p>
+
       <section class="missing" id="missing" hidden>
         <h2 id="missing-title">This listing is not here</h2>
         <p id="missing-body"></p>
@@ -235,6 +241,8 @@
         missing: document.getElementById('missing'),
         missingTitle: document.getElementById('missing-title'),
         missingBody: document.getElementById('missing-body'),
+        claimLine: document.getElementById('claim-line'),
+        claimLink: document.getElementById('claim-link'),
       }
 
       const CONTACT_LABELS = {
@@ -609,6 +617,11 @@
           (business.skills ?? []).length === 0
         els.bare.hidden = !bare
         els.note.hidden = false
+
+        // An invitation to the owner, using the slug rather than the id so the
+        // claim page's url reads like the listing it is about.
+        els.claimLink.href = `/claim.html?b=${encodeURIComponent(business.slug ?? business.id)}`
+        els.claimLine.hidden = false
 
         // A link from a search result for a service or a product carries the
         // anchor. Scrolling to it is the difference between landing on the

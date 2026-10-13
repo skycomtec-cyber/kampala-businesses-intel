@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My business &middot; Kampala Intelligence Platform</title>
+    <meta
+      name="description"
+      content="Sign in to look after the listings you own: edit your details and maintain your contact points, services and products."
+    />
+
+    <!-- appearance read before paint, so a dark-mode visitor gets no flash -->
+    <script>
+      try {
+        var t = localStorage.getItem('kip-theme')
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/theme.css" />
+    <style>
+      /* Page-specific only. Everything shared lives in theme.css. */
+
+      .panel {
+        margin-top: var(--s5);
+        padding: var(--s5);
+        border: 1px solid var(--line-2);
+        border-radius: var(--radius-lg);
+        background: var(--card);
+        max-width: 40rem;
+      }
+
+      .panel h2 {
+        margin-top: 0;
+      }
+
+      .desk {
+        display: grid;
+        grid-template-columns: minmax(14rem, 18rem) 1fr;
+        gap: var(--s6);
+        align-items: start;
+        margin-top: var(--s5);
+      }
+
+      @media (max-width: 46rem) {
+        .desk {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .listing-picker {
+        display: grid;
+        gap: var(--s2);
+      }
+
+      .listing-picker button {
+        text-align: left;
+        justify-content: flex-start;
+        padding: var(--s3) var(--s4);
+        height: auto;
+        font-weight: 550;
+      }
+
+      .listing-picker button[aria-pressed='true'] {
+        border-color: var(--ink);
+        background: var(--card-2);
+      }
+
+      .group {
+        margin-top: var(--s6);
+      }
+
+      .group h2 {
+        margin-bottom: var(--s2);
+      }
+
+      .form {
+        display: grid;
+        gap: var(--s4);
+        margin-top: var(--s3);
+        max-width: 36rem;
+      }
+
+      .form .two {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        gap: var(--s4);
+      }
+
+      .form textarea {
+        min-height: 6rem;
+        resize: vertical;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--s3);
+        align-items: center;
+      }
+
+      .record {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--s3) var(--s4);
+        align-items: baseline;
+        padding: var(--s3) 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .record .where {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      .record .kind {
+        font-family: var(--mono);
+        font-size: 0.8125rem;
+        color: var(--faint);
+      }
+
+      .record .private {
+        font-size: 0.8125rem;
+        color: var(--muted);
+      }
+
+      .record button {
+        padding: 0.25rem 0.6rem;
+        min-height: 1.9rem;
+        font-size: 0.8125rem;
+      }
+
+      .inline-form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--s2);
+        margin-top: var(--s3);
+        max-width: 40rem;
+      }
+
+      .inline-form input,
+      .inline-form select {
+        flex: 1 1 9rem;
+      }
+
+      .status {
+        margin-top: var(--s3);
+        padding: var(--s3) var(--s4);
+        border-radius: var(--radius);
+        font-size: 0.9375rem;
+      }
+
+      .status.ok {
+        background: color-mix(in srgb, var(--ink) 6%, transparent);
+      }
+
+      .status.bad {
+        border: 1px solid var(--line-2);
+        color: var(--muted);
+      }
+
+      .section {
+        margin-top: var(--s7);
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="wordmark" href="/">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          Kampala Intelligence
+        </a>
+        <nav class="topnav">
+          <a href="/">Engine</a>
+          <a href="/directory.html">Directory</a>
+          <a href="/insights.html">Gaps</a>
+          <a href="/requests.html">Requests</a>
+          <a href="/ask.html">Ask</a>
+          <a href="/second-life.html">Second Life</a>
+          <a href="/claim.html">Claim</a>
+          <a href="/my-business.html" aria-current="page">My business</a>
+          <a href="/operator.html">Verification queue</a>
+          <button class="theme-toggle" type="button" hidden>
+            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <h1>My business</h1>
+        <p>
+          The desk for a business owner. Sign in with the account an operator created when your
+          claim was approved, then edit what describes your business and maintain your contact
+          points, services and products. You can only ever reach the listings that are yours.
+        </p>
+      </section>
+
+      <section class="panel" id="signin">
+        <h2>Sign in</h2>
+        <p class="sub">
+          Your account came from an approved claim. If you have a one-time reset link, use it to set
+          your password first.
+        </p>
+        <form class="form" id="signin-form">
+          <label>
+            Email
+            <input type="email" name="email" required autocomplete="username" />
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" required autocomplete="current-password" />
+          </label>
+          <div class="actions">
+            <button type="submit" class="btn-primary">Sign in</button>
+          </div>
+          <p class="status bad" id="signin-error" hidden></p>
+        </form>
+      </section>
+
+      <section id="desk" hidden>
+        <div class="desk">
+          <div>
+            <p class="label">Your listings</p>
+            <div class="listing-picker" id="listing-picker"></div>
+            <div class="actions" style="margin-top: var(--s4)">
+              <button type="button" class="quiet" id="signout">Sign out</button>
+            </div>
+          </div>
+
+          <div id="listing-detail" hidden>
+            <h2 id="listing-name" style="margin-bottom: var(--s1)"></h2>
+            <p class="sub" id="listing-where"></p>
+            <p class="status ok" id="desk-status" hidden></p>
+
+            <div class="group">
+              <h2>About your business</h2>
+              <form class="form" id="profile-form">
+                <label>
+                  Description
+                  <textarea name="description" maxlength="4000" placeholder="What you do, in your own words&hellip;"></textarea>
+                </label>
+                <div class="two">
+                  <label>
+                    Website
+                    <input type="text" name="website" maxlength="300" placeholder="https://example.com" />
+                  </label>
+                  <label>
+                    Founded
+                    <input type="number" name="foundedYear" min="1800" max="2100" placeholder="2019" />
+                  </label>
+                </div>
+                <div class="actions">
+                  <button type="submit" class="btn-primary">Save details</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="group">
+              <h2>How customers reach you</h2>
+              <div id="contacts"></div>
+              <form class="inline-form" id="contact-form">
+                <select name="kind" aria-label="Contact kind">
+                  <option value="phone">Phone</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="email">Email</option>
+                  <option value="website">Website</option>
+                  <option value="facebook">Facebook</option>
+                  <option value="tiktok">TikTok</option>
+                  <option value="physical">Address</option>
+                </select>
+                <input type="text" name="value" placeholder="Value" required maxlength="300" />
+                <button type="submit" class="btn">Add</button>
+              </form>
+              <p class="note">New contact points are published straight away. Unpublish any you would rather keep back.</p>
+            </div>
+
+            <div class="group">
+              <h2>Services</h2>
+              <div id="services"></div>
+              <form class="inline-form" id="service-form">
+                <input type="text" name="name" placeholder="Service name" required maxlength="160" />
+                <input type="text" name="description" placeholder="Short description (optional)" maxlength="2000" />
+                <button type="submit" class="btn">Add</button>
+              </form>
+            </div>
+
+            <div class="group">
+              <h2>Products</h2>
+              <div id="products"></div>
+              <form class="inline-form" id="product-form">
+                <input type="text" name="name" placeholder="Product name" required maxlength="160" />
+                <select name="condition" aria-label="Condition">
+                  <option value="new">new</option>
+                  <option value="refurbished">refurbished</option>
+                  <option value="used_good">used, good</option>
+                  <option value="used_fair">used, fair</option>
+                  <option value="for_parts">for parts</option>
+                  <option value="unknown">unknown</option>
+                </select>
+                <button type="submit" class="btn">Add</button>
+              </form>
+            </div>
+          </div>
+
+          <section class="panel" id="none" hidden>
+            <h2>No listings yet</h2>
+            <p>
+              Your account does not own a listing. If you have just been approved, the operator may
+              not have finished handing it over &mdash; or your claim is still being reviewed.
+            </p>
+            <a class="btn" href="/claim.html">Claim a listing</a>
+          </section>
+        </div>
+      </section>
+
+      <section class="section" id="reset-panel" hidden>
+        <h2>Setting a password from a reset link</h2>
+        <form class="form" id="reset-form">
+          <label>
+            Token
+            <input type="text" name="token" required autocomplete="off" />
+          </label>
+          <label>
+            New password
+            <input type="password" name="newPassword" required autocomplete="new-password" />
+          </label>
+          <div class="actions">
+            <button type="submit" class="btn-primary">Set password</button>
+          </div>
+          <p class="status bad" id="reset-status" hidden></p>
+        </form>
+      </section>
+    </main>
+
+    <script src="/theme.js"></script>
+    <script>
+      /*
+       * The provider desk. Two rules shape this file:
+       *
+       *   - It only ever calls /provider/*. It never reaches for an admin route,
+       *     because the capability table would refuse it anyway and a page that
+       *     looks like it can reach one is a page that lies.
+       *   - Nothing is written with innerHTML. Business names, service names and
+       *     contact values are owner-typed text, so they become text nodes.
+       */
+      const API = '/api/v1'
+
+      const els = {
+        signin: document.getElementById('signin'),
+        signinForm: document.getElementById('signin-form'),
+        signinError: document.getElementById('signin-error'),
+        desk: document.getElementById('desk'),
+        listingPicker: document.getElementById('listing-picker'),
+        listingDetail: document.getElementById('listing-detail'),
+        listingName: document.getElementById('listing-name'),
+        listingWhere: document.getElementById('listing-where'),
+        deskStatus: document.getElementById('desk-status'),
+        profileForm: document.getElementById('profile-form'),
+        contacts: document.getElementById('contacts'),
+        contactForm: document.getElementById('contact-form'),
+        services: document.getElementById('services'),
+        serviceForm: document.getElementById('service-form'),
+        products: document.getElementById('products'),
+        productForm: document.getElementById('product-form'),
+        none: document.getElementById('none'),
+        signout: document.getElementById('signout'),
+        resetPanel: document.getElementById('reset-panel'),
+        resetForm: document.getElementById('reset-form'),
+        resetStatus: document.getElementById('reset-status'),
+      }
+
+      const CONTACT_LABELS = {
+        phone: 'Phone', whatsapp: 'WhatsApp', email: 'Email', website: 'Website',
+        facebook: 'Facebook', tiktok: 'TikTok', physical: 'Address',
+      }
+      const CONDITION_LABELS = {
+        new: 'new', refurbished: 'refurbished', used_good: 'used, good',
+        used_fair: 'used, fair', for_parts: 'for parts', unknown: 'unknown',
+      }
+
+      let owned = []
+      let current = null
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          credentials: 'same-origin',
+          ...options,
+          headers: {
+            accept: 'application/json',
+            ...(options.body ? { 'content-type': 'application/json' } : {}),
+            ...(options.headers ?? {}),
+          },
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(payload?.error?.message ?? 'That did not work.')
+          error.status = response.status
+          throw error
+        }
+        return payload
+      }
+
+      const say = (element, message, kind = 'ok') => {
+        element.textContent = message ?? ''
+        element.className = `status ${kind}`
+        element.hidden = !message
+      }
+
+      function record(parts, actions) {
+        const row = document.createElement('div')
+        row.className = 'record'
+        const where = document.createElement('div')
+        where.className = 'where'
+        where.append(document.createTextNode(parts.primary))
+        if (parts.secondary) {
+          const span = document.createElement('span')
+          span.className = 'kind'
+          span.textContent = `  ${parts.secondary}`
+          where.append(span)
+        }
+        if (parts.note) {
+          const note = document.createElement('div')
+          note.className = 'private'
+          note.textContent = parts.note
+          where.append(note)
+        }
+        row.append(where)
+        for (const { label, onClick, disabled } of actions) {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.className = 'quiet'
+          button.textContent = label
+          button.disabled = Boolean(disabled)
+          button.addEventListener('click', onClick)
+          row.append(button)
+        }
+        return row
+      }
+
+      /* --- sign in ----------------------------------------------------------- */
+
+      els.signinForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        els.signinError.hidden = true
+        const data = new FormData(els.signinForm)
+        try {
+          await api(`${API}/auth/login`, {
+            method: 'POST',
+            body: JSON.stringify({
+              email: String(data.get('email')).trim(),
+              password: String(data.get('password')),
+            }),
+          })
+          await open()
+        } catch (error) {
+          say(els.signinError, error.message, 'bad')
+        }
+      })
+
+      els.signout.addEventListener('click', async () => {
+        try {
+          await api(`${API}/auth/logout`, { method: 'POST' })
+        } catch {
+          /* signing out locally is enough even if the call failed */
+        }
+        window.location.reload()
+      })
+
+      /* --- the listing ------------------------------------------------------- */
+
+      async function open() {
+        const me = await api(`${API}/auth/me`).catch(() => null)
+        if (!me) {
+          els.signin.hidden = false
+          els.desk.hidden = true
+          return
+        }
+        els.signin.hidden = true
+        els.desk.hidden = false
+        await loadOwned()
+      }
+
+      async function loadOwned() {
+        const body = await api(`${API}/provider/businesses`)
+        owned = body.data ?? []
+        els.listingPicker.replaceChildren()
+        if (owned.length === 0) {
+          els.listingDetail.hidden = true
+          els.none.hidden = false
+          return
+        }
+        els.none.hidden = true
+        for (const business of owned) {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.className = 'btn'
+          button.textContent = business.name
+          button.setAttribute('aria-pressed', String(current?.id === business.id))
+          button.addEventListener('click', () => selectListing(business.id))
+          els.listingPicker.append(button)
+        }
+        await selectListing(owned[0].id)
+      }
+
+      async function selectListing(id) {
+        const body = await api(`${API}/provider/businesses/${id}`)
+        current = body.data
+        for (const button of els.listingPicker.querySelectorAll('button')) {
+          button.setAttribute('aria-pressed', String(button.textContent === current.name))
+        }
+        els.listingDetail.hidden = false
+        els.listingName.textContent = current.name
+        els.listingWhere.textContent = current.slug
+        for (const field of ['description', 'website', 'foundedYear']) {
+          els.profileForm.elements[field].value = current[field] ?? ''
+        }
+        renderContacts(current.contacts ?? [])
+        renderOffer(els.services, current.services ?? [], 'service')
+        renderOffer(els.products, current.products ?? [], 'product')
+        say(els.deskStatus, '')
+      }
+
+      els.profileForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const data = new FormData(els.profileForm)
+        const payload = {
+          description: String(data.get('description') ?? ''),
+          website: String(data.get('website') ?? ''),
+        }
+        const year = String(data.get('foundedYear') ?? '').trim()
+        if (year) payload.foundedYear = Number(year)
+        await guard(async () => {
+          await api(`${API}/provider/businesses/${current.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+          })
+          await selectListing(current.id)
+          say(els.deskStatus, 'Saved.')
+        })
+      })
+
+      /* --- contacts ---------------------------------------------------------- */
+
+      function renderContacts(contacts) {
+        els.contacts.replaceChildren()
+        if (contacts.length === 0) els.contacts.append(emptyLine('No contact points yet.'))
+        for (const contact of contacts) {
+          els.contacts.append(
+            record(
+              {
+                primary: contact.value,
+                secondary: CONTACT_LABELS[contact.kind] ?? contact.kind,
+                note: contact.isPublic ? null : 'not published',
+              },
+              [
+                {
+                  label: contact.isPublic ? 'Unpublish' : 'Publish',
+                  onClick: () =>
+                    guard(async () => {
+                      await api(
+                        `${API}/provider/businesses/${current.id}/contacts/${contact.id}`,
+                        { method: 'PATCH', body: JSON.stringify({ isPublic: !contact.isPublic }) },
+                      )
+                      await selectListing(current.id)
+                    }),
+                },
+                {
+                  label: 'Remove',
+                  onClick: () =>
+                    guard(async () => {
+                      await api(
+                        `${API}/provider/businesses/${current.id}/contacts/${contact.id}`,
+                        { method: 'DELETE' },
+                      )
+                      await selectListing(current.id)
+                    }),
+                },
+              ],
+            ),
+          )
+        }
+      }
+
+      els.contactForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const data = new FormData(els.contactForm)
+        await guard(async () => {
+          await api(`${API}/provider/businesses/${current.id}/contacts`, {
+            method: 'POST',
+            body: JSON.stringify({
+              kind: String(data.get('kind')),
+              value: String(data.get('value')).trim(),
+            }),
+          })
+          els.contactForm.reset()
+          await selectListing(current.id)
+        })
+      })
+
+      /* --- services and products -------------------------------------------- */
+
+      function renderOffer(holder, items, kind) {
+        holder.replaceChildren()
+        if (items.length === 0) {
+          holder.append(emptyLine(`No ${kind}s listed yet.`))
+          return
+        }
+        for (const item of items) {
+          holder.append(
+            record(
+              {
+                primary: item.name,
+                secondary: kind === 'product' ? CONDITION_LABELS[item.condition] ?? null : null,
+                note: item.description ?? null,
+              },
+              [
+                {
+                  label: 'Remove',
+                  onClick: () =>
+                    guard(async () => {
+                      await api(
+                        `${API}/provider/businesses/${current.id}/${kind}s/${item.id}`,
+                        { method: 'DELETE' },
+                      )
+                      await selectListing(current.id)
+                    }),
+                },
+              ],
+            ),
+          )
+        }
+      }
+
+      els.serviceForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const data = new FormData(els.serviceForm)
+        const payload = { name: String(data.get('name')).trim() }
+        const description = String(data.get('description') ?? '').trim()
+        if (description) payload.description = description
+        await guard(async () => {
+          await api(`${API}/provider/businesses/${current.id}/services`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          })
+          els.serviceForm.reset()
+          await selectListing(current.id)
+        })
+      })
+
+      els.productForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const data = new FormData(els.productForm)
+        await guard(async () => {
+          await api(`${API}/provider/businesses/${current.id}/products`, {
+            method: 'POST',
+            body: JSON.stringify({
+              name: String(data.get('name')).trim(),
+              condition: String(data.get('condition')),
+            }),
+          })
+          els.productForm.reset()
+          await selectListing(current.id)
+        })
+      })
+
+      /* --- reset panel, for a one-time link --------------------------------- */
+
+      els.resetForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const data = new FormData(els.resetForm)
+        try {
+          await api(`${API}/auth/password-reset/confirm`, {
+            method: 'POST',
+            body: JSON.stringify({
+              token: String(data.get('token')).trim(),
+              newPassword: String(data.get('newPassword')),
+            }),
+          })
+          say(els.resetStatus, 'Password set. You can sign in above.')
+          els.resetForm.reset()
+        } catch (error) {
+          say(els.resetStatus, error.message, 'bad')
+        }
+      })
+
+      /* --- helpers ----------------------------------------------------------- */
+
+      function emptyLine(message) {
+        const p = document.createElement('p')
+        p.className = 'note'
+        p.textContent = message
+        return p
+      }
+
+      async function guard(action) {
+        try {
+          await action()
+        } catch (error) {
+          say(els.deskStatus, error.message, 'bad')
+        }
+      }
+
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('reset')) {
+        els.resetPanel.hidden = false
+        els.resetForm.elements.token.value = params.get('reset')
+      }
+      open()
+    </script>
+  </body>
+</html>
