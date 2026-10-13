@@ -104,6 +104,7 @@ test('migrations are idempotent and recorded', () => {
       '009_catalogue_ingestion',
       '010_opportunity_identity',
       '011_opportunity_actor_count',
+      '012_second_life',
     ]
 
     // Re-running the migrator on an up-to-date database must be a no-op, or the
@@ -135,7 +136,11 @@ test('011 backfills the actor count onto opportunities that predate the column',
   const migrations = path.join(APP_ROOT, 'src', 'db', 'migrations')
   const before = fs.mkdtempSync(path.join(os.tmpdir(), 'kip-before-'))
   for (const name of fs.readdirSync(migrations)) {
-    if (name === '011_opportunity_actor_count.sql') continue
+    // Stage the schema as it stood before 011, so 011 (and anything added after
+    // it, like 012) is genuinely pending when the full directory is applied. The
+    // migrator refuses out-of-order history, which is why the newer migration has
+    // to be left out here rather than copied in and applied later.
+    if (name === '011_opportunity_actor_count.sql' || name === '012_second_life.sql') continue
     fs.copyFileSync(path.join(migrations, name), path.join(before, name))
   }
 
@@ -180,8 +185,8 @@ test('011 backfills the actor count onto opportunities that predate the column',
     const results = migrate(db)
     assert.deepEqual(
       results.filter((row) => row.status !== 'skipped').map((row) => row.id),
-      ['011_opportunity_actor_count'],
-      '011 is the only migration the upgrade applies',
+      ['011_opportunity_actor_count', '012_second_life'],
+      'the upgrade applies every migration added after the staged schema',
     )
 
     const rows = db.prepare('SELECT id, distinct_actors FROM opportunity ORDER BY id').all()

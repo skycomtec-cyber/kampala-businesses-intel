@@ -7,13 +7,13 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
 /**
- * Drives the two browser end-to-end passes the way they are only worth driving:
+ * Drives the browser end-to-end passes the way they are only worth driving:
  * a real Chromium against a real server on a throwaway database.
  *
- * The provider pass needs the demonstration seed (36 businesses, one admin) to
- * mean anything, so this runner seeds a fresh temporary database for it. The
- * requests pass runs against an empty database, which is also what makes its
- * `empty state` and `list now shows one request` assertions mean anything.
+ * The provider and ask passes read the demonstration seed (36 businesses, one
+ * admin), so this runner seeds a fresh temporary database for them. The requests
+ * pass runs against an empty database, which is also what makes its `empty state`
+ * and `list now shows one request` assertions mean anything.
  *
  * Prereqs: a Python 3 interpreter with the `playwright` package and a Chromium
  * browser installed (`pip install playwright && python -m playwright install
@@ -146,6 +146,7 @@ async function runCycle(label, { script, seed }) {
 
 const cycles = [
   ['requests page', { script: 'e2e_requests.py', seed: false }],
+  ['ask page', { script: 'e2e_ask.py', seed: true }],
   ['provider desk', { script: 'e2e_provider.py', seed: true }],
 ]
 

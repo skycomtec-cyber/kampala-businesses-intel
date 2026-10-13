@@ -7,6 +7,7 @@ import { createCatalogueRepository } from './catalogue.js'
 import { createDemandRepository } from './demand.js'
 import { createMarketplaceRepository } from './marketplace.js'
 import { createIntelligenceRepository } from './intelligence.js'
+import { createSecondLifeRepository } from './secondLife.js'
 
 /**
  * Repository wiring.
@@ -36,6 +37,7 @@ export function createRepositories(db, config) {
   const demand = createDemandRepository(db, config)
   const marketplace = createMarketplaceRepository(db, config)
   const intelligence = createIntelligenceRepository(db, config)
+  const secondLife = createSecondLifeRepository(db, config)
 
   return {
     db,
@@ -52,6 +54,7 @@ export function createRepositories(db, config) {
     demand,
     marketplace,
     intelligence,
+    secondLife,
 
     /**
      * Runs a unit of work atomically.

@@ -29,6 +29,13 @@ nothing leaves the machine.
 - **A gap engine.** Daily rollups of search demand, scored gaps and opportunities with the inputs
   they were derived from stored alongside them, so a conclusion stays explainable after the data
   moves on.
+- **Second Life Electronics, the first vertical.** Six electronics activities — repair,
+  refurbishment, parts recovery, resale, recycling and data services — filed as real taxonomy, plus a
+  device intake that follows one item from the counter to a named outcome and enforces its data-wipe
+  promise.
+- **Ask Kampala.** A plain-language question is read into an intent, a category and a location by a
+  deterministic parser in `core/ask.js`, answered from the same engine everything else uses, and shown
+  back to the asker so a misreading is visible rather than silent. Nothing leaves the machine.
 - **Operator accounts with capabilities.** No public registration. Accounts are created by whoever
   has shell access, and every editorial action is written to an audit log with a before and after.
 
@@ -511,7 +518,7 @@ closures it causes itself and spends that count instead of settling on it.
 
 ### The pages, and what they share
 
-Five static files, no build step, no framework, served from the same origin as the api and linked
+Nine static files, no build step, no framework, served from the same origin as the api and linked
 from the same topbar, so any of them can be bookmarked or reloaded on its own:
 
 | Page | What it is for |
@@ -521,13 +528,17 @@ from the same topbar, so any of them can be bookmarked or reloaded on its own:
 | `/business.html?b=<slug>` | One listing: contacts marked public or private, services, skills, and the source it came from |
 | `/insights.html` | The ranked gaps: what people search for and nobody lists, each card carrying the sentence it was ranked by |
 | `/operator.html` | The review queue, above |
+| `/requests.html` | The marketplace of requests: post one without an account, read it back with its token, accept an offer |
+| `/provider.html` | The provider desk: a published business answering open requests |
+| `/ask.html` | Ask Kampala: a plain-language question, the reading of it, and the answer |
+| `/second-life.html` | The Second Life Electronics vertical: its six activities and the intake lifecycle |
 
 `/insights.html` is the other half of `/directory.html`, and reads the same
 `/api/v1/insights/opportunities` the api documents. Its floor toggle is the page form of
 `?includeSuppressed=true`: on, it lists the findings computed over too few distinct people and withholds
 their counts, which is what the flag means everywhere else in this platform.
 
-Everything the five pages agree on lives in `app/web/theme.css` as tokens, so light and dark are two
+Everything the pages agree on lives in `app/web/theme.css` as tokens, so light and dark are two
 readings of one set of rules rather than two stylesheets, and a page cannot drift from its neighbours.
 `theme.js` only reads and writes the saved appearance; the choice is inlined into each page's `<head>`
 so a dark-mode visitor never sees a white flash, and with JavaScript off the rest of each page still
@@ -625,6 +636,86 @@ instead of a high one, and colour costs about 13% more bytes than the grayscale 
 preceded it. It is worth reading before changing the band, because re-measuring is cheaper than
 rediscovering it.
 
+## Second Life Electronics
+
+The first specialised vertical, and the one that shows what a vertical is for. Its six activities are
+real category nodes under `second-life-electronics` in the taxonomy, so a listing filed under one is
+browsable like any other part of the directory. On top of that sits an **intake book**: a record that
+follows a single device — its make, model, condition and the activity it is being handled under — from
+the counter to a named outcome. A directory entry can say a workshop exists; an intake is the only
+thing that can say this phone came in cracked on Tuesday and left with its data wiped.
+
+The intake lifecycle is one-way: `received → diagnosed → in_progress → ready`, and then `closed` with
+one of seven outcomes (`repaired`, `refurbished`, `parts_recovered`, `resold`, `recycled`, `returned`,
+`scrapped`). Every move is written to an append-only `device_intake_event` history. The rules live in
+`app/src/core/secondLife.js` and are enforced by the repository, not restated in the route, so the
+buttons the api offers and the moves it accepts cannot drift apart.
+
+The one promise this vertical *enforces* rather than merely intends is the data wipe. An intake can be
+opened with `dataWipeRequested`, and it cannot be closed as `resold`, `parts_recovered`, `recycled` or
+`returned` while that wipe is outstanding — the record must either have the wipe completed first, or
+choose an outcome that keeps custody of the device (`repaired`, `refurbished`, `scrapped`). The
+database `CHECK` refuses a completed wipe that was never requested, so the constraint holds even if a
+future caller skips the repository.
+
+```bash
+# the vertical's public table of contents (activity -> live category id)
+curl -s http://127.0.0.1:4310/api/v1/second-life/activities
+
+# take a device in (operator, business:write)
+curl -s -X POST http://127.0.0.1:4310/api/v1/second-life/businesses/$BUSINESS_ID/intakes \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"activity":"repair","deviceType":"smartphone","receivedCondition":"cracked","dataWipeRequested":true}'
+# -> data.reference "SL-2026-00001"
+
+# close it — refused while the wipe is outstanding, allowed once recorded
+curl -s -X POST http://127.0.0.1:4310/api/v1/second-life/intakes/SL-2026-00001/wipe \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{}'
+curl -s -X POST http://127.0.0.1:4310/api/v1/second-life/intakes/SL-2026-00001/close \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"outcome":"repaired"}'
+```
+
+The public page is `/second-life.html`.
+
+## Ask Kampala
+
+A plain-language question — *"how many laptop repairers are there in Nakawa?"* — answered from the
+same engine every other surface uses, with the reading of the question shown back. It is deliberately
+**not a chatbot and not a model call**: `app/src/core/ask.js` is a pure, deterministic parser that
+extracts an intent (`find` or `count`), at most one category from the real taxonomy, at most one
+location from the real geography, and leaves whatever is left as free text. A word it does not
+recognise stays in the free text rather than being dropped, so an unfamiliar place narrows the search
+instead of silently vanishing. Nothing leaves the machine, and the same question always produces the
+same plan.
+
+```bash
+curl -s "http://127.0.0.1:4310/api/v1/ask?q=how%20many%20device%20repair%20businesses%20are%20in%20Kampala%20District"
+```
+
+```json
+{
+  "data": [],
+  "meta": {
+    "total": 12,
+    "intent": "count",
+    "query": "how many device repair businesses are in Kampala District",
+    "answer": "12 listings for Device Repair in Kampala District.",
+    "understood": {
+      "text": null,
+      "category": { "id": "…", "name": "Device Repair", "slug": "device-repair" },
+      "location": { "id": "…", "name": "Kampala District", "kind": "district" },
+      "categoryPhrase": "device repair",
+      "locationPhrase": "kampala district"
+    }
+  }
+}
+```
+
+A `find` question runs the free text through the search index with the recognised category and
+location as filters; a `count` question returns the number and no rows. Either way the question is
+recorded as an anonymised demand signal exactly as a search is, because a question is what a person
+wanted and the gap engine should see it. The public page is `/ask.html`.
+
 ## API
 
 Base URL `http://127.0.0.1:4310`. Every response uses the same envelope:
@@ -653,6 +744,8 @@ API version is deployed to know whether the process is alive.
 | `GET` | `/api/v1/businesses/:idOrSlug` | A public profile. Never includes private contact points. |
 | `GET` | `/api/v1/businesses/match` | `?q=name` or `?phone=` to catch duplicates before adding a listing. |
 | `GET` | `/api/v1/search` | `?q=` required. Records a demand signal; see the header `x-demand-signal`. |
+| `GET` | `/api/v1/ask` | `?q=` required. Reads a plain-language question and answers it; `meta.understood` shows the reading. Records a demand signal like `/search`. |
+| `GET` | `/api/v1/second-life/activities` | The vertical's six activities and the category each is filed under. |
 | `GET` | `/api/v1/insights/opportunities` | Ranked gaps. `?includeSuppressed=true` to see withheld ones. |
 | `GET` | `/api/v1/insights/opportunities/:id` | One gap with the snapshot it was derived from. |
 | `GET` | `/api/v1/insights/signals` | Aggregated demand. `?from=` required. |
@@ -688,6 +781,13 @@ API version is deployed to know whether the process is alive.
 | `POST`/`DELETE` | `/api/v1/admin/businesses/:id/skills[/:skillId]` | `business:write` |
 | `GET` | `/api/v1/admin/businesses/:id/offers` | `business:read` (offers a business has made) |
 | `GET` | `/api/v1/admin/businesses/:id/matching-requests` | `business:read` (open requests it has not answered) |
+| `POST` | `/api/v1/second-life/businesses/:id/intakes` | `business:write` (take a device in; body names `activity`, `deviceType`, `receivedCondition`) |
+| `GET` | `/api/v1/second-life/businesses/:id/intakes` | `business:read` (a business's intake book; `?stage=`, `?outcome=`, `?activity=`, `?deviceType=`, `?search=`) |
+| `GET` | `/api/v1/second-life/businesses/:id/summary` | `business:read` (counts by stage, outcome and activity, including wipes) |
+| `GET` | `/api/v1/second-life/intakes/:reference` | `business:read` (one intake, its history and its `nextStages`) |
+| `POST` | `/api/v1/second-life/intakes/:reference/advance` | `business:write` (forward only; a skip straight to `closed` is refused) |
+| `POST` | `/api/v1/second-life/intakes/:reference/close` | `business:write` (close with an `outcome`; the data-wipe rule is applied here) |
+| `POST` | `/api/v1/second-life/intakes/:reference/wipe` | `business:write` (record that a requested data wipe was completed) |
 | `POST` | `/api/v1/requests/:reference/offers` | `business:write` (offer as a published business; `businessId` in the body) |
 | `POST` | `/api/v1/requests/:reference/offers/:offerId/withdraw` | `business:write` (retract one of its offers) |
 | `GET` | `/api/v1/admin/imports/businesses/schema` | `import:read` |
@@ -761,6 +861,7 @@ Fixed windows, in process memory, keyed by account when signed in and by address
 | Sign-in and password reset | 10 per 15 minutes |
 | `POST /requests`, withdraw, offers, accept | 5 per minute |
 | `GET /search` | 30 per minute |
+| `GET /ask` | 30 per minute (the search budget: every question is a demand signal) |
 | Everything else | 240 per minute |
 
 A refused request answers `429 rate_limited` with `retry-after`, `x-ratelimit-limit`,
@@ -1025,12 +1126,16 @@ class of breakage entirely.
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
 │   │                         import, backup, restore, and the one-off repairs
 │   │                         — backfill-provenance, add-sources
-│   ├── test/                 176 tests, no network, temporary folders only
-│   └── web/                  the five pages, and the stylesheet they share
+│   ├── test/                 194 tests, no network, temporary folders only
+│   └── web/                  the website pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
 │       ├── business.html         one listing, with its contacts, services and provenance
 │       ├── insights.html         the ranked gaps, and what the engine withheld
+│       ├── requests.html         the marketplace of requests
+│       ├── provider.html         the provider desk
+│       ├── ask.html              Ask Kampala, with the reading of the question
+│       ├── second-life.html      the Second Life Electronics vertical
 │       ├── operator.html         the review queue
 │       ├── theme.css             every shared token and component, light and dark
 │       ├── theme.js              the appearance toggle, and nothing else
@@ -1062,7 +1167,7 @@ cd app
 npm test
 ```
 
-179 tests, no network access, each against its own temporary database. The API tests mount the real
+194 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule
@@ -1071,7 +1176,10 @@ points, the capability table, the rate limiter, that every documented filter act
 undocumented one is refused, that every signed-in route refuses an anonymous caller, that a bug in
 our own code is answered as a 500 rather than as the caller's mistake, that every location level the
 data holds is filterable, and the rule that a bad sign-in cannot be used to find out which addresses
-exist.
+exist. The Second Life vertical is pinned at both levels — the pure rules (the one-way stage order,
+the activity/category mapping, the data-wipe rule) against `core/secondLife.js`, and a full device
+lifecycle against the api — and Ask Kampala is pinned the same way: the parser's reading against
+`core/ask.js`, and a count and a find question end to end through `/api/v1/ask`.
 
 The backup tests are written around the failure they exist to prevent, which is that a copy of a WAL
 database looks complete and is missing every write since the last checkpoint. So the assertions are
@@ -1102,10 +1210,12 @@ these were strengthened.
 
 ### The marketplace pages, driven through a real Chromium
 
-The two marketplace pages have no build step and therefore no unit tests either, so the flows that are
-decisions — an anonymous requester posting a request and reading it back with the token, a provider
-answering, the accept-one-declines-the-other rule, withdrawing an offer, withdrawing a request — are
-driven the only way that says anything: Playwright against a real server on a throwaway database.
+The marketplace, ask and second-life pages have no build step and therefore no unit tests either, so
+the flows that are decisions — an anonymous requester posting a request and reading it back with the
+token, a provider answering, the accept-one-declines-the-other rule, withdrawing an offer, withdrawing
+a request, asking a question and reading back how it was understood, browsing the vertical's six
+activities — are driven the only way that says anything: Playwright against a real server on a
+throwaway database.
 
 ```bash
 cd app
@@ -1113,11 +1223,13 @@ npm run test:e2e
 ```
 
 The runner (`app/scripts/run-e2e.mjs`) starts the real server on a free port for each pass, waits for it
-to listen, deletes the temporary database afterwards, and exits non-zero if either pass does. The
+to listen, deletes the temporary database afterwards, and exits non-zero if any pass does. The
 requests pass runs against an empty database (which is what makes its `empty state` and
-`list now shows one request` assertions mean anything); the provider pass seeds the demonstration —
-36 businesses and the one admin account — and exercises two businesses answering the same request,
-a requester choosing between offers, and both kinds of withdrawal.
+`list now shows one request` assertions mean anything); the ask and provider passes seed the
+demonstration — 36 businesses and the one admin account. The ask pass asks a count question and a find
+question and checks the reading the page prints back, then checks the vertical's six activities;
+the provider pass exercises two businesses answering the same request, a requester choosing between
+offers, and both kinds of withdrawal.
 
 Prereqs: a Python 3 interpreter with the `playwright` package and its Chromium, at the same pinned
 version the `e2e` job in CI installs:
