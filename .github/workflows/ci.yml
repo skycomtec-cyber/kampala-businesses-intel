@@ -1,6 +1,6 @@
 # Kampala Businesses Intel - continuous integration
 #
-# Three jobs, in the order they fail:
+# Four jobs, in the order they fail:
 #
 #   1. test        - the suite, on the Node versions this supports.
 #   2. config      - .env.example still matches src/config.js. Separate from the
@@ -9,6 +9,10 @@
 #                    to see in the log.
 #   3. image       - the Dockerfile builds and the container answers its own
 #                    healthcheck. The last one that can be done without a host.
+#   4. e2e         - the marketplace's browser passes, on a real Chromium against
+#                    a real server. Kept apart from the others because it is the
+#                    only one that needs a browser and a Python interpreter, and a
+#                    flake here should not read as a unit-test regression.
 #
 # Scheduled as well as push: a platform that seeds itself, imports and runs a
 # nightly engine has code paths that only execute once a day in production, so a
@@ -219,3 +223,56 @@ jobs:
       - name: Clean up
         if: always()
         run: docker rm -f cip-app || true
+
+  # The two marketplace pages have no build step and so no unit tests; the flows
+  # that carry a decision are driven through a real Chromium against a real server
+  # on a throwaway database instead. That is the only reason this job exists: the
+  # Node suite cannot click "Accept this offer" and see the other one decline.
+  e2e:
+    name: Marketplace browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_MIN }}
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      # The passes are driven by Playwright's Python binding, which is why this is
+      # the one job that needs a Python interpreter. Pinned to a minor the runner
+      # is known to pass against rather than floating, so a new Playwright cannot
+      # move the ground under the suite without a commit that says it did.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        working-directory: app
+        run: npm ci
+
+      # Cached by the pinned version, because the browser is a ~150MB download and
+      # it only changes when the pin does. The key names the version rather than
+      # hashing the workflow, since a comment edit should not re-download it.
+      - name: Cache the Chromium download
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.63.0
+
+      # `--with-deps` is the part that matters on a bare runner: it installs the
+      # shared libraries Chromium links against, which the image does not carry.
+      # `playwright install` skips the download when the cache above restored it.
+      - name: Install Playwright and its Chromium
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright==1.63.0
+          python -m playwright install --with-deps chromium
+
+      # The runner boots the real server on a free port for each pass on a
+      # throwaway database and exits non-zero if either pass fails, so there is
+      # nothing left to arrange. No network and no pre-existing state are needed.
+      - name: Run the browser passes
+        working-directory: app
+        run: npm run test:e2e

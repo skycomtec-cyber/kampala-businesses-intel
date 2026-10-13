@@ -1119,10 +1119,11 @@ requests pass runs against an empty database (which is what makes its `empty sta
 36 businesses and the one admin account — and exercises two businesses answering the same request,
 a requester choosing between offers, and both kinds of withdrawal.
 
-Prereqs: a Python 3 interpreter with the `playwright` package and its Chromium:
+Prereqs: a Python 3 interpreter with the `playwright` package and its Chromium, at the same pinned
+version the `e2e` job in CI installs:
 
 ```bash
-pip install playwright && python -m playwright install chromium
+pip install playwright==1.63.0 && python -m playwright install chromium
 ```
 
 Override the interpreter and the demo admin credentials with `KIP_E2E_PYTHON`,
