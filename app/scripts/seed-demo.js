@@ -26,9 +26,11 @@
  * WHAT IT DOES, IN THE ORDER THE PLATFORM DOES IT
  *
  * Reference data, then the demonstration businesses through the review path, then
- * the searches as events, then the daily rollup, then the gap engine. The last two
- * steps call the same functions `scripts/maintenance.js` calls, so the demonstration
- * is produced by the platform rather than by this file.
+ * the reviews and photographs against those businesses, then the searches as events,
+ * then the daily rollup, then the gap engine. The last two steps call the same
+ * functions `scripts/maintenance.js` calls, so the demonstration is produced by the
+ * platform rather than by this file. The photographs are written to the media
+ * directory beside the database, the same one the server reads them back from.
  *
  * Usage:
  *   KIP_DATA_DIR=../data-demo node scripts/seed-demo.js
@@ -45,6 +47,7 @@ import { seedReferenceData } from '../src/seed/index.js'
 import { demoCoverage, seedDemo } from '../src/seed/demo.js'
 import { DEMO_DEMAND } from '../src/seed/demo-data.js'
 import { runGapEngine } from '../src/engine/gaps.js'
+import { createMediaStore } from '../src/media/index.js'
 
 const DAY_MS = 86400000
 const DEFAULT_DATA_DIR = path.join(APP_ROOT, 'data')
@@ -211,18 +214,27 @@ function main() {
   const config = loadConfig({ dataDir })
   assertDatabaseIsInside(config, dataDir)
   const app = openApp({ config })
+  // The same directory the server reads from, so a photo written here is one the
+  // gallery serves without any further step.
+  const media = createMediaStore({ dir: config.mediaDir })
 
   try {
     assertNoExistingBusinesses(app)
 
     const reference = seedReferenceData(app, { config })
-    const seeded = seedDemo(app)
+    const seeded = seedDemo(app, { media })
     const rolled = rollupDemoWindow(app, new Date())
     const run = runGapEngine(app)
     const coverage = demoCoverage(app)
     const admin = ensureDemoAdmin(app)
 
     const opportunities = app.intelligence.opportunities({}).items
+
+    const tally = (rows) => {
+      const counts = { published: 0, pending: 0, rejected: 0 }
+      for (const row of rows) counts[row.status] = (counts[row.status] ?? 0) + 1
+      return `${counts.published} published, ${counts.pending} pending, ${counts.rejected} rejected`
+    }
 
     log(`Demonstration database built at ${dataDir}`)
     log(
@@ -233,6 +245,11 @@ function main() {
     log(
       `  Demand:    ${seeded.phrases.length} phrase(s), ${rolled.events} search event(s) over ` +
         `${rolled.span} day(s) -> ${rolled.signals} signal row(s).`,
+    )
+    log(`  Ratings:   ${tally(seeded.reviews)} review(s)`)
+    log(
+      `  Photos:    ${tally(seeded.photos)} photo(s), written under ` +
+        `${path.relative(dataDir, media.dir) || media.dir}.`,
     )
     log(
       `  Engine:    run over ${run.windowDays} day(s) ending ${run.windowEnd}: ` +

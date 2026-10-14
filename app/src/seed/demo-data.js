@@ -311,6 +311,285 @@ export const DEMO_DEMAND = [
 ]
 
 /**
+ * Reviews, published through the real moderation path.
+ *
+ * A directory whose listings are all unrated demonstrates nothing about the
+ * ratings feature, so most of these are published and carry an average. Two are
+ * left pending and one is rejected: the point of the queue at `/reviews.html` is
+ * the work waiting in it, and an empty queue shows the empty state instead.
+ *
+ * The averages are chosen to differ rather than to all land on five. Kampala Laptop
+ * Repair settles on 4.7 from three reviews and Kampala Mobile Care on 4.5 from two,
+ * so a directory card, a profile and a histogram all have a number that is not the
+ * same number in the next place, which is the only way to see the summarising work.
+ *
+ * The words are invented, like everything else here, and the addresses are at
+ * `example.com` because they are never published and never mailed.
+ */
+export const DEMO_REVIEWS = [
+  {
+    business: 'Kampala Laptop Repair',
+    rating: 5,
+    title: 'Recovered a thesis I had not backed up',
+    body: 'The laptop would not boot and the drive was clicking. They recovered every document, including three months of work I had no copy of. They explained what had failed rather than just taking the machine.',
+    authorName: 'Miriam Kirabo',
+    authorEmail: 'miriam.kirabo@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Laptop Repair',
+    rating: 5,
+    title: 'Honest about a cheap fix',
+    body: 'I walked in ready to pay for a new keyboard and they told me it was a software problem. It was done in an hour and the bill was almost nothing.',
+    authorName: 'Denis Mugisha',
+    authorEmail: 'denis.mugisha@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Laptop Repair',
+    rating: 4,
+    title: 'Battery swapped while I waited',
+    body: 'A genuine battery, fitted in under an hour, and they took the old one away. Only the small shop and the waiting bench keep it from five.',
+    authorName: 'Aisha Nabirye',
+    authorEmail: 'aisha.nabirye@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Mobile Care',
+    rating: 5,
+    title: 'Screen replaced the same morning',
+    body: 'I took the phone in at nine and collected it before lunch. They showed me the cracked screen afterwards and the price did not move at the counter.',
+    authorName: 'Sarah Nakato',
+    authorEmail: 'sarah.nakato@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Mobile Care',
+    rating: 4,
+    title: 'Good repair, longer wait than promised',
+    body: 'The work was clean and the phone has been fine since. I waited most of the afternoon rather than the hour I was told, which is the only reason this is not five stars.',
+    authorName: 'Peter Ssemakula',
+    authorEmail: 'peter.ssemakula@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Data Recovery',
+    rating: 5,
+    title: 'Files back from a drive two others refused',
+    body: 'A drive that two other places would not touch came back with everything on it, including photographs from an old phone. Worth the wait.',
+    authorName: 'Joel Ssentongo',
+    authorEmail: 'joel.ssentongo@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Nakawa Phone Point',
+    rating: 4,
+    title: 'Charging port replaced, no upselling',
+    body: 'The phone would not charge at all. They replaced the port, tested it in front of me, and did not try to sell me a screen I did not need.',
+    authorName: 'Grace Achieng',
+    authorEmail: 'grace.achieng@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Electricians',
+    rating: 3,
+    title: 'Neat wiring, slow to come back',
+    body: 'The wiring was done well and passed inspection. Getting them back for one small correction took a week of calls, which is the whole of the missing two stars.',
+    authorName: 'Hakim Waisale',
+    authorEmail: 'hakim.waisale@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Makindye Plumbing',
+    rating: 5,
+    title: 'Found the leak two others could not',
+    body: 'Two plumbers had already been out and both gave up. This one traced it to a joint behind the wall and fixed it in a morning.',
+    authorName: 'Irene Nabukenya',
+    authorEmail: 'irene.nabukenya@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Furniture Makers',
+    rating: 4,
+    title: 'Made to the measurements I gave',
+    body: 'I brought a drawing and they built exactly what was on it. Solid joinery and delivered on the day they said.',
+    authorName: 'Ronald Kaggwa',
+    authorEmail: 'ronald.kaggwa@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Wakiso Auto Mechanics',
+    rating: 5,
+    title: 'Traced an electrical fault others missed',
+    body: 'The car kept stalling and two garages guessed. They found the fault in a loom connector and it has not stalled since.',
+    authorName: 'Nasuuna Deborah',
+    authorEmail: 'nasuuna.deborah@example.com',
+    decision: 'publish',
+  },
+  {
+    business: 'Kyengera Device Services',
+    rating: 3,
+    title: 'Reset done, everything else cleared too',
+    body: 'They reset the phone as asked and it works. I had hoped to keep the messages on it and they were gone as well, so ask carefully what will be kept.',
+    authorName: 'Julius Okello',
+    authorEmail: 'julius.okello@example.com',
+    decision: 'publish',
+  },
+
+  // Waiting for a moderator. The queue is the feature, so it opens with work in it.
+  {
+    business: 'Kampala Photo Studio',
+    rating: 5,
+    title: 'Wedding coverage that caught everything',
+    body: 'They covered the whole day and handed over the edited pictures within a week. The candid shots were the ones we kept.',
+    authorName: 'Prossy Namuli',
+    authorEmail: 'prossy.namuli@example.com',
+  },
+  {
+    business: 'Kampala Tailors',
+    rating: 4,
+    title: 'A gomesi that actually fits',
+    body: 'Three fittings before it was finished and the fit was right on the day. I will go back.',
+    authorName: 'Esther Amollo',
+    authorEmail: 'esther.amollo@example.com',
+  },
+
+  // Refused, so the reason a review can be turned away is visible rather than only
+  // asserted. Kept in the dataset because a queue that only ever approves is a
+  // queue nobody has tested.
+  {
+    business: 'Kampala Cobblers',
+    rating: 1,
+    title: 'Do not go here',
+    body: 'Terrible, the owner is a thief and the whole family is useless. Do not waste your money.',
+    authorName: 'Anonymous',
+    authorEmail: 'not-a-real-address@example.com',
+    decision: 'reject',
+    reason: 'A personal attack rather than a description of the work, and it names the owner.',
+  },
+]
+
+/**
+ * Business photographs, as metadata over generated placeholder bytes.
+ *
+ * There is no honest way to ship a photograph of a business that does not exist,
+ * so these are not photographs and do not pretend to be. Each is a deterministic
+ * two-tone PNG - the same business always produces the same picture, because there
+ * is no `Math.random` here either - which is enough to make the gallery, the
+ * thumbnail order and the queue visible. The captions describe what a real
+ * photograph of that business would show.
+ *
+ * The bytes are handed to `buildPhotoUpload`, the same door an upload arrives at,
+ * so the demonstration cannot store an image the platform would have refused, and
+ * `position` is the order an owner would have arranged them in.
+ */
+export const DEMO_PHOTOS = [
+  // Kampala Mobile Care: two published photos, so the gallery has an order to keep.
+  {
+    business: 'Kampala Mobile Care',
+    position: 0,
+    caption: 'Service counter and parts cabinet',
+    altText: 'A repair shop counter with a glass display of phone screens and a wall of small parts drawers.',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Mobile Care',
+    position: 1,
+    caption: 'A screen replacement in progress',
+    altText: 'A technician lifting a cracked phone screen away from the frame with a suction cup.',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Laptop Repair',
+    position: 0,
+    altText: 'Rows of open laptops on a workbench, each with a screwdriver tray beside it.',
+    caption: 'The workshop bench',
+    decision: 'publish',
+  },
+  {
+    business: 'Nakawa Power',
+    position: 0,
+    caption: 'Wiring a distribution board',
+    altText: 'An electrician connecting labelled cables to a wall-mounted distribution board.',
+    decision: 'publish',
+  },
+  {
+    business: 'Makindye Plumbing',
+    position: 0,
+    caption: 'The van and the pipe stock',
+    altText: 'A small van with its rear doors open, filled with coils of pipe and plumbing fittings.',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Furniture Makers',
+    position: 0,
+    caption: 'Finished tables ready for delivery',
+    altText: 'Several finished wooden dining tables standing in a workshop.',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Photo Studio',
+    position: 0,
+    caption: 'The studio and its backdrop',
+    altText: 'A photography studio with a lit backdrop, softboxes and a tripod.',
+    decision: 'publish',
+  },
+  {
+    business: 'Wakiso Auto Mechanics',
+    position: 0,
+    caption: 'A vehicle on the ramp',
+    altText: 'A car raised on a lift inside a garage, with tools laid out on a bench nearby.',
+    decision: 'publish',
+  },
+  {
+    business: 'Mukono Metal Fabrication',
+    position: 0,
+    caption: 'A finished gate ready for delivery',
+    altText: 'A welded metal gate leaning against a workshop wall, with a welder working behind it.',
+    decision: 'publish',
+  },
+  {
+    business: 'Kyengera Device Services',
+    position: 0,
+    caption: 'Refurbished handsets on the shelf',
+    altText: 'A shelf of refurbished phones, each on a stand with a price card.',
+    decision: 'publish',
+  },
+  {
+    business: 'Kampala Design Studio',
+    position: 0,
+    caption: 'The studio and the print rack',
+    altText: 'A design studio desk with monitors, sketches pinned to the wall and a rack of printed posters.',
+    decision: 'publish',
+  },
+
+  // Waiting for a moderator, so the photo queue is not empty either.
+  {
+    business: 'Kampala Networks',
+    position: 0,
+    caption: 'A finished network cabinet',
+    altText: 'A wall cabinet of patch panels and switches with neatly bundled cables.',
+  },
+  {
+    business: 'Nansana Panel Beaters',
+    position: 0,
+    caption: 'A respray in the booth',
+    altText: 'A car panel being resprayed inside a paint booth.',
+  },
+
+  // Refused, so a rejected photograph and its reason are visible in the owner's
+  // view rather than only in a test.
+  {
+    business: 'Kampala Cobblers',
+    position: 0,
+    caption: 'Our workshop',
+    altText: 'A generic picture of shoes on a shelf.',
+    decision: 'reject',
+    reason: 'A stock photograph that shows no workshop; it is not this business.',
+  },
+]
+
+/**
  * What the dataset is supposed to prove, named so a test can assert it.
  *
  * These are claims about outcomes, not about row counts. They are deliberately

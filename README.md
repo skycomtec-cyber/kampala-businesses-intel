@@ -1323,7 +1323,7 @@ class of breakage entirely.
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
 │   │                         set-password, import, backup, restore, and the one-off repairs
 │   │                         — backfill-provenance, add-sources
-│   ├── test/                 237 tests, no network, temporary folders only
+│   ├── test/                 238 tests, no network, temporary folders only
 │   └── web/                  the website pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
@@ -1369,7 +1369,7 @@ cd app
 npm test
 ```
 
-237 tests, no network access, each against its own temporary database. The API tests mount the real
+238 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule
@@ -1432,7 +1432,7 @@ The runner (`app/scripts/run-e2e.mjs`) starts the real server on a free port for
 to listen, deletes the temporary database afterwards, and exits non-zero if any pass does. The
 requests pass runs against an empty database (which is what makes its `empty state` and
 `list now shows one request` assertions mean anything); the ask and provider passes seed the
-demonstration — 36 businesses and the one admin account. The ask pass asks a count question and a find
+demonstration — 36 businesses, their ratings and photographs, and the one admin account. The ask pass asks a count question and a find
 question and checks the reading the page prints back, then checks the vertical's six activities;
 the provider pass exercises two businesses answering the same request, a requester choosing between
 offers, and both kinds of withdrawal.

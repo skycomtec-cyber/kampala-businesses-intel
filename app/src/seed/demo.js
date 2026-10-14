@@ -1,5 +1,8 @@
+import zlib from 'node:zlib'
+import { newId } from '../core/identifiers.js'
+import { buildPhotoUpload } from '../core/photos.js'
 import { SKILLS } from './reference-data.js'
-import { DEMO_BUSINESSES, DEMO_DEMAND } from './demo-data.js'
+import { DEMO_BUSINESSES, DEMO_DEMAND, DEMO_PHOTOS, DEMO_REVIEWS } from './demo-data.js'
 
 /**
  * Applying the demonstration dataset.
@@ -198,6 +201,187 @@ function recordPhrase(app, row, location, now) {
 }
 
 /**
+ * The demonstration's photographs, generated rather than shipped.
+ *
+ * There is no honest way to include a picture of a business that does not exist,
+ * so the demonstration makes its own: a vertical shade, one hue per business,
+ * written by hand as a PNG. Doing it here rather than with an image library keeps
+ * a dependency out of the project for something used exactly once, and writing it
+ * from a name rather than `Math.random` keeps the picture the same on every build,
+ * so a screenshot taken today still matches one taken next month.
+ */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let index = 0; index < 256; index += 1) {
+    let value = index
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
+    }
+    table[index] = value >>> 0
+  }
+  return table
+})()
+
+function crc32(buffer) {
+  let crc = 0xffffffff
+  for (const byte of buffer) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8)
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+/** One PNG chunk: a length, the type, the data, and a checksum over the last two. */
+function pngChunk(type, data) {
+  const length = Buffer.alloc(4)
+  length.writeUInt32BE(data.length, 0)
+  const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+  const checksum = Buffer.alloc(4)
+  checksum.writeUInt32BE(crc32(body), 0)
+  return Buffer.concat([length, body, checksum])
+}
+
+/** A hue in the 0-359 range from a name. A plain string hash, not a digest. */
+function hueFor(text) {
+  let hue = 0
+  for (const character of text) hue = (hue * 31 + character.codePointAt(0)) % 360
+  return hue
+}
+
+/** HSL to 8-bit RGB, with the hue given in turns (0-1) rather than degrees. */
+function hslToRgb(hue, saturation, lightness) {
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation
+  const second = chroma * (1 - Math.abs(((hue * 6) % 2) - 1))
+  const match = lightness - chroma / 2
+  let red
+  let green
+  let blue
+  if (hue < 1 / 6) [red, green, blue] = [chroma, second, 0]
+  else if (hue < 2 / 6) [red, green, blue] = [second, chroma, 0]
+  else if (hue < 3 / 6) [red, green, blue] = [0, chroma, second]
+  else if (hue < 4 / 6) [red, green, blue] = [0, second, chroma]
+  else if (hue < 5 / 6) [red, green, blue] = [second, 0, chroma]
+  else [red, green, blue] = [chroma, 0, second]
+  return [
+    Math.round((red + match) * 255),
+    Math.round((green + match) * 255),
+    Math.round((blue + match) * 255),
+  ]
+}
+
+/** A small truecolour PNG for a text, deterministic for that text. */
+function placeholderPhoto(text, { width = 640, height = 400 } = {}) {
+  const hue = hueFor(text) / 360
+  const rows = Buffer.alloc(height * (1 + width * 3))
+  let offset = 0
+  for (let y = 0; y < height; y += 1) {
+    rows[offset] = 0 // filter type: none, the only one this writes
+    offset += 1
+    // Darker toward the bottom, so the result is visibly an image rather than a
+    // flat block of colour, which matters when the point is a gallery.
+    const lightness = 0.74 - (0.36 * y) / (height - 1)
+    const [red, green, blue] = hslToRgb(hue, 0.42, lightness)
+    for (let x = 0; x < width; x += 1) {
+      rows[offset] = red
+      rows[offset + 1] = green
+      rows[offset + 2] = blue
+      offset += 3
+    }
+  }
+
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header[8] = 8 // bits per channel
+  header[9] = 2 // colour type: truecolour
+  header[10] = 0 // compression method: deflate
+  header[11] = 0 // filter method
+  header[12] = 0 // no interlacing
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', zlib.deflateSync(rows, { level: 9 })),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ])
+}
+
+/**
+ * Writes the demonstration reviews, through the same two calls the api makes.
+ *
+ * `create` always lands a review pending and `moderate` is the only method that
+ * changes that, so a published review in the demonstration went through exactly the
+ * path a submitted one does. An entry with no `decision` is left waiting on
+ * purpose, because the queue is the feature and it should open with work in it.
+ */
+function seedReviews(app, businesses) {
+  const byName = new Map(businesses.map((business) => [business.name, business]))
+  return DEMO_REVIEWS.map((row) => {
+    const business = byName.get(row.business)
+    if (!business) {
+      throw new Error(
+        `The demonstration reviews refer to business "${row.business}", which is not in ` +
+          'DEMO_BUSINESSES. This is a bug in demo-data.js.',
+      )
+    }
+    const review = app.reviews.create({
+      businessId: business.id,
+      rating: row.rating,
+      title: row.title,
+      body: row.body,
+      authorName: row.authorName,
+      authorEmail: row.authorEmail,
+    })
+    if (!row.decision) return review
+    return app.reviews.moderate(review.id, {
+      decision: row.decision,
+      reason: row.reason ?? 'Demonstration seed.',
+    })
+  })
+}
+
+/**
+ * Writes the demonstration photographs.
+ *
+ * The generated bytes are handed back through `buildPhotoUpload`, the same entry
+ * point an upload uses, so an image the platform would refuse cannot be seeded by
+ * construction. The file is written before the row, as in the api, and the media
+ * store owns the key.
+ */
+function seedPhotos(app, media, businesses) {
+  const byName = new Map(businesses.map((business) => [business.name, business]))
+  return DEMO_PHOTOS.map((row) => {
+    const business = byName.get(row.business)
+    if (!business) {
+      throw new Error(
+        `The demonstration photos refer to business "${row.business}", which is not in ` +
+          'DEMO_BUSINESSES. This is a bug in demo-data.js.',
+      )
+    }
+    const bytes = placeholderPhoto(`${row.business}:${row.position ?? 0}`)
+    const upload = buildPhotoUpload({
+      data: `data:image/png;base64,${bytes.toString('base64')}`,
+      caption: row.caption,
+      altText: row.altText,
+    })
+    const storageKey = `${newId()}.${upload.extension}`
+    media.write(storageKey, upload.bytes)
+    const photo = app.photos.create({
+      businessId: business.id,
+      storageKey,
+      mimeType: upload.mimeType,
+      byteSize: upload.bytes.length,
+      caption: upload.caption,
+      altText: upload.altText,
+      position: row.position ?? 0,
+      source: 'admin',
+    })
+    if (!row.decision) return photo
+    return app.photos.moderate(photo.id, {
+      decision: row.decision,
+      reason: row.reason ?? 'Demonstration seed.',
+    })
+  })
+}
+
+/**
  * Writes the demonstration dataset.
  *
  * Reference data first: every category, skill and location this dataset refers to
@@ -210,10 +394,13 @@ function recordPhrase(app, row, location, now) {
  * demonstrating the fixture rather than the platform.
  *
  * @param {object} app the open database handle and repositories
- * @param {{ now?: Date }} [options] the instant "today" is measured from
- * @returns {{ businesses: object[], phrases: object[] }}
+ * @param {{ now?: Date, media?: object }} [options] the instant "today" is measured
+ *   from, and the media store the photographs are written to. Without a media store
+ *   the reviews are still written and no photograph is, which is what lets a test
+ *   that only cares about the market model skip the files.
+ * @returns {{ businesses: object[], phrases: object[], reviews: object[], photos: object[] }}
  */
-export function seedDemo(app, { now = new Date() } = {}) {
+export function seedDemo(app, { now = new Date(), media = null } = {}) {
   const locations = indexLocations(app)
 
   // The dataset stores each business as a positional row, which keeps twenty-odd
@@ -227,7 +414,10 @@ export function seedDemo(app, { now = new Date() } = {}) {
   const phrases = DEMO_DEMAND.map((row) =>
     recordPhrase(app, row, requireLocation(locations, row.place), now),
   )
-  return { businesses, phrases }
+  // Reviews and photos hang off a business, so they come after the supply exists.
+  const reviews = seedReviews(app, businesses)
+  const photos = media ? seedPhotos(app, media, businesses) : []
+  return { businesses, phrases, reviews, photos }
 }
 
 /**

@@ -12,6 +12,7 @@ import { openApp } from '../src/db/index.js'
 import { seedReferenceData } from '../src/seed/index.js'
 import { demoCoverage, seedDemo } from '../src/seed/demo.js'
 import { DEMO_DEMAND, OUTCOME_EXPECTATIONS } from '../src/seed/demo-data.js'
+import { createMediaStore } from '../src/media/index.js'
 import { runGapEngine } from '../src/engine/gaps.js'
 
 /**
@@ -55,7 +56,10 @@ test.before(() => {
   const app = openApp({ config })
   try {
     const reference = seedReferenceData(app, { config })
-    const seeded = seedDemo(app)
+    // The media store is provided so the photographs are written as files as well
+    // as rows, which is the arrangement the server reads them back from.
+    const media = createMediaStore({ dir: path.join(dir, 'media') })
+    const seeded = seedDemo(app, { media })
     rollupDemoWindow(app, new Date())
     const run = runGapEngine(app)
 
@@ -66,7 +70,7 @@ test.before(() => {
     const opportunities = app.intelligence.opportunities({}).items
     const coverage = demoCoverage(app)
 
-    state = { app, reference, seeded, run, findings, opportunities, coverage, dir }
+    state = { app, reference, seeded, run, findings, opportunities, coverage, media, dir }
   } catch (error) {
     app.close()
     throw error
@@ -109,6 +113,35 @@ test('the demonstration builds, and it is the size it claims to be', () => {
   assert.ok(state.reference.skills > 0, 'reference skills seeded')
   assert.ok(state.seeded.businesses.length >= 30, 'a market, not a sample')
   assert.ok(state.seeded.phrases.length >= 10, 'enough demand to have a distribution')
+})
+
+test('the demonstration also opens with a rated and pictured market', () => {
+  const count = (rows, status) => rows.filter((row) => row.status === status).length
+  const reviews = state.seeded.reviews
+  const photos = state.seeded.photos
+
+  // Ratings are the thing a directory is judged on, so there have to be enough
+  // published ones to produce a non-trivial average, and the queue has to have
+  // work in it or the moderation screens show nothing but their empty state.
+  assert.ok(count(reviews, 'published') >= 10, 'enough published reviews to show an average')
+  assert.ok(count(reviews, 'pending') > 0, 'and something waiting in the review queue')
+  assert.ok(count(reviews, 'rejected') > 0, 'and a refused one, so a reason is visible')
+
+  assert.ok(count(photos, 'published') >= 8, 'a gallery, not a single picture')
+  assert.ok(count(photos, 'pending') > 0, 'and something waiting in the photo queue')
+
+  // At least one business carries both, which is what makes a profile page worth
+  // screenshotting: a rating and a picture on the same listing.
+  const showcased = state.seeded.businesses.find(
+    (business) =>
+      state.app.reviews.summaryFor(business.id).count > 0 &&
+      state.app.photos.listPublished({ businessId: business.id }).total > 0,
+  )
+  assert.ok(showcased, 'a business with both a rating and a published photo')
+
+  // The bytes are files the content route can serve, not rows pointing at nothing.
+  const published = photos.find((photo) => photo.status === 'published')
+  assert.ok(state.media.exists(published.storageKey), 'the published photo has bytes on disk')
 })
 
 test('an uncovered place produces an unsuppressed opportunity', () => {
