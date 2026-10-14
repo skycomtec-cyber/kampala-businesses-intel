@@ -43,15 +43,52 @@
       }
 
       /* The skill chips the script drops in here. */
-      #skill-chip-holder {
+      #skill-chip-holder,
+      #near-chip-holder {
         display: flex;
         flex-wrap: wrap;
         gap: var(--s1);
         margin-top: var(--s2);
       }
 
-      #skill-chip-holder:empty {
+      #skill-chip-holder:empty,
+      #near-chip-holder:empty {
         display: none;
+      }
+
+      /* The open/closed badge on a card. It is a tag like the others, given a
+         colour only so a reader scanning the grid can find what is open without
+         reading each line. */
+      .tag.openstate-tag.is-open {
+        color: var(--ok, #1a7f4b);
+        border-color: currentColor;
+      }
+
+      .tag.openstate-tag.is-closed {
+        color: var(--muted);
+      }
+
+      /* The distance badge. Muted like a secondary fact — a reader sorting by
+         distance already knows the order, so the number is for confirmation,
+         not a headline. */
+      .tag.distance-tag {
+        color: var(--muted);
+      }
+
+      .rating-line {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+        margin-top: var(--s2);
+        color: var(--muted);
+        font-size: 0.8125rem;
+      }
+      .stars {
+        letter-spacing: 0.08em;
+        color: var(--star, #c98a00);
+      }
+      .stars .empty {
+        color: var(--line-2);
       }
 
       @media (min-width: 60rem) {
@@ -83,7 +120,7 @@
           <a href="/second-life.html">Second Life</a>
           <a href="/claim.html">Claim</a>
           <a href="/my-business.html">My business</a>
-          <a href="/operator.html">Verification queue</a>
+          <a href="/operator.html">Verification queue</a><a href="/reviews.html">Reviews</a>
           <button class="theme-toggle" type="button" hidden>
             <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
               <circle cx="12" cy="12" r="4" />
@@ -177,6 +214,22 @@
               </select>
             </label>
 
+            <label class="near">
+              Near me
+              <button type="button" class="quiet" id="near">Use my location</button>
+              <span id="near-chip-holder"></span>
+            </label>
+
+            <label id="radius-row" hidden>
+              Distance
+              <select id="radius">
+                <option value="1">Within 1 km</option>
+                <option value="3" selected>Within 3 km</option>
+                <option value="10">Within 10 km</option>
+                <option value="25">Within 25 km</option>
+              </select>
+            </label>
+
             <button type="button" class="quiet clear" id="clear">Clear filters</button>
           </form>
         </aside>
@@ -202,7 +255,7 @@
 
           <p class="note">
             Every listing here has been checked by somebody who went and looked. Records that are
-            still in the <a href="/operator.html">verification queue</a> are not in this directory
+            still in the <a href="/operator.html">Verification queue</a> are not in this directory
             and are not counted anywhere the public can see.
           </p>
         </div>
@@ -246,6 +299,10 @@
         skillChip: document.getElementById('skill-chip-holder'),
         capability: document.getElementById('capability'),
         sort: document.getElementById('sort'),
+        near: document.getElementById('near'),
+        nearChip: document.getElementById('near-chip-holder'),
+        radius: document.getElementById('radius'),
+        radiusRow: document.getElementById('radius-row'),
         clear: document.getElementById('clear'),
         heading: document.getElementById('heading'),
         count: document.getElementById('count'),
@@ -272,6 +329,15 @@
         sort: 'name',
         offset: 0,
         total: 0,
+        /**
+         * "Near me" is a point and a radius, kept separately from the other
+         * filters because it changes what a distance even means. When it is set,
+         * the listing is ordered by how far away each business is and the order
+         * control has nothing left to decide.
+         */
+        lat: null,
+        lng: null,
+        radiusKm: 3,
         /** id -> name, for the two reference trees. */
         categoryNames: new Map(),
         locationPaths: new Map(),
@@ -430,6 +496,16 @@
         // says `&sort=name` is noise.
         const sort = params.get('sort') ?? ''
         state.sort = sort || 'name'
+        // "Near me" travels in the url like every other filter, so a shared link
+        // reproduces the same patch of the map rather than only its results.
+        // Numbers are parsed defensively: a hand-edited link that puts a word in
+        // `lat` becomes no location, not a NaN centre.
+        const lat = Number.parseFloat(params.get('lat'))
+        const lng = Number.parseFloat(params.get('lng'))
+        state.lat = Number.isFinite(lat) ? lat : null
+        state.lng = Number.isFinite(lng) ? lng : null
+        const radius = Number.parseInt(params.get('radius'), 10)
+        state.radiusKm = Number.isFinite(radius) && radius > 0 ? radius : 3
         const offset = Number.parseInt(params.get('offset') ?? '0', 10)
         state.offset = Number.isInteger(offset) && offset > 0 ? offset : 0
       }
@@ -450,6 +526,11 @@
         if (state.skillId) params.set('skill', state.skillId)
         if (state.capabilityLevel) params.set('capability', state.capabilityLevel)
         if (state.sort !== 'name') params.set('sort', state.sort)
+        if (state.lat !== null && state.lng !== null) {
+          params.set('lat', String(state.lat))
+          params.set('lng', String(state.lng))
+          params.set('radius', String(state.radiusKm))
+        }
         if (state.offset > 0) params.set('offset', String(state.offset))
         const url = params.toString() ? `?${params}` : window.location.pathname
         if (push) window.history.pushState({}, '', url)
@@ -464,8 +545,49 @@
         els.location.value = state.locationId
         els.capability.value = state.capabilityLevel
         els.sort.value = state.sort
+        els.radius.value = String(state.radiusKm)
         writeModeControls()
         renderSkillChip()
+        renderNearChip()
+      }
+
+      /** Whether the caller has given the page a place to measure from. */
+      function nearActive() {
+        return state.lat !== null && state.lng !== null
+      }
+
+      /**
+       * The chip that says the listing is centred on the reader.
+       *
+       * Without it the only sign that the results are near rather than everywhere
+       * would be the distance on each card, and a person who shared the link or
+       * pressed back would have no way to tell what the list was sorted by. The
+       * chip names the radius and carries the way to drop it.
+       */
+      function renderNearChip() {
+        els.nearChip.replaceChildren()
+        els.radiusRow.hidden = !nearActive()
+        if (!nearActive()) {
+          els.near.textContent = 'Use my location'
+          return
+        }
+        els.near.textContent = 'Update my location'
+        const chip = document.createElement('span')
+        chip.className = 'chip'
+        chip.append(document.createTextNode(`Within ${state.radiusKm} km of you`))
+        const drop = document.createElement('button')
+        drop.type = 'button'
+        drop.setAttribute('aria-label', 'Stop sorting by distance')
+        drop.textContent = '×'
+        drop.addEventListener('click', () => {
+          state.lat = null
+          state.lng = null
+          state.offset = 0
+          writeControls()
+          run({ push: true })
+        })
+        chip.append(drop)
+        els.nearChip.append(chip)
       }
 
       /**
@@ -492,8 +614,27 @@
        */
       function writeModeControls() {
         const searching = Boolean(state.q)
-        els.sort.disabled = searching
-        els.sort.title = searching ? 'Search results are ordered by relevance.' : ''
+        const near = nearActive()
+        /*
+         * Near me is a browse-only control, because `/search` matches words and
+         * nothing in the index records where a hit is, so a search would quietly
+         * drop the radius and answer a different question. It is disabled while
+         * searching for the same reason `sort` and `capability` are.
+         */
+        els.near.disabled = searching
+        els.near.title = searching ? 'Clear the search to sort by distance.' : ''
+        els.radius.disabled = searching
+        /*
+         * Order and proximity cannot both win. With a centre set, the repository
+         * orders by distance and ignores `sort`, so leaving the control live would
+         * offer a choice that silently does nothing. It is greyed and says why.
+         */
+        els.sort.disabled = searching || near
+        els.sort.title = searching
+          ? 'Search results are ordered by relevance.'
+          : near
+            ? 'Nearby listings are ordered by distance.'
+            : ''
         els.capability.disabled = searching
         els.capability.title = searching
           ? 'Search does not filter by maturity. Clear the search to use it.'
@@ -503,7 +644,12 @@
       /** Whether anything has narrowed the listing. Decides how the empty state reads. */
       function hasFilters() {
         return Boolean(
-          state.q || state.categoryId || state.locationId || state.skillId || state.capabilityLevel,
+          state.q ||
+            state.categoryId ||
+            state.locationId ||
+            state.skillId ||
+            state.capabilityLevel ||
+            nearActive(),
         )
       }
 
@@ -511,8 +657,17 @@
       function describe() {
         if (state.q) return `Results for “${state.q}”`
         const category = state.categoryId ? state.categoryNames.get(state.categoryId) : null
-        if (category) return category
         const place = state.locationId ? state.locationPaths.get(state.locationId) : null
+        // A radius on top of a category or a place narrows it further, so the
+        // heading names the closer of the two: "restaurants within 3 km" reads as
+        // a smaller question than "restaurants", which is what the list now is.
+        if (nearActive()) {
+          const within = `within ${state.radiusKm} km of you`
+          if (category) return `${category} ${within}`
+          if (place) return `${place} ${within}`
+          return `Nearest to you`
+        }
+        if (category) return category
         if (place) return place
         return 'Everything'
       }
@@ -681,6 +836,15 @@
         if (state.locationId) params.set('locationId', state.locationId)
         if (state.skillId) params.set('skillId', state.skillId)
         if (state.capabilityLevel) params.set('capabilityLevel', state.capabilityLevel)
+        // The point is only sent while browsing. `/search` takes neither of these
+        // and the sort collapses to distance once a centre is present, which is
+        // why the order control goes quiet in the same breath.
+        if (nearActive()) {
+          params.set('lat', String(state.lat))
+          params.set('lng', String(state.lng))
+          params.set('radiusKm', String(state.radiusKm))
+          params.set('sort', 'distance')
+        }
         return api(`${API}/businesses?${params}`)
       }
 
@@ -817,7 +981,27 @@
         if (business.capabilityLevel && business.capabilityLevel !== 'unverified') {
           tags.append(tag(business.capabilityLevel))
         }
+        // Whether it is open right now is the fact a browser most often came
+        // for, and the api computed it for the whole page, so the directory can
+        // say it without a request per card.
+        if (business.openState && business.openState.recorded) {
+          const openTag = tag(business.openState.open ? 'open now' : 'closed now')
+          openTag.classList.add('openstate-tag', business.openState.open ? 'is-open' : 'is-closed')
+          tags.append(openTag)
+        }
+        // How far away it is, present only when the caller asked from a point.
+        // A business with no recorded coordinates is left out of a proximity
+        // answer entirely, so a card without a distance here has simply not been
+        // sorted by one.
+        if (typeof business.distanceKm === 'number') {
+          const distanceTag = tag(`${formatKm(business.distanceKm)} away`)
+          distanceTag.classList.add('distance-tag')
+          tags.append(distanceTag)
+        }
         card.append(tags)
+
+        const rating = ratingLine(business.rating)
+        if (rating) card.append(rating)
 
         return card
       }
@@ -948,6 +1132,53 @@
         return span
       }
 
+      /**
+       * A distance a person can picture.
+       *
+       * Under a kilometre the number is given in metres rounded to the nearest
+       * fifty, because "0.3 km away" is a figure somebody has to convert and
+       * "300 m away" is one they can act on — and the rounding to 50 m is coarse
+       * enough that it does not pretend the position is more precise than a phone
+       * reading it.
+       */
+      function formatKm(km) {
+        if (km < 1) return `${Math.max(50, Math.round((km * 1000) / 50) * 50)} m`
+        return `${km} km`
+      }
+
+      /** Five stars drawn from two characters, so there is no icon set to load. */
+      function renderStars(value) {
+        const node = document.createElement('span')
+        node.className = 'stars'
+        if (!Number.isFinite(value) || value < 0) value = 0
+        const n = Math.max(0, Math.min(5, Math.round(value)))
+        node.append(document.createTextNode('★'.repeat(n)))
+        const empty = document.createElement('span')
+        empty.className = 'empty'
+        empty.textContent = '☆'.repeat(5 - n)
+        node.append(empty)
+        return node
+      }
+
+      /**
+       * The rating line under a card, or nothing.
+       *
+       * The api only attaches `rating` to rows that have at least one published
+       * review, so an absent rating means "nobody has rated this yet" and there
+       * is nothing to draw. A business with no reviews must not show an empty
+       * five-star row, which reads as a bad score rather than no score.
+       */
+      function ratingLine(rating) {
+        if (!rating || rating.count === 0 || !rating.average) return null
+        const line = document.createElement('p')
+        line.className = 'rating-line'
+        line.append(renderStars(rating.average))
+        line.append(
+          document.createTextNode(`${rating.average.toFixed(1)} · ${rating.count} review${rating.count === 1 ? '' : 's'}`),
+        )
+        return line
+      }
+
       function renderPager() {
         const hasMore = state.offset + PAGE_SIZE < state.total
         // A pager with both buttons greyed out, sitting under a page that already
@@ -997,6 +1228,67 @@
         state.skillName = null
         state.capabilityLevel = ''
         state.sort = 'name'
+        state.lat = null
+        state.lng = null
+        state.radiusKm = 3
+        state.offset = 0
+        writeControls()
+        run()
+      })
+
+      /**
+       * "Near me" asks the browser where the reader is.
+       *
+       * The position is used to build one request and is not kept anywhere the
+       * platform can find it later: it is a query parameter on a listing, exactly
+       * like a district, and it is not written to a listing or a demand signal. A
+       * person who wants to be found by their patch of Kampala can say so by
+       * filling in an address; a person who only wants to walk to a shop should
+       * not leave a home coordinate in a business directory.
+       *
+       * The refusal path says what happened rather than failing silently, because
+       * a button that does nothing when pressed is indistinguishable from a broken
+       * page. It does not offer a fallback location: guessing that somebody in
+       * Kampala is in central Kampala would answer a question about their own
+       * street with somebody else's.
+       */
+      els.near.addEventListener('click', () => {
+        say(els.problem, '')
+        if (!navigator.geolocation) {
+          say(els.problem, 'This browser cannot report a location, so distance sorting is unavailable.')
+          return
+        }
+        els.near.disabled = true
+        els.near.textContent = 'Finding you…'
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            state.lat = position.coords.latitude
+            state.lng = position.coords.longitude
+            state.offset = 0
+            writeControls()
+            run({ push: true })
+          },
+          (error) => {
+            // Permission denied, unavailable, or timed out: three causes, one
+            // sentence, because the reader can act on none of them differently.
+            say(
+              els.problem,
+              error.code === error.PERMISSION_DENIED
+                ? 'Location permission was declined, so the directory cannot sort by distance.'
+                : 'Your location could not be determined just now. Try again in a moment.',
+            )
+            writeControls()
+          },
+          // A short timeout and a coarse fix. The directory needs the reader to
+          // the nearest street, not to the nearest metre, and a cached reading is
+          // good enough to order a list of shops.
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
+        )
+      })
+
+      els.radius.addEventListener('change', () => {
+        const radius = Number.parseInt(els.radius.value, 10)
+        state.radiusKm = Number.isFinite(radius) && radius > 0 ? radius : 3
         state.offset = 0
         writeControls()
         run()
@@ -1049,3 +1341,7 @@
     </script>
   </body>
 </html>
+
+
+
+

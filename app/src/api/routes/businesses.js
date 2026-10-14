@@ -1,6 +1,8 @@
 import { paged, single, toBoolean, toList, toPage, toText, uuidPattern } from '../lib/http.js'
 import { actorForRequest } from '../lib/actor.js'
 import { isPubliclyVisible } from '../../core/business.js'
+import { describeState } from '../../core/hours.js'
+import { publicReview } from '../../core/reviews.js'
 import { CAPABILITY_LEVELS } from '../../core/taxonomy.js'
 import { COVERAGE_LEVELS } from '../../core/location.js'
 import { NotFoundError } from '../../core/errors.js'
@@ -34,8 +36,14 @@ const listQuerySchema = {
     status: { type: 'string' },
     capabilityLevel: { type: 'string', enum: [...CAPABILITY_LEVELS] },
     search: { type: 'string', maxLength: 120 },
-    sort: { type: 'string', enum: ['newest', 'oldest', 'updated', 'name', 'name desc', 'status', 'verification'] },
+    sort: { type: 'string', enum: ['newest', 'oldest', 'updated', 'name', 'name desc', 'status', 'verification', 'distance'] },
     includeSubtree: { type: 'boolean' },
+    // "Near me": the caller's own point and how far around it to look. Supplying
+    // one of lat/lng without the other is refused, because half a coordinate is
+    // not a place.
+    lat: { type: 'number', minimum: -90, maximum: 90 },
+    lng: { type: 'number', minimum: -180, maximum: 180 },
+    radiusKm: { type: 'number', exclusiveMinimum: 0, maximum: 500 },
     limit: { type: 'integer', minimum: 1, maximum: 100 },
     offset: { type: 'integer', minimum: 0 },
   },
@@ -45,7 +53,61 @@ const listQuerySchema = {
   additionalProperties: false,
 }
 
+/**
+ * A review as the public submits it.
+ *
+ * `author` and `email` are the names a person would recognise; `core/reviews.js`
+ * also accepts `authorName` and `authorEmail`, but the public body keeps the
+ * shorter form. Neither the status nor the source is reachable from here: a
+ * submission is always pending and always from `web`, and a body that tried to
+ * say otherwise is refused rather than quietly corrected.
+ */
+const reviewBodySchema = {
+  type: 'object',
+  required: ['rating', 'author'],
+  additionalProperties: false,
+  properties: {
+    rating: { type: 'integer', minimum: 1, maximum: 5 },
+    title: { type: 'string', maxLength: 160 },
+    body: { type: 'string', maxLength: 2000 },
+    author: { type: 'string', minLength: 2, maxLength: 80 },
+    email: { type: 'string', maxLength: 200 },
+  },
+}
+
+const reviewsQuerySchema = {
+  type: 'object',
+  properties: {
+    sort: { type: 'string', enum: ['newest', 'oldest', 'rating'] },
+    limit: { type: 'integer', minimum: 1, maximum: 50 },
+    offset: { type: 'integer', minimum: 0 },
+  },
+  additionalProperties: false,
+}
+
+const businessSlugParam = {
+  type: 'object',
+  required: ['idOrSlug'],
+  properties: { idOrSlug: { type: 'string', minLength: 1, maxLength: 200 } },
+}
+
 export default async function businessRoutes(fastify, { app }) {
+  /**
+   * Resolves a public listing by id or slug, or 404s.
+   *
+   * The visibility rule lives in core/business.js, so the api cannot drift from
+   * the one the search index and supply counts use. 404 rather than 403: a draft
+   * or rejected listing must be indistinguishable from one that does not exist,
+   * or this becomes a way to enumerate who has been delisted.
+   */
+  function requirePublicBusiness(idOrSlug) {
+    const business = app.businesses.findById(idOrSlug) ?? app.businesses.findBySlug(idOrSlug)
+    if (!business || !isPubliclyVisible(business)) {
+      throw new NotFoundError('Business', idOrSlug)
+    }
+    return business
+  }
+
   fastify.get(
     '/businesses',
     {
@@ -82,9 +144,33 @@ export default async function businessRoutes(fastify, { app }) {
          * onto every client.
          */
         includeSubtree: toBoolean(request.query.includeSubtree, 'includeSubtree') ?? true,
+        // Passed straight through as numbers; the repository validates the pair
+        // through core/geo.js, so the rule lives in one place rather than being
+        // half-enforced by the schema and half by the query.
+        lat: request.query.lat,
+        lng: request.query.lng,
+        radiusKm: request.query.radiusKm,
         ...page,
       })
-      return paged(result, page)
+      // The badge a directory row shows. Computed for the page rather than
+      // stored on the row, from the same rule the profile uses, so a list and
+      // the page it links to can never disagree about whether a shop is open.
+      const now = new Date()
+      for (const item of result.items ?? []) {
+        item.openState = describeState(app.businesses.hours(item.id), now)
+      }
+      // The rating each row carries, in one query for the whole page. Only rows
+      // with at least one published review get one, so a card without a rating
+      // is a card whose business nobody has rated rather than one missing data.
+      const summaries = app.reviews.summariesFor((result.items ?? []).map((item) => item.id))
+      for (const item of result.items ?? []) {
+        const rating = summaries.get(item.id)
+        if (rating && rating.count > 0) item.rating = rating
+      }
+      // When the caller asked from a point, the centre and the radius ride in
+      // `meta` so the page can say "within 3 km of you" without keeping its own
+      // copy of what it sent.
+      return paged(result, result.geo ? { ...page, geo: result.geo } : page)
     },
   )
 
@@ -101,28 +187,89 @@ export default async function businessRoutes(fastify, { app }) {
       schema: {
         summary: 'One business profile, with services, products, skills and public contacts.',
         tags: ['businesses'],
-        params: {
-          type: 'object',
-          required: ['idOrSlug'],
-          properties: { idOrSlug: { type: 'string', minLength: 1, maxLength: 200 } },
-        },
+        params: businessSlugParam,
       },
       preHandler: fastify.enforceRateLimit('read'),
     },
     async (request) => {
-      const { idOrSlug } = request.params
-      const business = app.businesses.findById(idOrSlug) ?? app.businesses.findBySlug(idOrSlug)
-      // The visibility rule lives in core/business.js, so the api cannot drift
-      // from the one the search index and supply counts use.
-      if (!business || !isPubliclyVisible(business)) {
-        // 404 rather than 403: a draft or rejected listing must be
-        // indistinguishable from one that does not exist, or this endpoint becomes
-        // a way to enumerate who has been delisted.
-        throw new NotFoundError('Business', idOrSlug)
-      }
+      const business = requirePublicBusiness(request.params.idOrSlug)
       // `includePrivateContacts` is deliberately not a query parameter. Only the
       // admin routes can see unpublished contact points.
-      return single(app.businesses.profile(business.id, { includePrivateContacts: false }))
+      const profile = app.businesses.profile(business.id, { includePrivateContacts: false })
+      // Whether the doors are open is computed here, at read time, from the
+      // stored week and the current moment. It is derived rather than stored so
+      // a listing is never wrong about being open: there is no cached flag to go
+      // stale, and no job that has to run for the badge to change.
+      // The rating is derived the same way, from the published reviews that exist
+      // right now, so rejecting a review changes the number with no rollup to run.
+      return single({
+        ...profile,
+        openState: describeState(profile.hours, new Date()),
+        rating: app.reviews.summaryFor(business.id),
+      })
+    },
+  )
+
+  /**
+   * A business's published reviews.
+   *
+   * The public only ever sees `published`. A pending review is absent, not
+   * hidden with a flag, because the repository query itself filters on the
+   * status — there is no path from this route to a review a moderator has not
+   * put there.
+   */
+  fastify.get(
+    '/businesses/:idOrSlug/reviews',
+    {
+      schema: {
+        summary: "A business's published reviews, newest first.",
+        tags: ['businesses'],
+        params: businessSlugParam,
+        querystring: reviewsQuerySchema,
+      },
+      preHandler: fastify.enforceRateLimit('read'),
+    },
+    async (request) => {
+      const business = requirePublicBusiness(request.params.idOrSlug)
+      const page = toPage(request.query, { defaultLimit: 10, maxLimit: 50 })
+      const result = app.reviews.listPublished({
+        businessId: business.id,
+        sort: request.query.sort ?? 'newest',
+        ...page,
+      })
+      result.items = result.items.map(publicReview)
+      return paged(result, { ...page, rating: app.reviews.summaryFor(business.id) })
+    },
+  )
+
+  /**
+   * Submit a review.
+   *
+   * No account, like a marketplace request: requiring one to say a shop was good
+   * would mean collecting the addresses this platform deliberately does not hold.
+   * The cost of that openness is that a submission is untrusted by default, so it
+   * is created pending and rate limited, and the response says plainly that it is
+   * waiting rather than implying it is already on the page.
+   */
+  fastify.post(
+    '/businesses/:idOrSlug/reviews',
+    {
+      schema: {
+        summary: 'Submit a review for a business. It is held for moderation.',
+        tags: ['businesses'],
+        params: businessSlugParam,
+        body: reviewBodySchema,
+      },
+      preHandler: fastify.enforceRateLimit('review'),
+    },
+    async (request, reply) => {
+      const business = requirePublicBusiness(request.params.idOrSlug)
+      const review = app.reviews.create({
+        businessId: business.id,
+        source: 'web',
+        ...request.body,
+      })
+      return reply.status(201).send(single(publicReview(review), { moderation: 'pending' }))
     },
   )
 

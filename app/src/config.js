@@ -199,6 +199,11 @@ export function loadConfig(overrides = {}) {
         request: { windowMs: 60_000, max: 5 },
         signIn: { windowMs: 15 * 60_000, max: 10 },
         read: { windowMs: 60_000, max: 240 },
+        // Submitting a review is a write by an anonymous stranger, so it is the
+        // tightest of the anonymous limits: one person with something to say
+        // about several businesses is a normal afternoon's browsing, and a script
+        // filling the moderation queue is not.
+        review: { windowMs: 60 * 60_000, max: 5 },
       },
     },
     intelligence: {

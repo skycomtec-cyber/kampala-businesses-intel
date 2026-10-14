@@ -106,6 +106,8 @@ test('migrations are idempotent and recorded', () => {
       '011_opportunity_actor_count',
       '012_second_life',
       '013_provider_claims',
+      '014_business_hours',
+      '015_business_review',
     ]
 
     // Re-running the migrator on an up-to-date database must be a no-op, or the
@@ -144,7 +146,9 @@ test('011 backfills the actor count onto opportunities that predate the column',
     if (
       name === '011_opportunity_actor_count.sql' ||
       name === '012_second_life.sql' ||
-      name === '013_provider_claims.sql'
+      name === '013_provider_claims.sql' ||
+      name === '014_business_hours.sql' ||
+      name === '015_business_review.sql'
     ) {
       continue
     }
@@ -192,7 +196,7 @@ test('011 backfills the actor count onto opportunities that predate the column',
     const results = migrate(db)
     assert.deepEqual(
       results.filter((row) => row.status !== 'skipped').map((row) => row.id),
-      ['011_opportunity_actor_count', '012_second_life', '013_provider_claims'],
+      ['011_opportunity_actor_count', '012_second_life', '013_provider_claims', '014_business_hours', '015_business_review'],
       'the upgrade applies every migration added after the staged schema',
     )
 

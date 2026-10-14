@@ -756,6 +756,72 @@ is, and the platform does not delegate them to the person with an interest in th
 The public pages are `/claim.html` (claim, and follow a claim by reference) and `/my-business.html`
 (the signed-in desk).
 
+## Opening hours
+
+The most common reason somebody looks a business up is to decide whether to go there now, so a
+listing records a recurring weekly schedule and says whether the doors are open at this moment.
+
+Hours are stored as a week: seven rows keyed by ISO weekday (1 is Monday, 7 is Sunday), each either
+closed or open with an `opens` and a `closes` time (`HH:MM`, 24-hour). A closed day carries no times
+and an open day carries both, and the rule layer refuses the ambiguous pair — an opening time equal
+to a closing time, or an open day missing a time — rather than guessing. A closing time earlier than
+its opening time is not an error: it is a night shift, and the reader understands it as running past
+midnight, including on the following day.
+
+The week is replaced whole (`PUT .../hours`), not patched day by day, because a schedule that changes
+one day at a time cannot express "closed on Sunday" without a delete for every day that moved; omitted
+days read as closed.
+
+Times are Uganda time. East Africa Time is UTC+3 and has never observed daylight saving, so the offset
+is a fixed constant in `app/src/core/hours.js` (`TZ_OFFSET_MINUTES = 180`) rather than a per-record
+column. The platform does not pretend to support a business that keeps its hours in another zone,
+because none of the ones it indexes do.
+
+`openState` is **derived, never stored**. The public profile and every directory row compute it at read
+time from the stored week and the current moment (in EAT), so there is no cached flag to go stale and no
+job that has to run for the badge to change. It is a small object: `{ open, recorded, label, closesAt?,
+nextOpens? }`, where `recorded` is false when no hours were ever entered, and `label` is the whole
+sentence — `Open now · closes 17:00`, `Closed · opens tomorrow 09:00`, `Closed · opens Monday 09:00`, or
+`Opening hours not recorded`. The same sentence is what the badge, the listing and any future client
+display, so they cannot disagree about whether the same business is open.
+
+A provider owns these outright through `/provider/businesses/:id/hours` — unlike the review state or
+the category, opening hours are a fact about the owner's day and not a decision about what the
+directory is — and an operator can set or clear them from the admin routes.
+
+## Near me
+
+The area picker answers "what is in Nakawa". The question a person actually asks, with a phone in
+their hand, is "what is close to where I am standing" — and a ward boundary is not an answer to
+that. `GET /api/v1/businesses` therefore accepts `lat`, `lng` and `radiusKm`; when a centre is
+present the listing is ordered by distance and each row gains `distanceKm`, and `meta.geo` echoes the
+centre and radius back so a page can render "within 3 km of you" without keeping its own copy.
+
+The distance is computed in `app/src/core/geo.js` in JavaScript rather than in SQL, because SQLite
+has no haversine and the two honest ways around that are to register a custom function or to do the
+arithmetic where the rule already lives. The second was chosen deliberately: a second copy of the
+formula inside a SQL string could drift from the one in `core/`, and a test could then only ever
+check one of the two. Candidate rows are pulled back with the ordinary filters already applied —
+the directory is a city, not a planet — and the radius and the ordering are applied to that set,
+before pagination, so a page shows the nearest overall rather than the nearest of an arbitrary slice.
+
+A listing whose primary location has no coordinates is left out of a proximity answer entirely
+rather than shown with a guessed or infinite distance, so every row in a distance-sorted list can be
+reached on a map. `lat` and `lng` are validated as a pair: half a coordinate is not a place, and
+quietly defaulting the missing half to Kampala would answer a question about somebody's own street
+with somebody else's. A radius above 500 km is refused rather than turned into a full-table list
+sorted by a number that means nothing at that scale.
+
+The reader's position is never recorded. It travels as query parameters on a listing request —
+exactly like a district — and is not written to any listing or to a demand signal. A person who
+wants their business to be found by their patch of Kampala says so by entering an address; a person
+who only wants to walk to a shop should not leave a home coordinate in a business directory.
+
+`sort=distance` is browse-only and is honoured only while a centre is present; the ordinary sort
+keys still work when no centre is given, and an unknown key falls back to the default order rather
+than to nothing. The directory's "Use my location" button drives this, and it offers no fallback
+location when the browser refuses: guessing is worse than saying so.
+
 ## API
 
 Base URL `http://127.0.0.1:4310`. Every response uses the same envelope:
@@ -780,8 +846,8 @@ API version is deployed to know whether the process is alive.
 | `GET` | `/api/v1/categories` | The category tree. `?includeCounts=true`. |
 | `GET` | `/api/v1/categories/:id` | One node with its children and linked skills. |
 | `GET` | `/api/v1/skills` | The skill vocabulary. `?q=` required; searches names and synonyms. |
-| `GET` | `/api/v1/businesses` | The directory. `?locationId=`, `?categoryId=`, `?skillId=`, `?capabilityLevel=`, `?verificationState=`, `?status=`, `?search=`, `?sort=`. |
-| `GET` | `/api/v1/businesses/:idOrSlug` | A public profile. Never includes private contact points. |
+| `GET` | `/api/v1/businesses` | The directory. `?locationId=`, `?categoryId=`, `?skillId=`, `?capabilityLevel=`, `?verificationState=`, `?status=`, `?search=`, `?sort=`. Each row carries an `openState`. For proximity, add `?lat=`, `?lng=`, `?radiusKm=` and `?sort=distance`; each row then also carries `distanceKm` and `meta.geo` reports the centre and radius used. |
+| `GET` | `/api/v1/businesses/:idOrSlug` | A public profile, with its weekly `hours` and a derived `openState`. Never includes private contact points. |
 | `GET` | `/api/v1/businesses/match` | `?q=name` or `?phone=` to catch duplicates before adding a listing. |
 | `GET` | `/api/v1/search` | `?q=` required. Records a demand signal; see the header `x-demand-signal`. |
 | `GET` | `/api/v1/ask` | `?q=` required. Reads a plain-language question and answers it; `meta.understood` shows the reading. Records a demand signal like `/search`. |
@@ -823,6 +889,8 @@ it, or change its status, review state or capability level.
 | `POST`/`PATCH`/`DELETE` | `/api/v1/provider/businesses/:id/contacts[/:contactId]` | Contact points. New ones are public by default; patch `isPublic`/`isPrimary`. |
 | `POST`/`PATCH`/`DELETE` | `/api/v1/provider/businesses/:id/services[/:serviceId]` | Services. |
 | `POST`/`PATCH`/`DELETE` | `/api/v1/provider/businesses/:id/products[/:productId]` | Products. |
+| `PUT` | `/api/v1/provider/businesses/:id/hours` | Replace the weekly opening hours. Body `{ "week": [{ "weekday": 1, "opens": "09:00", "closes": "17:00" }, { "weekday": 7, "isClosed": true }] }`. |
+| `DELETE` | `/api/v1/provider/businesses/:id/hours` | Remove the recorded hours. |
 
 ### Operator (capability required)
 
@@ -839,6 +907,7 @@ it, or change its status, review state or capability level.
 | `POST`/`PATCH`/`DELETE` | `/api/v1/admin/businesses/:id/products[/:productId]` | `business:write` |
 | `POST`/`PATCH`/`DELETE` | `/api/v1/admin/businesses/:id/contacts[/:contactId]` | `business:write` |
 | `POST`/`DELETE` | `/api/v1/admin/businesses/:id/skills[/:skillId]` | `business:write` |
+| `PUT`/`DELETE` | `/api/v1/admin/businesses/:id/hours` | `business:write` (replace or remove the weekly opening hours) |
 | `GET` | `/api/v1/admin/businesses/:id/offers` | `business:read` (offers a business has made) |
 | `GET` | `/api/v1/admin/businesses/:id/matching-requests` | `business:read` (open requests it has not answered) |
 | `POST` | `/api/v1/second-life/businesses/:id/intakes` | `business:write` (take a device in; body names `activity`, `deviceType`, `receivedCondition`) |
@@ -1357,4 +1426,8 @@ pip install playwright==1.63.0 && python -m playwright install chromium
 
 Override the interpreter and the demo admin credentials with `KIP_E2E_PYTHON`,
 `KIP_DEMO_ADMIN_EMAIL` and `KIP_DEMO_ADMIN_PASSWORD` if your environment needs them.
+
+
+## Reviews and ratings
+- Public submit creates a pending review; only published reviews are visible. Administrators and operators can moderate (publish/reject/delete). Providers can view all reviews for their listings. Ratings are computed from published reviews and shown on profiles and directory cards.
 

@@ -107,6 +107,30 @@ const contactBodySchema = {
   },
 }
 
+/** The whole weekly schedule, submitted at once. See the provider route. */
+const hoursBodySchema = {
+  type: 'object',
+  required: ['week'],
+  additionalProperties: false,
+  properties: {
+    week: {
+      type: 'array',
+      maxItems: 7,
+      items: {
+        type: 'object',
+        required: ['weekday'],
+        additionalProperties: false,
+        properties: {
+          weekday: { type: 'integer', minimum: 1, maximum: 7 },
+          isClosed: { type: 'boolean' },
+          opens: { type: 'string', maxLength: 5 },
+          closes: { type: 'string', maxLength: 5 },
+        },
+      },
+    },
+  },
+}
+
 export default async function adminBusinessRoutes(fastify, { app }) {
   /**
    * The admin listing is not the public one. It shows drafts, suspended and
@@ -673,5 +697,47 @@ export default async function adminBusinessRoutes(fastify, { app }) {
     },
     async (request) =>
       single({ removed: app.businesses.removeSkill(request.params.id, request.params.skillId) }),
+  )
+
+  /* Opening hours ----------------------------------------------------------- */
+
+  fastify.put(
+    '/admin/businesses/:id/hours',
+    {
+      schema: {
+        summary: "Replace a business's weekly opening hours.",
+        tags: ['admin'],
+        params: idParamSchema,
+        body: hoursBodySchema,
+      },
+      preHandler: fastify.requireCapability('business:write'),
+    },
+    async (request) => {
+      const before = app.businesses.hours(request.params.id)
+      const hours = app.businesses.setHours(request.params.id, request.body.week)
+      app.audit.record({
+        actorId: request.user.id,
+        actorRole: request.user.role,
+        action: 'business.hours',
+        entityType: 'business',
+        entityId: request.params.id,
+        before: { hours: before },
+        after: { hours },
+      })
+      return single({ hours })
+    },
+  )
+
+  fastify.delete(
+    '/admin/businesses/:id/hours',
+    {
+      schema: {
+        summary: "Remove a business's opening hours.",
+        tags: ['admin'],
+        params: idParamSchema,
+      },
+      preHandler: fastify.requireCapability('business:write'),
+    },
+    async (request) => single({ hours: app.businesses.clearHours(request.params.id) }),
   )
 }

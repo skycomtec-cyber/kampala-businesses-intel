@@ -163,6 +163,44 @@
       .section {
         margin-top: var(--s7);
       }
+
+      /* A week of opening hours: one row per day, so the form reads like the
+         schedule it records rather than like a list of separate fields. */
+      #hours-grid {
+        display: grid;
+        gap: var(--s2);
+        max-width: 36rem;
+      }
+
+      .hour-row {
+        display: grid;
+        grid-template-columns: 6rem 1fr 1fr auto;
+        gap: var(--s2);
+        align-items: center;
+      }
+
+      .hour-row .day {
+        font-size: 0.875rem;
+        font-weight: 550;
+      }
+
+      .hour-row input[type='time'] {
+        min-width: 0;
+      }
+
+      .hour-row .closed {
+        display: flex;
+        align-items: center;
+        gap: var(--s1);
+        font-size: 0.8125rem;
+        color: var(--muted);
+      }
+
+      @media (max-width: 30rem) {
+        .hour-row {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
 
@@ -182,7 +220,7 @@
           <a href="/second-life.html">Second Life</a>
           <a href="/claim.html">Claim</a>
           <a href="/my-business.html" aria-current="page">My business</a>
-          <a href="/operator.html">Verification queue</a>
+          <a href="/operator.html">Verification queue</a><a href="/reviews.html">Reviews</a>
           <button class="theme-toggle" type="button" hidden>
             <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
               <circle cx="12" cy="12" r="4" />
@@ -311,6 +349,18 @@
                 <button type="submit" class="btn">Add</button>
               </form>
             </div>
+
+            <div class="group">
+              <h2>Opening hours</h2>
+              <p class="note">Customers see at a glance whether you are open now. Tick a day as closed, or fill in its times &mdash; times are in East Africa Time.</p>
+              <form class="form" id="hours-form">
+                <div id="hours-grid"></div>
+                <div class="actions">
+                  <button type="submit" class="btn-primary">Save hours</button>
+                  <button type="button" class="quiet" id="hours-clear">Clear all hours</button>
+                </div>
+              </form>
+            </div>
           </div>
 
           <section class="panel" id="none" hidden>
@@ -373,6 +423,9 @@
         serviceForm: document.getElementById('service-form'),
         products: document.getElementById('products'),
         productForm: document.getElementById('product-form'),
+        hoursForm: document.getElementById('hours-form'),
+        hoursGrid: document.getElementById('hours-grid'),
+        hoursClear: document.getElementById('hours-clear'),
         none: document.getElementById('none'),
         signout: document.getElementById('signout'),
         resetPanel: document.getElementById('reset-panel'),
@@ -388,6 +441,8 @@
         new: 'new', refurbished: 'refurbished', used_good: 'used, good',
         used_fair: 'used, fair', for_parts: 'for parts', unknown: 'unknown',
       }
+      // ISO weekdays, matching core/hours.js: 1 is Monday.
+      const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
       let owned = []
       let current = null
@@ -528,7 +583,80 @@
         renderContacts(current.contacts ?? [])
         renderOffer(els.services, current.services ?? [], 'service')
         renderOffer(els.products, current.products ?? [], 'product')
+        populateHours(current.hours ?? [])
+        loadReviews(id)
         say(els.deskStatus, '')
+      }
+
+      let reviews = { meta: { total: 0 }, data: [] }
+
+      async function loadReviews(id) {
+        try {
+          const res = await api(`${API}/provider/businesses/${id}/reviews?sort=newest&limit=50`)
+          reviews = res
+          renderReviews()
+        } catch (e) {
+          reviews = { meta: { total: 0 }, data: [] }
+          renderReviews()
+        }
+      }
+
+      const revEls = {
+        wrap: null,
+      }
+
+      function renderReviews() {
+        let wrap = document.getElementById('reviews-wrap')
+        if (!wrap) {
+          wrap = document.createElement('div')
+          wrap.className = 'group'
+          wrap.id = 'reviews-wrap'
+          wrap.innerHTML = '<h2>Reviews</h2><p class="note">What people have said, including those waiting for you to publish or reject them.</p><div id="reviews-list"></div><p class="status" id="reviews-none" hidden>No reviews yet.</p>'
+          const detail = document.getElementById('listing-detail')
+          detail.appendChild(wrap)
+        }
+        const list = document.getElementById('reviews-list')
+        const none = document.getElementById('reviews-none')
+        list.replaceChildren()
+        const items = reviews.data || []
+        if (items.length === 0) {
+          none.hidden = false
+          return
+        }
+        none.hidden = true
+        for (const r of items) {
+          const card = document.createElement('div')
+          card.className = 'record'
+          const top = document.createElement('p')
+          top.className = 'primary'
+          top.innerHTML = `<strong>${escape(r.authorName || 'Anonymous')}</strong> · ${r.rating}★ · ${r.status}`
+          card.append(top)
+          if (r.title) {
+            const t = document.createElement('p')
+            t.className = 'secondary'
+            t.innerHTML = `<strong>${escape(r.title)}</strong>`
+            card.append(t)
+          }
+          if (r.body) {
+            const b = document.createElement('p')
+            b.className = 'secondary'
+            b.textContent = r.body
+            card.append(b)
+          }
+          if (r.createdAt) {
+            const d = document.createElement('p')
+            d.className = 'meta'
+            d.textContent = r.createdAt.slice(0, 10)
+            card.append(d)
+          }
+          list.append(card)
+        }
+      }
+
+      function escape(s) {
+        const div = document.createElement('div')
+        div.textContent = s
+        return div.innerHTML
       }
 
       els.profileForm.addEventListener('submit', async (event) => {
@@ -674,6 +802,115 @@
         })
       })
 
+      /* --- opening hours ----------------------------------------------------- */
+
+      /**
+       * Seven rows, built once.
+       *
+       * The schedule is a week, so the form is a week: each day is a row and the
+       * owner fills in the same three things for each. Ticking "closed" clears
+       * the times, because a day that is closed has no opening time and the api
+       * would refuse "closed 09:00 to 17:00" rather than guess what it meant.
+       */
+      function buildHoursGrid() {
+        const rows = []
+        for (let weekday = 1; weekday <= 7; weekday += 1) {
+          const row = document.createElement('div')
+          row.className = 'hour-row'
+          row.dataset.weekday = String(weekday)
+
+          const day = document.createElement('span')
+          day.className = 'day'
+          day.textContent = DAY_NAMES[weekday - 1]
+
+          const open = document.createElement('input')
+          open.type = 'time'
+          open.setAttribute('aria-label', `${DAY_NAMES[weekday - 1]} opening time`)
+
+          const close = document.createElement('input')
+          close.type = 'time'
+          close.setAttribute('aria-label', `${DAY_NAMES[weekday - 1]} closing time`)
+
+          const closed = document.createElement('label')
+          closed.className = 'closed'
+          const box = document.createElement('input')
+          box.type = 'checkbox'
+          closed.append(box, document.createTextNode('Closed'))
+          box.addEventListener('change', () => {
+            if (box.checked) {
+              open.value = ''
+              close.value = ''
+            }
+            open.disabled = box.checked
+            close.disabled = box.checked
+          })
+
+          row.append(day, open, close, closed)
+          rows.push(row)
+        }
+        els.hoursGrid.replaceChildren(...rows)
+      }
+
+      function populateHours(week) {
+        for (const row of els.hoursGrid.querySelectorAll('.hour-row')) {
+          const weekday = Number(row.dataset.weekday)
+          const [open, close] = row.querySelectorAll("input[type='time']")
+          const box = row.querySelector("input[type='checkbox']")
+          const day = week.find((entry) => entry.weekday === weekday)
+          const isClosed = !day || day.isClosed
+          box.checked = isClosed
+          open.disabled = isClosed
+          close.disabled = isClosed
+          open.value = day && !day.isClosed ? day.opens : ''
+          close.value = day && !day.isClosed ? day.closes : ''
+        }
+      }
+
+      /**
+       * The grid back to the shape the api takes.
+       *
+       * A day left blank is simply left out: the rule layer fills every omitted
+       * day in as closed, so "no row" and "closed row" mean the same thing and
+       * the form does not have to send seven objects to say "shut on Sunday".
+       */
+      function collectWeek() {
+        const week = []
+        for (const row of els.hoursGrid.querySelectorAll('.hour-row')) {
+          const weekday = Number(row.dataset.weekday)
+          const [open, close] = row.querySelectorAll("input[type='time']")
+          const box = row.querySelector("input[type='checkbox']")
+          if (box.checked) continue
+          if (!open.value && !close.value) continue
+          if (!open.value || !close.value) {
+            throw new Error(
+              `${DAY_NAMES[weekday - 1]} needs both an opening and a closing time, or tick it closed.`,
+            )
+          }
+          week.push({ weekday, opens: open.value, closes: close.value })
+        }
+        return week
+      }
+
+      els.hoursForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        await guard(async () => {
+          await api(`${API}/provider/businesses/${current.id}/hours`, {
+            method: 'PUT',
+            body: JSON.stringify({ week: collectWeek() }),
+          })
+          await selectListing(current.id)
+          say(els.deskStatus, 'Opening hours saved.')
+        })
+      })
+
+      els.hoursClear.addEventListener('click', () =>
+        guard(async () => {
+          await api(`${API}/provider/businesses/${current.id}/hours`, { method: 'DELETE' })
+          await selectListing(current.id)
+          say(els.deskStatus, 'Opening hours cleared.')
+        }),
+      )
+
       /* --- reset panel, for a one-time link --------------------------------- */
 
       els.resetForm.addEventListener('submit', async (event) => {
@@ -716,7 +953,12 @@
         els.resetPanel.hidden = false
         els.resetForm.elements.token.value = params.get('reset')
       }
+      buildHoursGrid()
       open()
     </script>
   </body>
 </html>
+
+
+
+

@@ -23,6 +23,7 @@ import adminBusinessRoutes from './routes/admin/businesses.js'
 import adminImportRoutes from './routes/admin/imports.js'
 import adminReferenceRoutes from './routes/admin/reference.js'
 import adminCatalogueRoutes from './routes/admin/catalogue.js'
+import adminReviewRoutes from './routes/admin/reviews.js'
 
 /**
  * The api layer's assembly.
@@ -118,6 +119,7 @@ export async function buildApi({ app, config, logger = true, web = true }) {
       await api.register(adminImportRoutes, { app })
       await api.register(adminReferenceRoutes, { app })
       await api.register(adminCatalogueRoutes, { app })
+      await api.register(adminReviewRoutes, { app })
     },
     { prefix: config.api.prefix },
   )

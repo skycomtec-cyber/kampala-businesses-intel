@@ -1,5 +1,6 @@
-import { single, uuidPattern, idParamSchema } from '../lib/http.js'
+import { single, paged, toPage, uuidPattern, idParamSchema } from '../lib/http.js'
 import { ForbiddenError, NotFoundError } from '../../core/errors.js'
+import { publicReview } from '../../core/reviews.js'
 import {
   PRODUCT_CONDITIONS,
   PRODUCT_STATUSES,
@@ -88,6 +89,38 @@ const productBodySchema = {
     currency: { type: 'string', minLength: 3, maxLength: 3 },
     isRecyclable: { type: 'boolean' },
     status: { type: 'string', enum: [...PRODUCT_STATUSES] },
+  },
+}
+
+/**
+ * The whole week, submitted at once.
+ *
+ * Opening hours are the one part of a listing a provider owns outright: it is a
+ * fact about their day, not a decision about what the directory is, so unlike
+ * the review state or the category this is theirs to set. The shape is the same
+ * seven days whether the provider filled in one or all of them; a day left out
+ * is closed.
+ */
+const hoursBodySchema = {
+  type: 'object',
+  required: ['week'],
+  additionalProperties: false,
+  properties: {
+    week: {
+      type: 'array',
+      maxItems: 7,
+      items: {
+        type: 'object',
+        required: ['weekday'],
+        additionalProperties: false,
+        properties: {
+          weekday: { type: 'integer', minimum: 1, maximum: 7 },
+          isClosed: { type: 'boolean' },
+          opens: { type: 'string', maxLength: 5 },
+          closes: { type: 'string', maxLength: 5 },
+        },
+      },
+    },
   },
 }
 
@@ -387,6 +420,86 @@ export default async function providerRoutes(fastify, { app }) {
         app.claims.productBusinessId(request.params.productId),
       )
       return single({ removed: app.businesses.removeProduct(request.params.productId) })
+    },
+  )
+
+  /* Opening hours ----------------------------------------------------------- */
+
+  fastify.put(
+    '/provider/businesses/:id/hours',
+    {
+      schema: {
+        summary: "Replace your listing's weekly opening hours.",
+        tags: ['provider'],
+        params: idParamSchema,
+        body: hoursBodySchema,
+      },
+      preHandler,
+    },
+    async (request) => {
+      assertOwner(request.user.id, request.params.id)
+      return single({ hours: app.businesses.setHours(request.params.id, request.body.week) })
+    },
+  )
+
+  fastify.delete(
+    '/provider/businesses/:id/hours',
+    {
+      schema: {
+        summary: 'Remove your listing\'s opening hours.',
+        tags: ['provider'],
+        params: idParamSchema,
+      },
+      preHandler,
+    },
+    async (request) => {
+      assertOwner(request.user.id, request.params.id)
+      return single({ hours: app.businesses.clearHours(request.params.id) })
+    },
+  )
+
+  /* Reviews ------------------------------------------------------------------ */
+
+  /**
+   * What people have said about your listing.
+   *
+   * The owner sees pending reviews as well as published ones, because the owner
+   * is the person most likely to spot a review that is really about a different
+   * shop and the least able to do anything about it if it appears without
+   * warning. The pending rows are marked by their `status`; the payload is the
+   * public shape, so the site's own moderation note never leaves the desk.
+   */
+  fastify.get(
+    '/provider/businesses/:id/reviews',
+    {
+      schema: {
+        summary: 'Reviews for one of your listings, including ones awaiting moderation.',
+        tags: ['provider'],
+        params: idParamSchema,
+        querystring: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['pending', 'published', 'rejected'] },
+            sort: { type: 'string', enum: ['newest', 'oldest', 'rating'] },
+            limit: { type: 'integer', minimum: 1, maximum: 50 },
+            offset: { type: 'integer', minimum: 0 },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler,
+    },
+    async (request) => {
+      assertOwner(request.user.id, request.params.id)
+      const page = toPage(request.query)
+      const result = app.reviews.list({
+        businessId: request.params.id,
+        status: request.query.status ?? null,
+        sort: request.query.sort ?? 'newest',
+        ...page,
+      })
+      result.items = result.items.map(publicReview)
+      return paged(result, { ...page, rating: app.reviews.summaryFor(request.params.id) })
     },
   )
 }

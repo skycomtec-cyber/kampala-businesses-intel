@@ -9,6 +9,7 @@ import { createMarketplaceRepository } from './marketplace.js'
 import { createIntelligenceRepository } from './intelligence.js'
 import { createSecondLifeRepository } from './secondLife.js'
 import { createClaimsRepository } from './claims.js'
+import { createReviewsRepository } from './reviews.js'
 
 /**
  * Repository wiring.
@@ -43,6 +44,11 @@ export function createRepositories(db, config) {
   // the account it creates and the reset token that delivers it. It is wired last
   // so all three already exist.
   const claims = createClaimsRepository(db, config, { businesses, users, passwordResets })
+  // Reviews are independent of the other repositories: a review references a
+  // business by foreign key, and the rating a profile shows is composed by the
+  // route rather than baked into the business repository. That keeps the two
+  // from depending on each other in a cycle.
+  const reviews = createReviewsRepository(db)
 
   return {
     db,
@@ -61,6 +67,7 @@ export function createRepositories(db, config) {
     intelligence,
     secondLife,
     claims,
+    reviews,
 
     /**
      * Runs a unit of work atomically.

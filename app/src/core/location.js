@@ -85,25 +85,14 @@ export function validateCoordinates({ latitude, longitude }) {
   }
 }
 
-/**
- * Approximate radius of the Earth in kilometres. The platform does not do
- * geodesic distance in Phase 1; it buckets locations by administrative level
- * and only uses this to sanity-check radius filters. Haversine arrives with the
- * Postgres/PostGIS adapter, not before.
+/*
+ * The earth-radius maths used to be here as a placeholder, with a comment
+ * promising a real haversine later. It is now real and lives in `core/geo.js`,
+ * which is where "near me" reads it from. Keeping two copies would mean two
+ * numbers to drift apart, and `export *` from the core barrel would re-export
+ * both under the same name and make that name unimportable, so the placeholder
+ * is gone rather than left alongside its replacement.
  */
-export const EARTH_RADIUS_KM = 6371
-
-export function haversineKm(a, b) {
-  const toRad = (deg) => (deg * Math.PI) / 180
-  const dLat = toRad(b.latitude - a.latitude)
-  const dLon = toRad(b.longitude - a.longitude)
-  const lat1 = toRad(a.latitude)
-  const lat2 = toRad(b.latitude)
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
-  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)))
-}
 
 /**
  * The levels a search can be scoped at, and the levels every rollup and gap is

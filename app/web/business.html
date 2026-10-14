@@ -102,6 +102,207 @@
         max-width: 44rem;
         text-wrap: pretty;
       }
+
+      /* The one-line answer to the most common question: are they open now. It
+         sits above everything else because it decides whether the rest of the
+         page is worth reading today. */
+      .openstate {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--s2);
+        margin: 0 0 var(--s5);
+        padding: 0.2rem 0.7rem;
+        border-radius: 999px;
+        border: 1px solid var(--line-2);
+        background: var(--card);
+        font-size: 0.8125rem;
+        font-weight: 600;
+      }
+
+      .openstate::before {
+        content: '';
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+
+      .openstate.is-open {
+        color: var(--ok, #1a7f4b);
+        border-color: currentColor;
+      }
+
+      .openstate.is-open::before {
+        background: currentColor;
+      }
+
+      /* A week, one day per row, ruled like the other records on this page. */
+      #hours div {
+        display: flex;
+        gap: var(--s4);
+        align-items: baseline;
+        padding: var(--s3) 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      #hours div:last-child {
+        border-bottom: 0;
+      }
+
+      #hours dt {
+        flex: 0 0 7rem;
+      }
+
+      #hours div.today dt {
+        font-weight: 700;
+      }
+
+      #hours .closed {
+        color: var(--muted);
+      }
+
+      /* The headline rating, beside the open badge. Same pill treatment so the
+         two one-line answers sit together at the top of the page. */
+      .rating {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--s2);
+        margin: 0 var(--s3) var(--s5) 0;
+        padding: 0.2rem 0.7rem;
+        border-radius: 999px;
+        border: 1px solid var(--line-2);
+        background: var(--card);
+        font-size: 0.8125rem;
+        font-weight: 600;
+      }
+
+      /* A five-point scale drawn with two characters, so there is no image to
+         load and no icon set to keep in step with the api's five points. */
+      .stars {
+        letter-spacing: 0.1em;
+        color: var(--star, #c98a00);
+      }
+
+      .stars .empty {
+        color: var(--line-2);
+      }
+
+      #reviews {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      #reviews li {
+        padding: var(--s4) 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      #reviews li:last-child {
+        border-bottom: 0;
+      }
+
+      #reviews .who {
+        display: flex;
+        gap: var(--s3);
+        align-items: baseline;
+        flex-wrap: wrap;
+        margin-bottom: var(--s2);
+      }
+
+      #reviews .who .name {
+        font-weight: 600;
+      }
+
+      #reviews .who .when {
+        color: var(--muted);
+        font-size: 0.8125rem;
+      }
+
+      #reviews .title {
+        font-weight: 600;
+        margin-bottom: var(--s1);
+      }
+
+      #reviews .body {
+        color: var(--text-2, inherit);
+        max-width: 46rem;
+        text-wrap: pretty;
+      }
+
+      #review-form {
+        margin-top: var(--s5);
+        padding-top: var(--s5);
+        border-top: 1px solid var(--line);
+        max-width: 40rem;
+      }
+
+      #review-form h3 {
+        margin-bottom: var(--s3);
+      }
+
+      #review-form label {
+        display: block;
+        margin: var(--s3) 0 var(--s1);
+        font-weight: 600;
+        font-size: 0.8125rem;
+      }
+
+      #review-form input,
+      #review-form textarea {
+        width: 100%;
+        font: inherit;
+      }
+
+      #review-form textarea {
+        min-height: 5rem;
+        resize: vertical;
+      }
+
+      /* A row of radio stars, hidden inputs but reachable by keyboard. */
+      .rating-input {
+        display: inline-flex;
+        flex-direction: row-reverse;
+        gap: 0.1rem;
+        border: 0;
+        padding: 0;
+        margin: 0;
+      }
+
+      .rating-input input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+      }
+
+      .rating-input label {
+        margin: 0;
+        font-size: 1.6rem;
+        line-height: 1;
+        cursor: pointer;
+        color: var(--line-2);
+      }
+
+      .rating-input input:checked ~ label,
+      .rating-input label:hover,
+      .rating-input label:hover ~ label {
+        color: var(--star, #c98a00);
+      }
+
+      .rating-input input:focus-visible + label {
+        outline: 2px solid var(--accent, currentColor);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+
+      #review-message {
+        margin-top: var(--s3);
+      }
+
+      #review-message.ok {
+        color: var(--ok, #1a7f4b);
+      }
     </style>
   </head>
 
@@ -121,7 +322,7 @@
           <a href="/second-life.html">Second Life</a>
           <a href="/claim.html">Claim</a>
           <a href="/my-business.html">My business</a>
-          <a href="/operator.html">Verification queue</a>
+          <a href="/operator.html">Verification queue</a><a href="/reviews.html">Reviews</a>
           <button class="theme-toggle" type="button" hidden>
             <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
               <circle cx="12" cy="12" r="4" />
@@ -145,6 +346,14 @@
 
       <p class="where" id="where" hidden></p>
       <p class="lede" id="lede" hidden></p>
+
+      <p class="openstate" id="openstate" hidden></p>
+      <p class="rating" id="rating" hidden></p>
+
+      <section class="section" id="hours-section" hidden>
+        <h2>Opening hours</h2>
+        <dl id="hours"></dl>
+      </section>
 
       <section class="reach" id="reach" hidden>
         <h2>How to reach them</h2>
@@ -175,6 +384,38 @@
       <section class="section" id="facts-section" hidden>
         <h2>Listing details</h2>
         <dl class="facts" id="facts"></dl>
+      </section>
+
+      <section class="section" id="reviews-section">
+        <h2>Reviews</h2>
+        <p class="count" id="reviews-count" hidden></p>
+        <ul id="reviews"></ul>
+        <p class="none" id="reviews-none" hidden>
+          No one has reviewed this business yet. If you have used them, what was it like?
+        </p>
+
+        <!--
+          A review is submitted by the public and held until a moderator publishes
+          it, which is why the button says "submit for review" and the
+          confirmation says "waiting" rather than "shown". Saying anything else
+          would be a lie the visitor only discovers later.
+        -->
+        <form id="review-form" hidden>
+          <h3>Write a review</h3>
+          <fieldset class="rating-input" id="rating-input">
+            <legend class="visually-hidden">Your rating, one to five</legend>
+          </fieldset>
+          <label for="review-author">Your name</label>
+          <input id="review-author" name="author" maxlength="80" required autocomplete="name" />
+          <label for="review-title">Title <span class="absent">(optional)</span></label>
+          <input id="review-title" name="title" maxlength="160" />
+          <label for="review-body">Your review <span class="absent">(optional)</span></label>
+          <textarea id="review-body" name="body" maxlength="2000"></textarea>
+          <label for="review-email">Email <span class="absent">(optional, never published)</span></label>
+          <input id="review-email" name="email" type="email" maxlength="200" autocomplete="email" />
+          <p><button type="submit" id="review-submit">Submit for review</button></p>
+          <p class="note" id="review-message" hidden></p>
+        </form>
       </section>
 
       <p class="none" id="bare" hidden>
@@ -223,6 +464,10 @@
         name: document.getElementById('name'),
         where: document.getElementById('where'),
         lede: document.getElementById('lede'),
+        openstate: document.getElementById('openstate'),
+        rating: document.getElementById('rating'),
+        hoursSection: document.getElementById('hours-section'),
+        hours: document.getElementById('hours'),
         reach: document.getElementById('reach'),
         contacts: document.getElementById('contacts'),
         noContacts: document.getElementById('no-contacts'),
@@ -236,6 +481,18 @@
         skills: document.getElementById('skills'),
         factsSection: document.getElementById('facts-section'),
         facts: document.getElementById('facts'),
+        reviewsSection: document.getElementById('reviews-section'),
+        reviewsCount: document.getElementById('reviews-count'),
+        reviews: document.getElementById('reviews'),
+        reviewsNone: document.getElementById('reviews-none'),
+        reviewForm: document.getElementById('review-form'),
+        ratingInput: document.getElementById('rating-input'),
+        reviewAuthor: document.getElementById('review-author'),
+        reviewTitle: document.getElementById('review-title'),
+        reviewBody: document.getElementById('review-body'),
+        reviewEmail: document.getElementById('review-email'),
+        reviewSubmit: document.getElementById('review-submit'),
+        reviewMessage: document.getElementById('review-message'),
         bare: document.getElementById('bare'),
         note: document.getElementById('note'),
         missing: document.getElementById('missing'),
@@ -289,6 +546,15 @@
             return /^https?:\/\//i.test(contact.value) ? contact.value : null
         }
       }
+
+      /**
+       * ISO weekdays, matching core/hours.js: 1 is Monday.
+       *
+       * Repeated here rather than fetched, because the day names are a fact
+       * about the calendar and not about this business, and a page that made a
+       * request to find out what "Wednesday" is called would be a worse page.
+       */
+      const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
       async function api(path) {
         const response = await fetch(path, {
@@ -553,6 +819,140 @@
         return `${count} ${word}${count === 1 ? '' : 's'} listed`
       }
 
+      /**
+       * The badge: whether the doors are open right now.
+       *
+       * The sentence is computed by the api, not here, so this page, the
+       * directory row and any future client all read the same answer. The page
+       * only chooses a colour for it.
+       */
+      function renderOpenState(state) {
+        if (!state || !state.recorded) return
+        els.openstate.textContent = state.label
+        els.openstate.classList.toggle('is-open', state.open === true)
+        els.openstate.hidden = false
+      }
+
+      function renderHours(hours) {
+        const week = hours ?? []
+        if (!week.some((day) => !day.isClosed)) return
+
+        const jsDay = new Date(Date.now() + 180 * 60000).getUTCDay()
+        const todayWeekday = jsDay === 0 ? 7 : jsDay
+
+        els.hours.replaceChildren()
+        for (const day of week) {
+          if (day.weekday < 1 || day.weekday > 7) continue
+          const row = document.createElement('div')
+          if (day.weekday === todayWeekday) row.className = 'today'
+          const term = document.createElement('dt')
+          term.textContent = DAY_NAMES[day.weekday - 1]
+          const value = document.createElement('dd')
+          if (day.isClosed) {
+            value.className = 'closed'
+            value.textContent = 'Closed'
+          } else {
+            const overnight = String(day.closes) <= String(day.opens)
+            value.textContent = `${day.opens} – ${day.closes}${overnight ? ' next day' : ''}`
+          }
+          row.append(term, value)
+          els.hours.append(row)
+        }
+        els.hoursSection.hidden = false
+      }
+
+      function renderStars(value) {
+        const node = document.createElement('span')
+        node.className = 'stars'
+        if (!Number.isFinite(value) || value < 0) value = 0
+        const n = Math.round(value)
+        const solid = '★'.repeat(Math.max(0, Math.min(5, n)))
+        const empty = '☆'.repeat(Math.max(0, 5 - Math.max(0, Math.min(5, n))))
+        node.append(document.createTextNode(solid))
+        const e = document.createElement('span')
+        e.className = 'empty'
+        e.textContent = empty
+        node.append(e)
+        return node
+      }
+
+      function renderRating(state) {
+        if (!state || state.count === 0 || !state.average) {
+          els.rating.hidden = true
+          return
+        }
+        els.rating.replaceChildren()
+        els.rating.append(renderStars(state.average))
+        els.rating.append(span(null, `${state.average.toFixed(1)} · ${pluralShort(state.count, 'review')}`))
+        els.rating.hidden = false
+      }
+
+      function pluralShort(count, word) {
+        return `${count} ${word}${count === 1 ? '' : 's'}`
+      }
+
+      async function loadReviews(businessId, slug) {
+        if (!businessId && !slug) return { meta: { total: 0, rating: { count: 0 } }, data: [] }
+        const key = slug ?? businessId
+        try {
+          const res = await api(`${API}/businesses/${encodeURIComponent(key)}/reviews?limit=50&sort=newest`)
+          return res
+        } catch (e) {
+          return { meta: { total: 0, rating: { count: 0 } }, data: [] }
+        }
+      }
+
+      function renderReviews(reviews, total) {
+        els.reviews.replaceChildren()
+        if (total === 0) {
+          els.reviewsCount.hidden = true
+          els.reviewsNone.hidden = false
+          els.reviewsSection.hidden = false
+          return
+        }
+        els.reviewsCount.textContent = pluralShort(total, 'review')
+        els.reviewsCount.hidden = false
+        els.reviewsNone.hidden = true
+        const slice = (reviews || []).slice(0, 10)
+        if (slice.length === 0) {
+          els.reviewsNone.hidden = false
+          return
+        }
+        for (const r of slice) {
+          const li = document.createElement('li')
+          const who = document.createElement('div')
+          who.className = 'who'
+          who.append(span('name', r.authorName || 'Anonymous'))
+          if (r.createdAt) who.append(span('when', r.createdAt.slice(0, 10)))
+          li.append(who)
+          li.append(renderStars(r.rating))
+          if (r.title) li.append(span('title', r.title))
+          if (r.body) li.append(span('body', r.body))
+          els.reviews.append(li)
+        }
+      }
+
+      function buildRatingInputs() {
+        els.ratingInput.replaceChildren()
+        const legend = document.createElement('legend')
+        legend.className = 'visually-hidden'
+        legend.textContent = 'Your rating, one to five'
+        els.ratingInput.append(legend)
+        for (let v = 5; v >= 1; v -= 1) {
+          const input = document.createElement('input')
+          input.type = 'radio'
+          input.name = 'rating'
+          input.id = `r${v}`
+          input.value = String(v)
+          input.required = true
+          const label = document.createElement('label')
+          label.htmlFor = `r${v}`
+          label.setAttribute('aria-label', `${v} star`)
+          label.textContent = '★'
+          els.ratingInput.append(input, label)
+        }
+      }
+
       /* --- start ----------------------------------------------------------- */
 
       async function start() {
@@ -602,10 +1002,58 @@
         }
 
         renderContacts(business.contacts ?? [])
+        renderOpenState(business.openState)
+        renderHours(business.hours ?? [])
         renderServices(business.services ?? [])
         renderProducts(business.products ?? [])
         renderSkills(business.skills ?? [])
         renderFacts(business)
+
+        const reviews = await loadReviews(business.id, business.slug)
+        renderRating(reviews.meta?.rating || business.rating || { count: 0 })
+        renderReviews(reviews.data, reviews.meta?.total || 0)
+        buildRatingInputs()
+        els.reviewForm.hidden = false
+        els.reviewForm.onsubmit = async (e) => {
+          e.preventDefault()
+          const formData = new FormData(els.reviewForm)
+          const payload = Object.fromEntries(formData.entries())
+          if (!payload.rating) return
+          els.reviewSubmit.disabled = true
+          els.reviewMessage.hidden = true
+          els.reviewMessage.classList.remove('ok')
+          try {
+            const res = await fetch(`${API}/businesses/${encodeURIComponent(business.slug ?? business.id)}/reviews`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({
+                rating: Number(payload.rating),
+                author: payload.author,
+                title: payload.title || undefined,
+                body: payload.body || undefined,
+                email: payload.email || undefined,
+              }),
+            })
+            const j = await res.json().catch(() => ({}))
+            if (res.status === 201) {
+              els.reviewForm.reset()
+              els.reviewMessage.textContent = j.meta?.moderation === 'pending' ? 'Thank you. Your review is awaiting moderation.' : 'Thank you for your review.'
+              els.reviewMessage.classList.add('ok')
+              els.reviewMessage.hidden = false
+              const rr = await loadReviews(business.id, business.slug)
+              renderReviews(rr.data, rr.meta?.total || 0)
+            } else {
+              els.reviewMessage.textContent = j?.error?.message || 'Your review could not be submitted. Please try again.'
+              els.reviewMessage.hidden = false
+            }
+          } catch (err) {
+            els.reviewMessage.textContent = err.message
+            els.reviewMessage.hidden = false
+          } finally {
+            els.reviewSubmit.disabled = false
+          }
+        }
 
         // The empty case is stated rather than left as a blank page: a live,
         // published listing with nothing on it is a real state of this platform,
@@ -638,3 +1086,7 @@
     </script>
   </body>
 </html>
+
+
+
+

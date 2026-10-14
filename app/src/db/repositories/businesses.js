@@ -20,9 +20,11 @@ import {
   assertIntakeState,
 } from '../../core/catalogue.js'
 import { assertCapabilityLevel } from '../../core/taxonomy.js'
+import { validateWeek, weekFromRows, rowsFromWeek } from '../../core/hours.js'
 import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js'
 import { camelizeRow, camelizeRows, nowIso, toSqlBool, fromSqlBool } from '../mapping.js'
 import { normalisePagination, where, likeParam, resolveOrder } from './common.js'
+import { normalisePoint, normaliseRadius, haversineKm, roundKm } from '../../core/geo.js'
 
 /**
  * Businesses and everything they offer.
@@ -297,6 +299,19 @@ export function createBusinessesRepository(db, deps = {}) {
   )
   const linkServiceSkill = db.prepare(
     `INSERT OR IGNORE INTO service_skill (service_id, skill_id) VALUES (?, ?)`,
+  )
+
+  // Opening hours. Written as a whole week in one transaction, never a day at a
+  // time: a schedule with Tuesday removed and Wednesday not yet added is a
+  // schedule nobody meant, and a partial week should not exist even briefly.
+  const insertHours = db.prepare(
+    `INSERT INTO business_hours (id, business_id, weekday, is_closed, opens, closes)
+     VALUES (@id, @businessId, @weekday, @isClosed, @opens, @closes)`,
+  )
+  const deleteHours = db.prepare(`DELETE FROM business_hours WHERE business_id = ?`)
+  const selectHours = db.prepare(
+    `SELECT weekday, is_closed, opens, closes FROM business_hours
+      WHERE business_id = ? ORDER BY weekday ASC`,
   )
 
   // How many businesses the public can actually see. Same predicate as
@@ -749,6 +764,9 @@ export function createBusinessesRepository(db, deps = {}) {
       includeContacts = false,
       publishedOnly = false,
       includeSubtree = false,
+      lat,
+      lng,
+      radiusKm,
     } = {}) {
       const page = normalisePagination({ limit, offset })
       const conditions = []
@@ -833,6 +851,61 @@ export function createBusinessesRepository(db, deps = {}) {
             JOIN location l ON l.id = b.primary_location_id
             JOIN category c ON c.id = b.category_id`
       const whereSql = where(conditions)
+
+      /**
+       * "Near me" is answered in JavaScript, not in SQL.
+       *
+       * SQLite has no haversine, and the two honest ways around that are to
+       * register a custom function or to pull the candidate rows back and do the
+       * arithmetic where the rule already lives. The second is chosen here
+       * because `core/geo.js` is the one place the formula is written down: a
+       * second copy inside a SQL string could drift from it, and a test could
+       * only ever check one of the two.
+       *
+       * The candidates are everything the ordinary filters allow — the directory
+       * is a city, not a planet — and the radius and the ordering are applied to
+       * that set. The rows are ordered by distance before paging, because a page
+       * sliced before the sort would show the nearest of an arbitrary set rather
+       * than the nearest overall.
+       */
+      const point = normalisePoint({ lat, lng })
+      if (point) {
+        const radius = normaliseRadius(radiusKm)
+        const candidates = db
+          .prepare(
+            `SELECT ${BUSINESS_COLUMNS},
+                    l.latitude AS geo_latitude,
+                    l.longitude AS geo_longitude
+               ${fromSql} ${whereSql}`,
+          )
+          .all(params)
+
+        const placed = []
+        for (const row of candidates) {
+          // A listing whose primary location carries no coordinates cannot be
+          // placed, so it is left out of a proximity answer rather than shown
+          // with a guessed or infinite distance.
+          if (row.geo_latitude === null || row.geo_longitude === null) continue
+          const distanceKm = roundKm(
+            haversineKm(point, { lat: row.geo_latitude, lng: row.geo_longitude }),
+          )
+          if (radius !== null && distanceKm > radius) continue
+          const { geo_latitude, geo_longitude, ...columns } = row
+          const item = businessRow(columns)
+          item.distanceKm = distanceKm
+          placed.push(item)
+        }
+        placed.sort((a, b) => a.distanceKm - b.distanceKm || (a.id < b.id ? -1 : 1))
+
+        const items = placed.slice(page.offset, page.offset + page.limit)
+        if (includeContacts) attachContactSummaries(items)
+        return {
+          total: placed.length,
+          items,
+          geo: { lat: point.lat, lng: point.lng, radiusKm: radius },
+        }
+      }
+
       // The id tiebreak keeps pagination stable: without it, rows with an equal
       // sort key can be returned in a different order per page and one of them
       // will be skipped.
@@ -1447,6 +1520,53 @@ export function createBusinessesRepository(db, deps = {}) {
       return true
     },
 
+    // ---- Opening hours ------------------------------------------------------
+
+    /**
+     * The week as seven entries, always, whether or not anything is recorded.
+     *
+     * The rule layer reads a full week, so the shape is normalised here rather
+     * than at every call site: a caller can index `hours[0]` for Monday without
+     * first checking whether Monday happens to exist.
+     */
+    hours(businessId) {
+      return weekFromRows(camelizeRows(selectHours.all(businessId)))
+    },
+
+    /**
+     * Replaces the whole schedule in one transaction.
+     *
+     * Replacing rather than merging is what makes "closed on Sunday" possible:
+     * a merge would need an explicit delete for every day that changed, and the
+     * form that edits a week always submits the whole week anyway.
+     */
+    setHours(businessId, week) {
+      requireBusiness(businessId)
+      const rows = rowsFromWeek(validateWeek(week))
+      const write = db.transaction(() => {
+        deleteHours.run(businessId)
+        for (const row of rows) {
+          insertHours.run({
+            id: newId(),
+            businessId,
+            weekday: row.weekday,
+            isClosed: row.isClosed,
+            opens: row.opens,
+            closes: row.closes,
+          })
+        }
+      })
+      write()
+      return repository.hours(businessId)
+    },
+
+    clearHours(businessId) {
+      requireBusiness(businessId)
+      const write = db.transaction(() => deleteHours.run(businessId))
+      write()
+      return repository.hours(businessId)
+    },
+
     // ---- Whole-profile read -------------------------------------------------
 
     /**
@@ -1466,6 +1586,7 @@ export function createBusinessesRepository(db, deps = {}) {
         services: repository.services(businessId),
         products: repository.products(businessId),
         skills: repository.skills(businessId),
+        hours: repository.hours(businessId),
       }
     },
 
