@@ -11,6 +11,7 @@ import { openApp } from '../src/db/index.js'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const createAdmin = path.join(appRoot, 'scripts', 'create-admin.js')
+const setPassword = path.join(appRoot, 'scripts', 'set-password.js')
 const password = 'Kampala-Reference-2026'
 
 /**
@@ -38,11 +39,11 @@ function withDataDir(dataDir, callback) {
   }
 }
 
-function run(args, { dataDir, env = {}, stdin = 'ignore' }) {
+function runCli(script, args, { dataDir, env = {}, stdin = 'ignore' }) {
   return new Promise((resolve) => {
     const child = execFile(
       process.execPath,
-      [createAdmin, ...args],
+      [script, ...args],
       { env: { ...process.env, KIP_DATA_DIR: dataDir, ...env }, timeout: 30_000 },
       (error, stdout, stderr) => {
         resolve({
@@ -54,6 +55,14 @@ function run(args, { dataDir, env = {}, stdin = 'ignore' }) {
     )
     child.stdin.end(stdin === 'ignore' ? undefined : stdin)
   })
+}
+
+function run(args, options) {
+  return runCli(createAdmin, args, options)
+}
+
+function runSetPassword(args, options) {
+  return runCli(setPassword, args, options)
 }
 
 function readAccounts(dataDir) {
@@ -158,6 +167,109 @@ test('create-admin refuses a second account without being told whose', async () 
     assert.equal(second.code, 0, second.stderr)
     assert.match(second.stdout, /--email you@example.com/)
     assert.equal(readAccounts(dataDir).length, 1)
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+/*
+ * set-password is the browser-free way to change a password: the operator who
+ * has lost theirs cannot supply the current one, so it takes only the email and
+ * the new password. The repeat is checked whenever it is supplied, because a
+ * typo here is the one way to lock everybody out of the only admin account.
+ */
+
+test('set-password changes an existing account and refuses a mismatched repeat', async () => {
+  const dataDir = freshDataDir()
+  try {
+    const created = await run(['--email', 'owner@kampala.test'], {
+      dataDir,
+      env: { KIP_ADMIN_PASSWORD: password },
+    })
+    assert.equal(created.code, 0, created.stderr)
+
+    // A mismatch changes nothing, so a typo cannot lock the operator out.
+    const mismatch = await runSetPassword([], {
+      dataDir,
+      env: {
+        KIP_ADMIN_EMAIL: 'owner@kampala.test',
+        KIP_ADMIN_PASSWORD: 'changed-password-12',
+        KIP_ADMIN_PASSWORD_CONFIRM: 'typo-password-999',
+      },
+    })
+    assert.notEqual(mismatch.code, 0)
+    assert.match(mismatch.stderr, /did not match/)
+
+    const changed = await runSetPassword([], {
+      dataDir,
+      env: {
+        KIP_ADMIN_EMAIL: 'owner@kampala.test',
+        KIP_ADMIN_PASSWORD: 'changed-password-12',
+        KIP_ADMIN_PASSWORD_CONFIRM: 'changed-password-12',
+      },
+    })
+    assert.equal(changed.code, 0, changed.stderr)
+
+    withDataDir(dataDir, () => {
+      const app = openApp({ config: loadConfig() })
+      // The old password is gone and the new one works.
+      assert.equal(app.users.authenticate('owner@kampala.test', password), null)
+      assert.ok(app.users.authenticate('owner@kampala.test', 'changed-password-12'))
+      app.close()
+    })
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('set-password refuses an account that does not exist', async () => {
+  const dataDir = freshDataDir()
+  try {
+    const result = await runSetPassword([], {
+      dataDir,
+      env: { KIP_ADMIN_EMAIL: 'nobody@kampala.test', KIP_ADMIN_PASSWORD: password },
+    })
+    assert.notEqual(result.code, 0)
+    assert.match(result.stderr, /No account exists/)
+    assert.equal(readAccounts(dataDir).length, 0)
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('set-password signs every existing session out, because they are no longer trustworthy', async () => {
+  const dataDir = freshDataDir()
+  try {
+    const created = await run(['--email', 'owner@kampala.test'], {
+      dataDir,
+      env: { KIP_ADMIN_PASSWORD: password },
+    })
+    assert.equal(created.code, 0, created.stderr)
+
+    // A session taken out before the change - as if signed in elsewhere.
+    const lived = withDataDir(dataDir, () => {
+      const app = openApp({ config: loadConfig() })
+      const owner = app.users.authenticate('owner@kampala.test', password)
+      const session = app.sessions.create({ userId: owner.id })
+      app.close()
+      return session.token
+    })
+
+    const changed = await runSetPassword([], {
+      dataDir,
+      env: {
+        KIP_ADMIN_EMAIL: 'owner@kampala.test',
+        KIP_ADMIN_PASSWORD: password,
+        KIP_ADMIN_PASSWORD_CONFIRM: password,
+      },
+    })
+    assert.equal(changed.code, 0, changed.stderr)
+
+    withDataDir(dataDir, () => {
+      const app = openApp({ config: loadConfig() })
+      assert.equal(app.sessions.resolve(lived), null)
+      app.close()
+    })
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true })
   }

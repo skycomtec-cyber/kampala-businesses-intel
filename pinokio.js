@@ -14,6 +14,7 @@ module.exports = {
       update: info.running("update.js"),
       reset: info.running("reset.js"),
       admin: info.running("create-admin.js"),
+      password: info.running("change-password.js"),
     }
 
     if (running.install) {
@@ -46,6 +47,14 @@ module.exports = {
         icon: "fa-solid fa-terminal",
         text: "Creating Account",
         href: "create-admin.js",
+      }]
+    }
+    if (running.password) {
+      return [{
+        default: true,
+        icon: "fa-solid fa-terminal",
+        text: "Changing Password",
+        href: "change-password.js",
       }]
     }
     if (running.demo) {
@@ -108,6 +117,10 @@ module.exports = {
         text: "<div><strong>Create Admin Account</strong><div>There is no public sign-up</div></div>",
         href: "create-admin.js",
       }, {
+        icon: "fa-solid fa-key",
+        text: "<div><strong>Change Admin Password</strong><div>Set a new password for an existing account</div></div>",
+        href: "change-password.js",
+      }, {
         icon: "fa-solid fa-flask",
         text: "<div><strong>Run the Demonstration</strong><div>A separate database full of invented traders. Useful when the real one is too empty to show anything.</div></div>",
         href: "demo.js",
@@ -124,6 +137,10 @@ module.exports = {
       icon: "fa-solid fa-user-plus",
       text: "<div><strong>Create Admin Account</strong><div>There is no public sign-up</div></div>",
       href: "create-admin.js",
+    }, {
+      icon: "fa-solid fa-key",
+      text: "<div><strong>Change Admin Password</strong><div>Set a new password for an existing account</div></div>",
+      href: "change-password.js",
     }, {
       icon: "fa-solid fa-flask",
       text: "<div><strong>Run the Demonstration</strong><div>A separate database full of invented traders. Useful when the real one is too empty to show anything.</div></div>",

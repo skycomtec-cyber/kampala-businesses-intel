@@ -3,6 +3,7 @@ import { actorForRequest } from '../lib/actor.js'
 import { isPubliclyVisible } from '../../core/business.js'
 import { describeState } from '../../core/hours.js'
 import { publicReview } from '../../core/reviews.js'
+import { publicPhoto } from '../../core/photos.js'
 import { CAPABILITY_LEVELS } from '../../core/taxonomy.js'
 import { COVERAGE_LEVELS } from '../../core/location.js'
 import { NotFoundError } from '../../core/errors.js'
@@ -91,7 +92,16 @@ const businessSlugParam = {
   properties: { idOrSlug: { type: 'string', minLength: 1, maxLength: 200 } },
 }
 
-export default async function businessRoutes(fastify, { app }) {
+const photosQuerySchema = {
+  type: 'object',
+  properties: {
+    limit: { type: 'integer', minimum: 1, maximum: 60 },
+    offset: { type: 'integer', minimum: 0 },
+  },
+  additionalProperties: false,
+}
+
+export default async function businessRoutes(fastify, { app, config }) {
   /**
    * Resolves a public listing by id or slug, or 404s.
    *
@@ -270,6 +280,41 @@ export default async function businessRoutes(fastify, { app }) {
         ...request.body,
       })
       return reply.status(201).send(single(publicReview(review), { moderation: 'pending' }))
+    },
+  )
+
+  /**
+   * A business's published photos, in the owner's order.
+   *
+   * Same rule as reviews: the query filters on `status = 'published'`, so a photo
+   * still awaiting a moderator is absent from the answer rather than present with
+   * a flag. Each item carries the url its bytes are served at, so the interface
+   * never has to know how the content route is shaped.
+   */
+  fastify.get(
+    '/businesses/:idOrSlug/photos',
+    {
+      schema: {
+        summary: "A business's photos, in the order the owner set.",
+        tags: ['businesses'],
+        params: businessSlugParam,
+        querystring: photosQuerySchema,
+      },
+      preHandler: fastify.enforceRateLimit('read'),
+    },
+    async (request) => {
+      const business = requirePublicBusiness(request.params.idOrSlug)
+      const page = toPage(request.query, { defaultLimit: 24, maxLimit: 60 })
+      const result = app.photos.listPublished({
+        businessId: business.id,
+        sort: 'position',
+        ...page,
+      })
+      result.items = result.items.map((photo) => ({
+        ...publicPhoto(photo),
+        url: `${config.api.prefix}/photos/${photo.id}/content`,
+      }))
+      return paged(result, page)
     },
   )
 

@@ -10,6 +10,7 @@ import { createIntelligenceRepository } from './intelligence.js'
 import { createSecondLifeRepository } from './secondLife.js'
 import { createClaimsRepository } from './claims.js'
 import { createReviewsRepository } from './reviews.js'
+import { createPhotosRepository } from './photos.js'
 
 /**
  * Repository wiring.
@@ -49,6 +50,11 @@ export function createRepositories(db, config) {
   // route rather than baked into the business repository. That keeps the two
   // from depending on each other in a cycle.
   const reviews = createReviewsRepository(db)
+  // Photos are the same shape as reviews: a submission held pending whose only
+  // transition is a recorded decision. The bytes live outside the database, so
+  // this repository holds metadata alone and the media store is wired by the api
+  // layer rather than here.
+  const photos = createPhotosRepository(db)
 
   return {
     db,
@@ -68,6 +74,7 @@ export function createRepositories(db, config) {
     secondLife,
     claims,
     reviews,
+    photos,
 
     /**
      * Runs a unit of work atomically.

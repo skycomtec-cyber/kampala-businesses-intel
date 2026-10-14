@@ -128,6 +128,14 @@ export function loadConfig(overrides = {}) {
     port: readInt('KIP_PORT', 4310),
     appRoot: APP_ROOT,
     dataDir,
+    // Where uploaded business photographs live. Inside the data directory on
+    // purpose: the database and the files it references are one disposable unit,
+    // and a backup of one without the other would restore rows pointing at
+    // nothing. The path is resolved here so the api never builds it from a
+    // request.
+    mediaDir: path.resolve(
+      overrides.mediaDir ?? readString('KIP_MEDIA_DIR', path.join(dataDir, 'media')),
+    ),
     database: {
       // Phase 1 runs on SQLite + FTS5. The repository layer is the only place
       // that knows this, so a Postgres adapter can replace it without touching
@@ -182,6 +190,13 @@ export function loadConfig(overrides = {}) {
       // Reject oversized bodies before they are parsed. The largest legitimate
       // request here is a business profile with a few hundred characters of text.
       bodyLimit: readInt('KIP_BODY_LIMIT', 256 * 1024),
+      // A photo arrives as a base64 data url, which is the one request in this
+      // api whose size is set by the caller rather than by the schema. It is
+      // raised on the upload route alone, never globally, so a malformed man-in
+      // -the-middle request to any other route is still refused at the small
+      // limit. The value is the ceiling on the decoded bytes plus the base64
+      // overhead, with room for the JSON envelope.
+      photoBodyLimit: readInt('KIP_PHOTO_BODY_LIMIT', 6 * 1024 * 1024),
       // Only trust X-Forwarded-For when a proxy in front of us is actually
       // setting it. Left off, a client could spoof its own address and walk
       // straight past the rate limiter.
@@ -204,6 +219,11 @@ export function loadConfig(overrides = {}) {
         // about several businesses is a normal afternoon's browsing, and a script
         // filling the moderation queue is not.
         review: { windowMs: 60 * 60_000, max: 5 },
+        // A provider uploading photos is an authenticated owner writing to their
+        // own listing, so this is looser than a review: a shop with a dozen
+        // pictures should be able to add them in one sitting. It exists to stop a
+        // script filling the media directory, not to meter an honest uploader.
+        photo: { windowMs: 60 * 60_000, max: 30 },
       },
     },
     intelligence: {

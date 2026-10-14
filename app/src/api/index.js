@@ -19,11 +19,14 @@ import askRoutes from './routes/ask.js'
 import insightRoutes from './routes/insights.js'
 import claimRoutes from './routes/claims.js'
 import providerRoutes from './routes/provider.js'
+import photoRoutes from './routes/photos.js'
 import adminBusinessRoutes from './routes/admin/businesses.js'
 import adminImportRoutes from './routes/admin/imports.js'
 import adminReferenceRoutes from './routes/admin/reference.js'
 import adminCatalogueRoutes from './routes/admin/catalogue.js'
 import adminReviewRoutes from './routes/admin/reviews.js'
+import adminPhotoRoutes from './routes/admin/photos.js'
+import { createMediaStore } from '../media/index.js'
 
 /**
  * The api layer's assembly.
@@ -92,6 +95,13 @@ export async function buildApi({ app, config, logger = true, web = true }) {
   // it is inherited by every plugin and every handler below.
   fastify.decorate('kip', { config, app })
 
+  // The one piece of upload state that is not a row. The media store owns the
+  // files; the repositories hold only the metadata that points at them, so the
+  // store is built here, where the api decides how bytes are received and served,
+  // and handed to the routes that move bytes rather than threaded through the db
+  // layer.
+  const media = createMediaStore({ dir: config.mediaDir })
+
   await fastify.register(errorPlugin)
   await fastify.register(securityPlugin)
   await fastify.register(rateLimitPlugin, { config })
@@ -107,19 +117,21 @@ export async function buildApi({ app, config, logger = true, web = true }) {
     async (api) => {
       await api.register(metaRoutes, { config, app })
       await api.register(referenceRoutes, { app })
-      await api.register(businessRoutes, { app })
+      await api.register(businessRoutes, { app, config })
       await api.register(authRoutes, { config, app })
       await api.register(marketplaceRoutes, { app })
       await api.register(secondLifeRoutes, { app })
       await api.register(askRoutes, { app })
       await api.register(insightRoutes, { config, app })
       await api.register(claimRoutes, { app })
-      await api.register(providerRoutes, { app })
+      await api.register(providerRoutes, { app, config, media })
+      await api.register(photoRoutes, { app, media })
       await api.register(adminBusinessRoutes, { app })
       await api.register(adminImportRoutes, { app })
       await api.register(adminReferenceRoutes, { app })
       await api.register(adminCatalogueRoutes, { app })
       await api.register(adminReviewRoutes, { app })
+      await api.register(adminPhotoRoutes, { app, media })
     },
     { prefix: config.api.prefix },
   )

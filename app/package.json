@@ -14,6 +14,7 @@
     "seed": "node scripts/seed.js",
     "seed:demo": "node scripts/seed-demo.js",
     "create-admin": "node scripts/create-admin.js",
+    "set-password": "node scripts/set-password.js",
     "import": "node scripts/import.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Photos &middot; Kampala Intelligence Platform</title>
+    <script>
+      try {
+        var t = localStorage.getItem('kip-theme')
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/theme.css" />
+    <style>
+      .photo {
+        border-bottom: 1px solid var(--line);
+        padding: var(--s4) 0;
+        display: grid;
+        grid-template-columns: 10rem 1fr;
+        gap: var(--s4);
+        align-items: start;
+      }
+      .photo:last-child { border-bottom: 0; }
+      .photo img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: var(--card); }
+      .head { display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap; margin-bottom: var(--s2); }
+      .name { font-weight: 600; }
+      .meta { color: var(--muted); font-size: 0.8125rem; }
+      .caption { margin-bottom: var(--s2); text-wrap: pretty; }
+      .actions { display: flex; gap: var(--s2); margin-top: var(--s3); flex-wrap: wrap; }
+      .reason { margin-top: var(--s2); width: 100%; }
+      #signin { max-width: 28rem; }
+      #queue { margin-top: var(--s5); }
+      @media (max-width: 34rem) {
+        .photo { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="wordmark" href="/"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span> Kampala Intelligence</a>
+        <nav class="topnav">
+          <a href="/">Engine</a>
+          <a href="/directory.html">Directory</a>
+          <a href="/insights.html">Gaps</a>
+          <a href="/requests.html">Requests</a>
+          <a href="/ask.html">Ask</a>
+          <a href="/second-life.html">Second Life</a>
+          <a href="/claim.html">Claim</a>
+          <a href="/my-business.html">My business</a>
+          <a href="/operator.html">Verification queue</a>
+          <a href="/reviews.html">Reviews</a><a href="/photos.html" aria-current="page">Photos</a>
+        </nav>
+      </div>
+    </header>
+    <main class="shell">
+      <div class="masthead"><div><h1>Photo moderation</h1><p class="sub">Publish or reject the images businesses have uploaded.</p></div></div>
+      <section class="panel" id="signin"><h2>Sign in</h2><form class="form" id="signin-form"><label>Email</label><input type="email" name="email" required autocomplete="email" /><label>Password</label><input type="password" name="password" required autocomplete="current-password" /><button type="submit" class="btn-primary">Sign in</button><p class="status bad" id="signin-error" hidden></p></form></section>
+      <section id="queue" hidden><div id="photos"></div></section>
+    </main>
+    <script src="/theme.js"></script>
+    <script>
+      const API = '/api/v1'
+      const els = {
+        signin: document.getElementById('signin'),
+        form: document.getElementById('signin-form'),
+        err: document.getElementById('signin-error'),
+        queue: document.getElementById('queue'),
+        photos: document.getElementById('photos'),
+      }
+      let token = null
+
+      async function api(path, opts = {}) {
+        const r = await fetch(path, {
+          credentials: 'same-origin',
+          headers: {
+            accept: 'application/json',
+            'Content-Type': opts.body ? 'application/json' : undefined,
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+            ...opts.headers,
+          },
+          ...opts,
+        })
+        const j = await r.json().catch(() => ({}))
+        if (!r.ok) {
+          const e = new Error(j?.error?.message || 'Request failed')
+          e.status = r.status
+          throw e
+        }
+        return j
+      }
+
+      els.form.onsubmit = async (e) => {
+        e.preventDefault()
+        els.err.hidden = true
+        try {
+          const f = new FormData(els.form)
+          const b = await api(`${API}/auth/login`, {
+            method: 'POST',
+            body: JSON.stringify({ email: f.get('email'), password: f.get('password') }),
+          })
+          token = b.data.token
+          els.signin.hidden = true
+          els.queue.hidden = false
+          load()
+        } catch (err) {
+          els.err.textContent = err.message
+          els.err.hidden = false
+        }
+      }
+
+      async function load() {
+        const r = await api(`${API}/admin/photos?status=pending&sort=oldest&limit=100`)
+        els.photos.replaceChildren()
+        for (const photo of r.data || []) els.photos.append(render(photo))
+      }
+
+      // The image is signed in with the same cookie/bearer the page already holds,
+      // so a moderator can see a pending photo before it is public. The bytes come
+      // from the content route, which serves an unpublished photo to a moderator
+      // and a 404 to anyone else.
+      function render(photo) {
+        const d = document.createElement('div')
+        d.className = 'photo'
+
+        const img = document.createElement('img')
+        img.src = `${API}/photos/${photo.id}/content`
+        img.alt = photo.altText || photo.caption || 'Pending photo'
+        d.append(img)
+
+        const body = document.createElement('div')
+        const head = document.createElement('div')
+        head.className = 'head'
+        head.append(el('span', 'name', photo.businessName || photo.businessSlug || 'Unknown business'))
+        head.append(el('span', 'meta', photo.status))
+        head.append(el('span', 'meta', photo.createdAt ? photo.createdAt.slice(0, 10) : ''))
+        head.append(el('span', 'meta', `${Math.round((photo.byteSize || 0) / 1024)} KB`))
+        body.append(head)
+        if (photo.caption) body.append(el('div', 'caption', photo.caption))
+
+        const actions = document.createElement('div')
+        actions.className = 'actions'
+        const publish = button('Publish')
+        const reject = button('Reject', 'quiet')
+        const del = button('Delete', 'quiet')
+        actions.append(publish, reject, del)
+
+        const reason = document.createElement('input')
+        reason.type = 'text'
+        reason.className = 'reason'
+        reason.placeholder = 'Reason (required for publish/reject)'
+        reason.maxLength = 500
+
+        publish.onclick = async () => {
+          try {
+            await api(`${API}/admin/photos/${photo.id}`, { method: 'PATCH', body: JSON.stringify({ decision: 'publish', reason: reason.value }) })
+            d.remove()
+          } catch (err) { reason.placeholder = err.message }
+        }
+        reject.onclick = async () => {
+          try {
+            await api(`${API}/admin/photos/${photo.id}`, { method: 'PATCH', body: JSON.stringify({ decision: 'reject', reason: reason.value }) })
+            d.remove()
+          } catch (err) { reason.placeholder = err.message }
+        }
+        del.onclick = async () => {
+          if (confirm('Delete this photo? The image file is removed too.')) {
+            await api(`${API}/admin/photos/${photo.id}`, { method: 'DELETE' })
+            d.remove()
+          }
+        }
+
+        body.append(actions, reason)
+        d.append(body)
+        return d
+      }
+
+      function el(tag, className, text) {
+        const n = document.createElement(tag)
+        if (className) n.className = className
+        n.textContent = text ?? ''
+        return n
+      }
+
+      function button(label, className) {
+        const b = document.createElement('button')
+        if (className) b.className = className
+        b.textContent = label
+        return b
+      }
+    </script>
+  </body>
+</html>

@@ -201,6 +201,20 @@
           grid-template-columns: 1fr;
         }
       }
+
+      #photos .record {
+        align-items: center;
+      }
+
+      .thumb {
+        width: 4.5rem;
+        height: 4.5rem;
+        object-fit: cover;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        flex: 0 0 auto;
+      }
     </style>
   </head>
 
@@ -220,7 +234,7 @@
           <a href="/second-life.html">Second Life</a>
           <a href="/claim.html">Claim</a>
           <a href="/my-business.html" aria-current="page">My business</a>
-          <a href="/operator.html">Verification queue</a><a href="/reviews.html">Reviews</a>
+          <a href="/operator.html">Verification queue</a><a href="/reviews.html">Reviews</a><a href="/photos.html">Photos</a>
           <button class="theme-toggle" type="button" hidden>
             <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
               <circle cx="12" cy="12" r="4" />
@@ -361,6 +375,24 @@
                 </div>
               </form>
             </div>
+
+            <div class="group">
+              <h2>Photos</h2>
+              <p class="note">Show customers what you look like. Every photo is held for the moderator before it goes public, and a rejected one is never shown.</p>
+              <div id="photos"></div>
+              <form class="form" id="photo-form">
+                <label>Picture</label>
+                <input type="file" id="photo-file" accept="image/jpeg,image/png,image/webp" required />
+                <label>Caption</label>
+                <input type="text" name="caption" maxlength="300" placeholder="What is in the picture" />
+                <label>Description for screen readers</label>
+                <input type="text" name="altText" maxlength="300" placeholder="Describe the image in words" />
+                <div class="actions">
+                  <button type="submit" class="btn-primary">Upload photo</button>
+                </div>
+                <p class="status" id="photo-status" hidden></p>
+              </form>
+            </div>
           </div>
 
           <section class="panel" id="none" hidden>
@@ -426,6 +458,10 @@
         hoursForm: document.getElementById('hours-form'),
         hoursGrid: document.getElementById('hours-grid'),
         hoursClear: document.getElementById('hours-clear'),
+        photos: document.getElementById('photos'),
+        photoForm: document.getElementById('photo-form'),
+        photoFile: document.getElementById('photo-file'),
+        photoStatus: document.getElementById('photo-status'),
         none: document.getElementById('none'),
         signout: document.getElementById('signout'),
         resetPanel: document.getElementById('reset-panel'),
@@ -585,6 +621,7 @@
         renderOffer(els.products, current.products ?? [], 'product')
         populateHours(current.hours ?? [])
         loadReviews(id)
+        loadPhotos(id)
         say(els.deskStatus, '')
       }
 
@@ -658,6 +695,108 @@
         div.textContent = s
         return div.innerHTML
       }
+
+      /* --- photos ------------------------------------------------------------ */
+
+      /*
+       * The upload form reads the chosen file in the browser and sends it as a
+       * data url. That is the same shape the api expects, so no multipart parser
+       * is involved and the page needs nothing beyond FileReader. The photo is
+       * held for moderation, so it appears here with its status but not on the
+       * public listing until the moderator publishes it.
+       */
+
+      let photos = { meta: { total: 0 }, data: [] }
+
+      async function loadPhotos(id) {
+        try {
+          photos = await api(`${API}/provider/businesses/${id}/photos?limit=50`)
+        } catch {
+          photos = { meta: { total: 0 }, data: [] }
+        }
+        renderPhotos()
+      }
+
+      function renderPhotos() {
+        els.photos.replaceChildren()
+        const items = photos.data ?? []
+        if (items.length === 0) {
+          els.photos.append(emptyLine('No photos yet.'))
+          return
+        }
+        for (const photo of items) els.photos.append(photoRow(photo))
+      }
+
+      function photoRow(photo) {
+        const row = document.createElement('div')
+        row.className = 'record'
+        const thumb = document.createElement('img')
+        thumb.className = 'thumb'
+        thumb.src = photo.url
+        thumb.alt = photo.altText || photo.caption || 'One of your photos'
+        thumb.loading = 'lazy'
+        row.append(thumb)
+        const where = document.createElement('div')
+        where.className = 'where'
+        where.append(document.createTextNode(photo.caption || 'Untitled'))
+        const kind = document.createElement('span')
+        kind.className = 'kind'
+        kind.textContent = `  ${photo.status}`
+        where.append(kind)
+        if (photo.moderationReason && photo.status === 'rejected') {
+          const note = document.createElement('div')
+          note.className = 'private'
+          note.textContent = photo.moderationReason
+          where.append(note)
+        }
+        row.append(where)
+        const remove = document.createElement('button')
+        remove.type = 'button'
+        remove.className = 'quiet'
+        remove.textContent = 'Remove'
+        remove.addEventListener('click', () =>
+          guard(async () => {
+            await api(`${API}/provider/businesses/${current.id}/photos/${photo.id}`, {
+              method: 'DELETE',
+            })
+            await loadPhotos(current.id)
+          }),
+        )
+        row.append(remove)
+        return row
+      }
+
+      els.photoForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const file = els.photoFile.files?.[0]
+        if (!file) return
+        const data = new FormData(els.photoForm)
+        await guard(async () => {
+          const url = await readAsDataUrl(file)
+          const body = await api(`${API}/provider/businesses/${current.id}/photos`, {
+            method: 'POST',
+            body: JSON.stringify({
+              data: url,
+              caption: String(data.get('caption') ?? '').trim() || undefined,
+              altText: String(data.get('altText') ?? '').trim() || undefined,
+            }),
+          })
+          els.photoForm.reset()
+          await loadPhotos(current.id)
+          say(els.photoStatus, body.meta?.moderation === 'pending' ? 'Uploaded. Waiting for review.' : 'Uploaded.')
+        })
+      })
+
+      function readAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result)
+          reader.onerror = () => reject(new Error('That file could not be read.'))
+          reader.readAsDataURL(file)
+        })
+      }
+
+      /* --- profile ----------------------------------------------------------- */
 
       els.profileForm.addEventListener('submit', async (event) => {
         event.preventDefault()

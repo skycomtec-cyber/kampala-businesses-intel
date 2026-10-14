@@ -3,8 +3,11 @@ module.exports = {
   // account. There is no public registration in this platform, so this is the
   // only way an account is ever created.
   //
-  // Collect email via input; collect password via a secure shell prompt so that
-  // the password never appears in Pinokio's event/input logs.
+  // Collect the email and the password in one modal. The password is a masked
+  // field and is handed to the CLI through the environment (KIP_ADMIN_PASSWORD),
+  // never on the command line, so it stays out of the process list. Pinokio's
+  // shell has no TTY, so the CLI cannot prompt for the password itself: every
+  // answer has to be collected here.
   run: [
     {
       method: "input",
@@ -19,6 +22,13 @@ module.exports = {
             description: "The address the operator will sign in with.",
             placeholder: "you@example.com",
             required: true
+          },
+          {
+            type: "password",
+            key: "password",
+            title: "Password",
+            description: "At least 8 characters. Choose something you will keep safe.",
+            required: true
           }
         ]
       }
@@ -28,7 +38,8 @@ module.exports = {
       params: {
         path: "app",
         env: {
-          KIP_ADMIN_EMAIL: "{{input.email}}"
+          KIP_ADMIN_EMAIL: "{{input.email}}",
+          KIP_ADMIN_PASSWORD: "{{input.password}}"
         },
         message: [
           "node scripts/create-admin.js"

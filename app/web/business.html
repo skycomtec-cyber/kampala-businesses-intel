@@ -303,6 +303,38 @@
       #review-message.ok {
         color: var(--ok, #1a7f4b);
       }
+
+      /* A gallery is a grid of equal tiles. The fixed aspect ratio stops the page
+         reflowing as each image arrives, and object-fit crops rather than
+         distorts a picture whose proportions belong to the owner, not to us. */
+      #photos {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+        gap: var(--s3);
+      }
+
+      #photos figure {
+        margin: 0;
+      }
+
+      #photos img {
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        display: block;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--card);
+      }
+
+      #photos figcaption {
+        margin-top: var(--s1);
+        font-size: 0.8125rem;
+        color: var(--muted);
+      }
     </style>
   </head>
 
@@ -322,7 +354,7 @@
           <a href="/second-life.html">Second Life</a>
           <a href="/claim.html">Claim</a>
           <a href="/my-business.html">My business</a>
-          <a href="/operator.html">Verification queue</a><a href="/reviews.html">Reviews</a>
+          <a href="/operator.html">Verification queue</a><a href="/reviews.html">Reviews</a><a href="/photos.html">Photos</a>
           <button class="theme-toggle" type="button" hidden>
             <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
               <circle cx="12" cy="12" r="4" />
@@ -349,6 +381,11 @@
 
       <p class="openstate" id="openstate" hidden></p>
       <p class="rating" id="rating" hidden></p>
+
+      <section class="section" id="photos-section" hidden>
+        <h2>Photos</h2>
+        <ul class="gallery" id="photos"></ul>
+      </section>
 
       <section class="section" id="hours-section" hidden>
         <h2>Opening hours</h2>
@@ -466,6 +503,8 @@
         lede: document.getElementById('lede'),
         openstate: document.getElementById('openstate'),
         rating: document.getElementById('rating'),
+        photosSection: document.getElementById('photos-section'),
+        photos: document.getElementById('photos'),
         hoursSection: document.getElementById('hours-section'),
         hours: document.getElementById('hours'),
         reach: document.getElementById('reach'),
@@ -932,6 +971,48 @@
         }
       }
 
+      async function loadPhotos(key) {
+        if (!key) return { data: [] }
+        try {
+          const res = await api(`${API}/businesses/${encodeURIComponent(key)}/photos?limit=24`)
+          return res
+        } catch (e) {
+          return { data: [] }
+        }
+      }
+
+      /*
+       * The gallery. Every image is a tile in a grid; the url comes from the api
+       * and points at the content route, so this page never learns where the bytes
+       * live. The caption and alt text are owner-typed, so they are set as text,
+       * never as markup — the same rule as the rest of the page.
+       */
+      function renderPhotos(photos) {
+        els.photos.replaceChildren()
+        const list = photos || []
+        if (list.length === 0) {
+          els.photosSection.hidden = true
+          return
+        }
+        for (const photo of list) {
+          const figure = document.createElement('figure')
+          const img = document.createElement('img')
+          img.src = photo.url
+          img.loading = 'lazy'
+          img.alt = photo.altText || photo.caption || 'Photo of the business'
+          figure.append(img)
+          if (photo.caption) {
+            const caption = document.createElement('figcaption')
+            caption.textContent = photo.caption
+            figure.append(caption)
+          }
+          const item = document.createElement('li')
+          item.append(figure)
+          els.photos.append(item)
+        }
+        els.photosSection.hidden = false
+      }
+
       function buildRatingInputs() {
         els.ratingInput.replaceChildren()
         const legend = document.createElement('legend')
@@ -1008,6 +1089,9 @@
         renderProducts(business.products ?? [])
         renderSkills(business.skills ?? [])
         renderFacts(business)
+
+        const photos = await loadPhotos(business.slug ?? business.id)
+        renderPhotos(photos.data)
 
         const reviews = await loadReviews(business.id, business.slug)
         renderRating(reviews.meta?.rating || business.rating || { count: 0 })

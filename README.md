@@ -89,8 +89,13 @@ This is the part worth reading before deploying it anywhere public.
    The form's answers are handed to the CLI through the environment, so nothing is typed into a shell.
 3. **Start** from the menu. Pinokio assigns a free port and opens the front page.
 
-Menu items: `Start`, `Create Admin Account`, `Update`, `Reset`. Stopping the server is done from
-the Pinokio terminal, as with any other script.
+**Change Admin Password** from the menu does the same for an account that already exists: it asks
+for the email and the new password twice (both masked) and needs no old password. Use it when an
+operator has lost theirs and the reset link is inconvenient. Every existing session for that
+account is signed out by the change.
+
+Menu items: `Start`, `Create Admin Account`, `Change Admin Password`, `Update`, `Reset`. Stopping
+the server is done from the Pinokio terminal, as with any other script.
 
 ### From a shell
 
@@ -118,6 +123,17 @@ KIP_ADMIN_EMAIL=you@example.com KIP_ADMIN_PASSWORD='at-least-12-characters' npm 
 
 `--email` and `KIP_ADMIN_EMAIL` are interchangeable; the same applies to the password's sources. The
 Pinokio launcher uses the environment pair so that neither answer touches the command line.
+
+Changing a password from a shell works the same way, and needs no current password:
+
+```bash
+cd app
+KIP_ADMIN_EMAIL=you@example.com KIP_ADMIN_PASSWORD='at-least-12-characters' npm run set-password
+```
+
+The CLI also accepts the repeat in `KIP_ADMIN_PASSWORD_CONFIRM` and changes nothing if it does not
+match. The Pinokio form always sends one. Either way, the change signs out every existing session
+for that account.
 
 ### Configuration
 
@@ -1297,16 +1313,17 @@ class of breakage entirely.
 │   ├── Dockerfile            two stages: native build, then runtime with tini
 │   ├── src/
 │   │   ├── config.js         every value resolvable from the environment
-│   │   ├── core/             domain rules: auth, demand, privacy, identifiers, errors
+│   │   ├── core/             the pure rules: hours, geo, reviews, photos, claims, ask, ...
 │   │   ├── db/               driver, migrations, repositories, backup.js
 │   │   ├── seed/             idempotent reference import
 │   │   ├── import/           csv reader, row resolution, the importer itself
 │   │   ├── api/              plugins, routes, response envelope
+│   │   ├── media/            the photo store: bytes on disk, never in the database
 │   │   └── server.js         the process
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
-│   │                         import, backup, restore, and the one-off repairs
+│   │                         set-password, import, backup, restore, and the one-off repairs
 │   │                         — backfill-provenance, add-sources
-│   ├── test/                 201 tests, no network, temporary folders only
+│   ├── test/                 237 tests, no network, temporary folders only
 │   └── web/                  the website pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
@@ -1319,6 +1336,8 @@ class of breakage entirely.
 │       ├── claim.html            claim a listing, and follow a claim by reference
 │       ├── my-business.html      the signed-in desk for a business owner
 │       ├── operator.html         the review queue
+│       ├── reviews.html          review moderation
+│       ├── photos.html           photo moderation
 │       ├── theme.css             every shared token and component, light and dark
 │       ├── theme.js              the appearance toggle, and nothing else
 │       ├── sheet.js              the one confirmation box, reused by every page that asks
@@ -1331,6 +1350,7 @@ class of breakage entirely.
 ├── install.js                Pinokio: dependencies, migrations, reference data, tests
 ├── start.js                  Pinokio: maintenance, then the server
 ├── create-admin.js           Pinokio: the only way an account is created
+├── change-password.js        Pinokio: set a new password for an existing account
 ├── update.js                 Pinokio: dependencies, migrations, maintenance, tests
 ├── reset.js                  Pinokio: removes node_modules and the database
 ├── pinokio.js                the menu
@@ -1349,7 +1369,7 @@ cd app
 npm test
 ```
 
-201 tests, no network access, each against its own temporary database. The API tests mount the real
+237 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule
@@ -1373,7 +1393,7 @@ that a backup taken from a connection that never stopped contains a row written 
 that the result is a single file with no `-wal` sibling to lose, that a byte-flipped file is refused
 by the checksum rather than restored over a good database, that a restore refuses while a live pid
 holds the data directory but not after a crashed one left its lock behind, and that the displaced
-database is kept. The CLI tests run `create-admin`, `import`, `backup` and `restore` as real child
+database is kept. The CLI tests run `create-admin`, `set-password`, `import`, `backup` and `restore` as real child
 processes, since the interesting
 ways for them to fail — a launcher step that pipes nothing, a piped email with no password, an import
 whose sheet has one bad row in it — are all about how they read stdin and what they do with a file
@@ -1430,4 +1450,12 @@ Override the interpreter and the demo admin credentials with `KIP_E2E_PYTHON`,
 
 ## Reviews and ratings
 - Public submit creates a pending review; only published reviews are visible. Administrators and operators can moderate (publish/reject/delete). Providers can view all reviews for their listings. Ratings are computed from published reviews and shown on profiles and directory cards.
+
+
+## Photos
+- Providers upload a picture to one of their listings with `POST /api/v1/provider/businesses/:id/photos`. The image travels as a base64 data url (`{"data": "data:image/png;base64,..."}`, plus optional `caption` and `altText`), and the real format is read from the bytes, never the declared prefix. Only JPEG, PNG and WebP are accepted.
+- A photo arrives `pending` and is held for moderation. Only `published` photos appear on the public profile, in the directory and at `GET /api/v1/businesses/:idOrSlug/photos`; a pending or rejected photo answers 404 to the public, while its owner and a moderator can still preview it.
+- Moderators work the queue at `GET /api/v1/admin/photos` (defaults to pending, oldest first) and act with `PATCH /api/v1/admin/photos/:id` (`publish` or `reject`, both requiring a reason) or `DELETE /api/v1/admin/photos/:id`, which removes the row and the image file. Owners can reread or remove their own photos with `PATCH`/`DELETE /api/v1/provider/businesses/:id/photos/:photoId`.
+- Image bytes live as files under `KIP_MEDIA_DIR` (default `<data-dir>/media`), never in SQLite; the row holds only metadata. A photo is addressed by id through `GET /api/v1/photos/:photoId/content` (published bytes are cacheable, unpublished ones are `no-store`). Uploads are capped at 4 MB decoded; `KIP_PHOTO_BODY_LIMIT` sets the larger transport ceiling (default 6 MB) and uploads are rate limited per account.
+
 
