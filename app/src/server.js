@@ -51,9 +51,31 @@ let shuttingDown = false
  */
 const LOCK_FILE = path.join(config.dataDir, '.lock')
 
+/**
+ * How long a shutdown may run before the process stops waiting for it.
+ *
+ * The clean path closes Fastify and checkpoints SQLite, and this is the backstop
+ * for when that path stalls rather than the plan. It exists because a signal
+ * handler that never returns is worse than an abrupt exit: the platform, seeing no
+ * exit, sends SIGKILL after its own grace period, and the SIGKILL leaves the lock
+ * file behind. The next start then reads a pid it has itself been given (a fresh
+ * container reissues small pids, so `node` is pid 7 again) and - before the
+ * own-pid rule below - refuses to run, which turns one slow stop into an outage
+ * that does not clear on its own. So the deadline releases the lock before it
+ * exits, whether or not the close returned.
+ *
+ * Below the ten seconds a `docker stop` allows, and far below systemd's
+ * TimeoutStopSec=30, so it fires before either sends SIGKILL.
+ */
+const SHUTDOWN_DEADLINE_MS = 8000
+
 /** Takes the lock, refusing rather than overwriting a live server's. */
 function takeLock() {
-  const existing = liveLock(config.dataDir)
+  // `ignoreSelf: true` because this process has not written a lock yet, so a lock
+  // that names our own pid is a leftover from a predecessor that died and whose
+  // pid we have been reissued - the container-restart case described in
+  // `liveLock`. Without it, a redeploy after an ungraceful stop could never start.
+  const existing = liveLock(config.dataDir, { ignoreSelf: true })
   if (existing) {
     throw new Error(
       `Another server (pid ${existing.pid}) is already using ${config.dataDir}. ` +
@@ -90,6 +112,16 @@ async function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true
   server.log.info({ signal }, 'shutting down')
+
+  // Armed for the whole of the close, so a close that stalls still ends in an
+  // exit that has released the lock. See SHUTDOWN_DEADLINE_MS.
+  const deadline = setTimeout(() => {
+    server.log.error({ signal }, 'shutdown did not finish; exiting and releasing the lock')
+    releaseLock()
+    process.exit(1)
+  }, SHUTDOWN_DEADLINE_MS)
+  deadline.unref()
+
   try {
     await server.close()
     app.close()
@@ -97,6 +129,7 @@ async function shutdown(signal) {
     server.log.error({ err: error }, 'shutdown failed')
     process.exitCode = 1
   } finally {
+    clearTimeout(deadline)
     releaseLock()
   }
 }

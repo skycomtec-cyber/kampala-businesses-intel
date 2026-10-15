@@ -331,13 +331,24 @@ export function pruneBackups(directory, keep) {
  *
  * The pid is checked rather than trusted, because a lock file outlives a crash. A
  * pid that is not alive means the file is stale and the restore may proceed.
+ *
+ * `ignoreSelf` exists for the other caller. A process deciding whether it may
+ * *take* the lock has not written one yet, so a lock naming its own pid cannot be
+ * a different live process - it is a leftover from a process that died and whose
+ * pid was reissued, which a container's reset pid namespace makes ordinary rather
+ * than rare (a fresh container hands `node` a small pid like 7 on every start).
+ * Such a caller passes `ignoreSelf` and is not blocked by its own reused pid. A
+ * restore must not, because there its own pid means the caller itself holds the
+ * directory.
  */
-export function liveLock(dataDir) {
+export function liveLock(dataDir, { ignoreSelf = false } = {}) {
   const lockFile = path.join(dataDir, '.lock')
   if (!fs.existsSync(lockFile)) return null
 
   const pid = Number.parseInt(fs.readFileSync(lockFile, 'utf8').trim(), 10)
   if (!Number.isInteger(pid) || pid <= 0) return null
+
+  if (ignoreSelf && pid === process.pid) return null
 
   try {
     // Signal 0 tests for existence without sending anything. It is the only

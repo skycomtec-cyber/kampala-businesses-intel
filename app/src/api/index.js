@@ -82,6 +82,14 @@ export async function buildApi({ app, config, logger = true, web = true }) {
       // browser should not be answered with a 404 from a machine-generated link.
       ignoreTrailingSlash: true,
     },
+    // Destroy the sockets on close instead of waiting for keep-alive connections
+    // to go idle. Without this, `server.close()` can sit for as long as a client
+    // holds a connection open, and a shutdown that overruns the platform's grace
+    // period is SIGKILLed - which leaves the data directory's lock file behind and
+    // is the whole reason src/server.js now carries a shutdown deadline. A request
+    // already in flight is cut off rather than finished, which is the right trade
+    // on a deploy: the alternative is the next instance refusing to start.
+    forceCloseConnections: true,
     // Fastify's default is to quietly delete any property a schema does not
     // declare, which turns every `additionalProperties: false` in this codebase
     // into decoration: a misspelled filter or a `role` sent to the sign-in

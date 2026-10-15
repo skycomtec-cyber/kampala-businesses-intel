@@ -345,6 +345,20 @@ test('restoring refuses while a server is holding the directory', async (t) => {
   )
 })
 
+test('a lock naming our own pid does not block a start', async (t) => {
+  // The container case: a process killed before it released the lock leaves `.lock`
+  // holding pid 7, and the fresh container hands `node` pid 7 again. A starter that
+  // read that as "another server is running" would refuse to start, turning one
+  // ungraceful stop into an outage that never clears on its own - which is what
+  // `ignoreSelf` prevents. A restore is the opposite: there the caller's own pid in
+  // the lock means the caller itself holds the directory, so it must still refuse.
+  const dataDir = freshDataDir(t)
+  fs.writeFileSync(path.join(dataDir, '.lock'), `${process.pid}\n`)
+
+  assert.equal(liveLock(dataDir, { ignoreSelf: true }), null, 'the starter is not blocked')
+  assert.equal(liveLock(dataDir).pid, process.pid, 'the restore still sees it')
+})
+
 test('a restore invalidates every existing session', async (t) => {
   // Deliberate, and the reasoning is in src/db/backup.js: keeping the old secret
   // would leave a session signed before the incident still signed after it, which
