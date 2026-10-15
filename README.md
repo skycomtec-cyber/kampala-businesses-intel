@@ -149,6 +149,11 @@ Anything already in the environment wins over `.env`, so a systemd `EnvironmentF
 example and `src/config.js` agree in both directions, so a variable added to one and not the other
 fails CI rather than being silently ignored.
 
+`.env.production.example` is the counterpart for a host that other people can reach. It names only
+the values worth changing once the install is public - `NODE_ENV`, the proxy setting, the session
+secret, and the privacy windows - and is written to be dropped in as a root-owned systemd
+`EnvironmentFile`. A value it does not list keeps its `.env.example` default.
+
 The ones that matter most:
 
 | Variable | Default | What it does |
