@@ -326,6 +326,8 @@ what it could not make sense of, with the line number for every row it rejected.
 npm run import -- businesses.csv --dry-run    # report only, writes nothing
 npm run import -- businesses.csv              # import
 npm run import -- businesses.csv --source field-survey-2026-09
+# attribute the file to a registered source: opens a run and writes provenance
+npm run import -- businesses.csv --source-key nakawa-field-survey --batch 2026-10
 cat businesses.csv | npm run import -- -      # read from stdin
 ```
 
@@ -349,7 +351,8 @@ platform's own conservative default, so a three-column file still imports.
 | `services`, `skills` | Separated by `,`, `;` or `\|`. A name that itself contains a comma has to use a semicolon or a pipe: splitting happens after the cell is read, so quoting does not protect it. |
 | `founded_year` | 1800 to 2100. |
 | `status`, `verification_state`, `capability_level` | Omit these and the listing arrives as a draft awaiting verification. Setting `status=active` does not make it public while it is unverified. |
-| `source` | Recorded on the listing, so you can tell which sheet it came from. |
+| `source` | Recorded on the listing, so you can tell which sheet it came from. Free text. Use `--source-key` instead when you want a registered source. |
+| `external_ref` | The source's own identifier for this row. With `--source-key` it becomes the idempotency key for provenance and the reference a later harvest is reconciled against, so give it one whenever the source has one. |
 
 Header names are matched loosely: `Phone Number`, `phone_number` and `phoneNumber` are the same
 column. A column the platform does not recognise is ignored rather than treated as an error. Quoted
@@ -376,11 +379,13 @@ becomes public when somebody makes that decision, not when a spreadsheet lands.
 existing listing on a contact point, or, if it has no contact details at all, on the same name in the
 same location. Everything else is a separate business, because two real traders can share a name.
 
-**It does not record where the row came from.** A file can name a source in a column, and that name
-lands in the legacy free-text `business.source_id`. The controlled reference the review pipeline reads,
-`business.catalogue_source_id`, stays null, so a listing imported from a file cannot answer "who
-published this?" on the page that shows its provenance. See
-[Where a record's provenance comes from](#where-a-records-provenance-comes-from).
+**It does not record where the row came from, unless you say who it came from.** A file named in a
+column still lands in the legacy free-text `business.source_id`, which is only a label. To record an
+origin that the review pipeline can read, attribute the file to a registered source with
+`--source-key`: every listing the file creates then gets a `record_provenance` row, the listing's
+`business.catalogue_source_id` is set, and both happen inside the listing's own transaction. See
+[Where a record's provenance comes from](#where-a-records-provenance-comes-from) and
+[Harvest runs and reconciliation](#harvest-runs-and-reconciliation).
 
 ### Fixing what a file gets wrong
 
@@ -455,24 +460,37 @@ payload nobody has read cannot create a hundred listings by accident.
 curl -sS -X POST http://127.0.0.1:4310/api/v1/admin/imports/businesses \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d "$(jq -Rn --rawfile csv businesses.csv '{csv: $csv}')"
+
+# the same file, attributed to a registered source (records a run; see below)
+curl -sS -X POST http://127.0.0.1:4310/api/v1/admin/imports/businesses \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "$(jq -Rn --rawfile csv businesses.csv '{csv: $csv, dryRun: false, sourceKey: "nakawa-field-survey"}')"
 ```
 
 `GET /api/v1/admin/imports/businesses/schema` returns the column contract as JSON, so a client does
-not have to parse this page.
+not have to parse this page. The identity of the source is `sourceKey`, not `sourceId`: `sourceId` is
+the legacy free-text label, `sourceKey` names a source in the register and is the one that makes the
+import accountable.
 
 ### Where a record's provenance comes from
 
-Two different things write a listing, and only one of them records its origin.
+Two paths write a listing from a file, and a third writes it one record at a time.
 
-`POST /api/v1/admin/catalogue/intake` is the controlled path. It takes a registered source key, the
-record and the evidence string, and in one transaction it writes the business, its `record_provenance`
-row and an intake event. It creates the record, so it cannot be used to explain one that already
-exists. The CSV importer is the other path, and it writes no provenance at all: a source named in a
-column is free text in `business.source_id`, `business.catalogue_source_id` stays null, and nothing
-records which page any given phone number was read off. There is no HTTP route for closing that gap,
-because quietly attaching an origin to a record is not something a client should be able to do — so it
-is a repository call, `catalogue.recordProvenance(businessId, { sourceId, externalRef, evidence,
-notes, attachToBusiness })`, and a script is how it gets run.
+`POST /api/v1/admin/catalogue/intake` is the controlled path for a single record. It takes a
+registered source key, the record and the evidence string, and in one transaction it writes the
+business, its `record_provenance` row and an intake event. It creates the record, so it cannot be used
+to explain one that already exists.
+
+The CSV importer is the file path, and it now records its origin too, when it is told to. Pass
+`--source-key` (or the API's `sourceKey`) and, for every row it creates, the listing, its
+`record_provenance` row and its `business.catalogue_source_id` are written inside the listing's own
+transaction, with the file's `external_ref` as the identity the claim hangs on. Without a key the
+importer behaves exactly as it did before: a source named in a column is free text in
+`business.source_id`, `business.catalogue_source_id` stays null, and nothing records which page any
+given phone number was read off. There is still no HTTP route for attaching an origin to a record that
+already exists, because quietly attributing an origin is not something a client should be able to do —
+so that remains a repository call, `catalogue.recordProvenance(businessId, { sourceId, externalRef,
+evidence, notes, attachToBusiness })`, and a script is how it gets run.
 
 `app/scripts/backfill-provenance.mjs` is that script, written for the five listings imported from pages
 harvested off KampalaBiz.Space. It does three things and stops there:
@@ -500,7 +518,52 @@ It is idempotent, and that is the property worth insisting on: `recordProvenance
 skipped instead of duplicated. Running it twice writes nothing the second time, so it is safe to point
 at a database somebody has been working in.
 
-### Reviewing what a file imported
+### Harvest runs and reconciliation
+
+A file is a batch, and a batch needs one record. Attributing an import to a registered source with
+`--source-key` opens a **harvest run**: one row in `catalogue_import_run` holding the source, the
+batch name, the file's name and a SHA-256 of its contents, who ran it, when it started and finished,
+and what it did — total, created, skipped, failed. Every `record_provenance` row the run writes points
+back at it, so months later a listing can still be traced to the file it arrived in.
+
+A run that never finishes is stored as `running`, and a run that blows up after sixty rows is stored
+as `failed` with the counts it managed. That is deliberate: "the import died halfway" and "the file was
+never handed over" must not look the same.
+
+```bash
+npm run import -- nakawa.csv --source-key nakawa-field-survey --batch 2026-10
+# Run 0f3a... for source "nakawa-field-survey" (completed).
+# 1 reference this source has described before was not in this file:
+#   NFS-002                     Nakawa Tailors  [pending_review]
+```
+
+**Reconciliation is a report, not a change.** After a run, the platform lists the references this
+source has been described before that the run did not mention. A record missing from one file means
+the file changed — a source that paginates, or was fetched on a bad day — so nothing is unpublished,
+no state is touched and no provenance is removed. The point is to notice that a file which used to
+carry four hundred businesses now carries three hundred and ninety, and to let a person decide what
+that means.
+
+Over HTTP the same thing is two reads:
+
+```bash
+# list runs (import:read)
+curl -sS -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:4310/api/v1/admin/catalogue/imports'
+# data[].sourceName, status, batchRef, filename, total, createdCount, skippedCount, failedCount
+
+# one run, with the references it did not repeat (import:read)
+curl -sS -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:4310/api/v1/admin/catalogue/imports/$RUN_ID"
+# data.run, data.source, data.runRefCount, data.stale[], data.staleCount
+# data.stale[].externalRef, businessName, businessSlug, verificationState
+```
+
+The import endpoint accepts it too: add `sourceKey` (plus optional `batchRef`, `filename`, `evidence`)
+to `POST /api/v1/admin/imports/businesses` and the response carries `data.run` and
+`data.reconciliation`. An unregistered `sourceKey` is refused with `404` and opens no run.
+
+In a browser, **Harvest runs** (`/harvest.html`) lists the runs and lets you open one to read its
+reconciliation. It is read-only by construction.
+
 
 An import is the only thing here that creates listings in hundreds, and every one of them arrives
 unverified and with its contact points private, because nobody has decided they are real. Reviewing
@@ -591,7 +654,7 @@ closures it causes itself and spends that count instead of settling on it.
 
 ### The pages, and what they share
 
-Fourteen static files, no build step, no framework, served from the same origin as the api and linked
+Fifteen static files, no build step, no framework, served from the same origin as the api and linked
 from the same topbar, so any of them can be bookmarked or reloaded on its own:
 
 | Page | What it is for |
@@ -610,6 +673,7 @@ from the same topbar, so any of them can be bookmarked or reloaded on its own:
 | `/reviews.html` | Review moderation |
 | `/photos.html` | Photo moderation |
 | `/lab.html` | The laboratory: the engine's own view, on the operator's side of the privacy floor |
+| `/harvest.html` | Harvest runs: what each source file did, and which of a source's references it stopped repeating. Read-only |
 
 `/insights.html` is the other half of `/directory.html`, and reads the same
 `/api/v1/insights/opportunities` the api documents. Its floor toggle is the page form of
@@ -1007,6 +1071,8 @@ it, or change its status, review state or capability level.
 | `POST` | `/api/v1/admin/catalogue/intake` | `business:write` |
 | `POST` | `/api/v1/admin/catalogue/records/:id/review` | `business:verify` (actions: `claim`, `submit`, `verify`, `approve`*, `unapprove`*, `reject`, `archive`, `reopen`; *requires `business:publish`) |
 | `GET` | `/api/v1/admin/catalogue/records/:id/history` | `business:read` |
+| `GET` | `/api/v1/admin/catalogue/imports` | `import:read` (harvest runs, newest first; `?sourceId=`, `?status=`, `?limit=`, `?offset=`) |
+| `GET` | `/api/v1/admin/catalogue/imports/:id` | `import:read` (one run and its reconciliation; `data.stale[]` is read-only) |
 | `GET` | `/api/v1/admin/claims` | `business:read` (`?status=`, `?businessId=`, `?search=`, `?sort=`) |
 | `GET` | `/api/v1/admin/claims/:id` | `business:read` |
 | `POST` | `/api/v1/admin/claims/:id/decide` | `business:verify`, plus `user:write` for `grant`/`revoke` (a grant creates an account). Body `decision` (`grant`, `reject`, `revoke`); `reason` required for reject and revoke. A grant returns the new `owner` and a one-time `passwordResetToken`. |
@@ -1392,7 +1458,7 @@ class of breakage entirely.
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
 │   │                         set-password, import, backup, restore, and the one-off repairs
 │   │                         — backfill-provenance, add-sources
-│   ├── test/                 246 tests, no network, temporary folders only
+│   ├── test/                 254 tests, no network, temporary folders only
 │   └── web/                  the website pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
@@ -1408,6 +1474,7 @@ class of breakage entirely.
 │       ├── lab.html              the laboratory: the findings the floor withholds
 │       ├── reviews.html          review moderation
 │       ├── photos.html           photo moderation
+│       ├── harvest.html          harvest runs, and what a run did not repeat
 │       ├── theme.css             every shared token and component, light and dark
 │       ├── theme.js              the appearance toggle, and nothing else
 │       ├── sheet.js              the one confirmation box, reused by every page that asks

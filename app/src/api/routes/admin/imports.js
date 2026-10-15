@@ -19,6 +19,16 @@ const importBodySchema = {
     csv: { type: 'string', minLength: 1, maxLength: 5000000 },
     dryRun: { type: 'boolean' },
     sourceId: { type: 'string', maxLength: 120 },
+    sourceKey: {
+      type: 'string',
+      maxLength: 80,
+      description:
+        'A registered catalogue source. When set, the import is recorded as a run ' +
+        'and every created listing gets provenance back to this source.',
+    },
+    batchRef: { type: 'string', maxLength: 120 },
+    filename: { type: 'string', maxLength: 300 },
+    evidence: { type: 'string', maxLength: 500 },
   },
 }
 
@@ -56,12 +66,31 @@ export default async function adminImportRoutes(fastify, { app }) {
       schema: { body: importBodySchema },
     },
     async (request) => {
-      const { csv, dryRun = true } = request.body
+      const { csv, dryRun = true, batchRef = null, filename = null, evidence = null } =
+        request.body
       const sourceId = toText(request.body.sourceId, { maxLength: 120 }) ?? 'import:csv'
+      const sourceKey = toText(request.body.sourceKey, { maxLength: 80 })
 
-      const { summary, rows, unresolved } = importBusinessesFromCsv(app, csv, { dryRun, sourceId })
+      const { summary, rows, unresolved, source, run, reconciliation } = importBusinessesFromCsv(
+        app,
+        csv,
+        {
+          dryRun,
+          sourceId,
+          sourceKey,
+          batchRef,
+          filename,
+          evidence,
+          // The run records who fed it, so a source's history names a person and
+          // not only a file. A dry run writes no run, so this is simply ignored.
+          actor: { id: request.user.id, role: request.user.role },
+        },
+      )
 
-      return single({ summary, rows, unresolved }, { dryRun, sourceId })
+      return single(
+        { summary, rows, unresolved, run, reconciliation },
+        { dryRun, sourceId, sourceKey: source?.key ?? null },
+      )
     },
   )
 }

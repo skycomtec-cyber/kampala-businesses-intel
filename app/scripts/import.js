@@ -16,6 +16,7 @@
  */
 
 import fs from 'node:fs'
+import path from 'node:path'
 import process from 'node:process'
 
 import { loadConfig } from '../src/config.js'
@@ -25,21 +26,42 @@ import { importBusinessesFromCsv } from '../src/import/index.js'
 const USAGE = `Usage: npm run import -- <file.csv|-> [options]
 
 Options:
-  --dry-run        Validate and report without writing anything.
-  --source <id>    Recorded on every created listing (default: import:csv).
-  --quiet          Only print the summary.
-  --help           Show this message.
+  --dry-run            Validate and report without writing anything.
+  --source <id>        Legacy origin text recorded on every created listing
+                       (default: import:csv).
+  --source-key <key>   Attribute this file to a registered catalogue source.
+                       Records a harvest run and writes provenance for every
+                       created listing, and reports which of the source's known
+                       references this file did not repeat.
+  --batch <ref>        A name for this batch, e.g. a month. Only meaningful
+                       with --source-key.
+  --evidence <text>    What makes the file checkable, e.g. a url. Only
+                       meaningful with --source-key.
+  --quiet              Only print the summary.
+  --help               Show this message.
 
 Use "-" as the file to read the CSV from stdin.`
 
 function parseArgs(argv) {
-  const options = { file: null, dryRun: false, sourceId: 'import:csv', quiet: false, help: false }
+  const options = {
+    file: null,
+    dryRun: false,
+    sourceId: 'import:csv',
+    sourceKey: null,
+    batchRef: null,
+    evidence: null,
+    quiet: false,
+    help: false,
+  }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--dry-run') options.dryRun = true
     else if (arg === '--quiet') options.quiet = true
     else if (arg === '--help' || arg === '-h') options.help = true
     else if (arg === '--source') options.sourceId = argv[++index] ?? options.sourceId
+    else if (arg === '--source-key') options.sourceKey = argv[++index] ?? null
+    else if (arg === '--batch') options.batchRef = argv[++index] ?? null
+    else if (arg === '--evidence') options.evidence = argv[++index] ?? null
     else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}.\n\n${USAGE}`)
     else if (options.file === null) options.file = arg
     else throw new Error(`Unexpected argument ${arg}.\n\n${USAGE}`)
@@ -92,16 +114,24 @@ try {
   }
 
   const marker = { created: 'created ', skipped: 'skipped ', failed: 'FAILED ' }
-  const { summary, rows, unresolved } = importBusinessesFromCsv(app, text, {
-    dryRun: options.dryRun,
-    sourceId: options.sourceId,
-    onRow: (row) => {
-      log(
-        `  line ${String(row.line).padStart(4)}  ${marker[row.outcome] ?? row.outcome}` +
-          `  ${row.name || '(no name)'}${row.detail ? `  -  ${row.detail}` : ''}`,
-      )
+  const { summary, rows, unresolved, source, run, reconciliation } = importBusinessesFromCsv(
+    app,
+    text,
+    {
+      dryRun: options.dryRun,
+      sourceId: options.sourceId,
+      sourceKey: options.sourceKey,
+      batchRef: options.batchRef,
+      filename: options.file === '-' ? null : path.basename(options.file),
+      evidence: options.evidence,
+      onRow: (row) => {
+        log(
+          `  line ${String(row.line).padStart(4)}  ${marker[row.outcome] ?? row.outcome}` +
+            `  ${row.name || '(no name)'}${row.detail ? `  -  ${row.detail}` : ''}`,
+        )
+      },
     },
-  })
+  )
 
   const verb = options.dryRun ? 'would be created' : 'created'
   log('')
@@ -109,6 +139,29 @@ try {
     `${summary.total} row(s): ${summary.created} ${verb}, ${summary.skipped} skipped, ` +
       `${summary.failed} failed.`,
   )
+
+  if (source && run) {
+    log('')
+    log(`Run ${run.id} for source "${source.key}" (${run.status}).`)
+    if (reconciliation && reconciliation.staleCount > 0) {
+      log('')
+      log(
+        `${reconciliation.staleCount} reference(s) this source has described before were not ` +
+          'in this file:',
+      )
+      for (const item of reconciliation.stale.slice(0, 20)) {
+        log(`  ${String(item.externalRef).padEnd(24)}  ${item.businessName}  [${item.verificationState}]`)
+      }
+      if (reconciliation.staleCount > 20) {
+        log(`  ... and ${reconciliation.staleCount - 20} more (see GET /admin/catalogue/imports/${run.id}).`)
+      }
+      log('')
+      log(
+        'This is a report, not a change: nothing was unpublished. A reference missing from ' +
+          'one file means the file changed, not that the business has closed.',
+      )
+    }
+  }
 
   if (unresolved.length > 0) {
     log('')

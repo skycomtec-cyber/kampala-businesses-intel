@@ -53,7 +53,7 @@ export async function metaRoutes(fastify, { config, app }) {
     async () =>
       single({
         name: 'Kampala Businesses Intelligence Platform',
-        phase: 2,
+        phase: 3,
         engine: 'kampala-data-engine',
         apiVersion: 'v1',
         environment: config.env,

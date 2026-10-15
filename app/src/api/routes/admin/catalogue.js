@@ -288,4 +288,60 @@ export default async function adminCatalogueRoutes(fastify, { app }) {
       )
     },
   )
+
+  /**
+   * Harvest runs: one row per ingestion of a source's file.
+   *
+   * The list answers "what have we fed this directory, and did it work". The
+   * single-run view adds the reconciliation: the references this source has
+   * described before that this run did not mention. That report is the point of
+   * the whole phase — it is how an operator notices that a file used to carry four
+   * hundred businesses and now carries three hundred and ninety — and it changes
+   * nothing by design, because a record missing from a file is evidence the file
+   * changed, not evidence the business closed.
+   */
+  fastify.get(
+    '/admin/catalogue/imports',
+    {
+      schema: {
+        summary: 'Ingestion runs, most recent first.',
+        tags: ['admin'],
+        querystring: {
+          type: 'object',
+          properties: {
+            sourceId: { type: 'string', pattern: uuidPattern },
+            status: { type: 'string', enum: ['running', 'completed', 'failed'] },
+            limit: { type: 'integer', minimum: 1, maximum: 100 },
+            offset: { type: 'integer', minimum: 0 },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: fastify.requireCapability('import:read'),
+    },
+    async (request) => {
+      const page = toPage(request.query)
+      return paged(
+        app.catalogue.listRuns({
+          sourceId: request.query.sourceId ?? null,
+          status: request.query.status ?? null,
+          ...page,
+        }),
+        page,
+      )
+    },
+  )
+
+  fastify.get(
+    '/admin/catalogue/imports/:id',
+    {
+      schema: {
+        summary: 'One run, with the references this source described before that it did not repeat.',
+        tags: ['admin'],
+        params: idParamSchema,
+      },
+      preHandler: fastify.requireCapability('import:read'),
+    },
+    async (request) => single(app.catalogue.reconcileRun(request.params.id)),
+  )
 }

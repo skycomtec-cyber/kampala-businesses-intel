@@ -1394,6 +1394,112 @@ test('the catalogue is administered over http, and trust is a decision', async (
 })
 
 /**
+ * A file harvested against a registered source, end to end through the router.
+ *
+ * This is the shape the phase is for: an operator registers a source, hands the
+ * directory a file, and then needs the api to be able to say what the file did
+ * and which of that source's references it stopped mentioning. Asserted here
+ * because the run is stored rather than merely reported, so a client that never
+ * sees the import response can still ask about it afterwards.
+ */
+test('a file imported against a source records a run that the api can list and reconcile', async (t) => {
+  const ctx = await freshServer()
+  t.after(() => ctx.cleanup())
+
+  const { headers } = await signIn(ctx, { email: 'harvester@kampala.test' })
+
+  const created = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/catalogue/sources',
+    headers,
+    payload: { name: 'Nakawa Field Survey', type: 'manual', trustLevel: 'unverified' },
+  })
+  assert.equal(created.statusCode, 201, created.body)
+  const source = created.json().data
+
+  const header = 'name,category,location,phone,external_ref'
+  const line = (name, ref, phone) =>
+    `${name},services/beauty-and-personal-care/barbering,Kampala/Nakawa Division,${phone},${ref}`
+
+  const first = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/imports/businesses',
+    headers,
+    payload: {
+      csv: [header, line('Nakawa Hair Studio', 'NFS-001', '0772 111 222'), line('Kintu Road Barbers', 'NFS-002', '0773 111 222')].join('\n'),
+      dryRun: false,
+      sourceKey: source.key,
+      batchRef: '2026-10',
+      filename: 'nakawa.csv',
+    },
+  })
+  assert.equal(first.statusCode, 200, first.body)
+  const run = first.json().data.run
+  assert.ok(run, 'the import recorded a run')
+  assert.equal(run.status, 'completed')
+  assert.equal(run.sourceId, source.id)
+  assert.equal(run.createdCount, 2)
+
+  // The run is readable on its own afterwards, which is what lets a client that
+  // never saw the import response catch up.
+  const listed = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/admin/catalogue/imports',
+    headers,
+  })
+  assert.equal(listed.statusCode, 200, listed.body)
+  assert.equal(listed.json().meta.total, 1)
+  assert.equal(listed.json().data[0].id, run.id)
+
+  // Second file: one reference is dropped.
+  const second = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/imports/businesses',
+    headers,
+    payload: {
+      csv: [header, line('Nakawa Hair Studio', 'NFS-001', '0772 111 222')].join('\n'),
+      dryRun: false,
+      sourceKey: source.key,
+    },
+  })
+  assert.equal(second.statusCode, 200, second.body)
+  assert.equal(second.json().data.reconciliation.staleCount, 1)
+
+  // And the same reconciliation is served by reading the run, unchanged.
+  const detail = await ctx.server.inject({
+    method: 'GET',
+    url: `/api/v1/admin/catalogue/imports/${second.json().data.run.id}`,
+    headers,
+  })
+  assert.equal(detail.statusCode, 200, detail.body)
+  assert.equal(detail.json().data.staleCount, 1)
+  assert.equal(detail.json().data.stale[0].externalRef, 'NFS-002')
+
+  // A run nobody has permission to read is refused, not silently emptied.
+  const anonymous = await ctx.server.inject({
+    method: 'GET',
+    url: '/api/v1/admin/catalogue/imports',
+  })
+  assert.equal(anonymous.statusCode, 401)
+
+  // An unknown source key is refused by the importer, so the api answers with a
+  // not found rather than importing the file attributed to nothing.
+  const bad = await ctx.server.inject({
+    method: 'POST',
+    url: '/api/v1/admin/imports/businesses',
+    headers,
+    payload: { csv: [header, line('Nowhere Shop', 'NFS-999', '0774 111 222')].join('\n'), dryRun: false, sourceKey: 'no-such-source' },
+  })
+  assert.equal(bad.statusCode, 404, bad.body)
+  assert.equal(
+    (await ctx.server.inject({ method: 'GET', url: '/api/v1/admin/catalogue/imports', headers })).json()
+      .meta.total,
+    2,
+    'the refused import opened no run',
+  )
+})
+
+/**
  * The password paths, which had no coverage at all.
  *
  * `changePassword` and `setPassword` both bound `@id` in their UPDATE while the

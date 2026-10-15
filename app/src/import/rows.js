@@ -48,6 +48,7 @@ export const IMPORT_COLUMNS = Object.freeze({
     'verification_state',
     'capability_level',
     'source',
+    'external_ref',
   ],
 })
 
@@ -335,7 +336,7 @@ export function buildImportRow(app, row) {
     })
   }
 
-  return { input, contacts, services, category, location }
+  return { input, contacts, services, category, location, externalRef: clean(row.external_ref) }
 }
 
 /**

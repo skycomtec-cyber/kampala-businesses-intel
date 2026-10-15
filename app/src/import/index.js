@@ -23,10 +23,11 @@
  */
 
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
 
 import { parseCsv, toRecords, splitList } from './csv.js'
 import { buildImportRow, resolveCategory, resolveLocation, IMPORT_COLUMNS } from './rows.js'
-import { ValidationError, DomainError } from '../core/errors.js'
+import { ValidationError, DomainError, ConflictError } from '../core/errors.js'
 import { canonicalContactValue } from '../core/business.js'
 import { slugify } from '../core/identifiers.js'
 
@@ -41,16 +42,55 @@ const OUTCOMES = Object.freeze(['created', 'skipped', 'updated', 'failed'])
 /**
  * Imports businesses from CSV text.
  *
+ * `sourceId` is the legacy free-text origin column and is kept because listings
+ * written before the catalogue existed carry it. `sourceKey` names a registered
+ * catalogue source instead, and it changes what the import records: the run is
+ * opened and closed around the file, and every listing the run creates — plus
+ * every row it recognises as one this source has described before — gets a
+ * provenance row tied back to that source and that run. Without a key the import
+ * behaves exactly as it always has, which is what keeps every existing file and
+ * caller working.
+ *
  * @param {object} app the open database handle and repositories
  * @param {string} text the file contents
  * @param {object} [options]
  * @param {boolean} [options.dryRun] validate and report without writing
- * @param {string} [options.sourceId] recorded on every created listing
+ * @param {string} [options.sourceId] legacy origin text recorded on created listings
+ * @param {string} [options.sourceKey] registered source to attribute the import to
+ * @param {string} [options.batchRef] a name for this batch, e.g. a month
+ * @param {string} [options.filename] the file this text came from, for the run list
+ * @param {string} [options.contentSha256] overrides the hash computed from the text
+ * @param {object} [options.actor] the user performing the import, for provenance
+ * @param {string} [options.evidence] what makes the file checkable, e.g. a url
+ * @param {string} [options.notes] a note for the run record
  * @param {(progress: object) => void} [options.onRow] called per row, for a CLI
- * @returns {{ summary: object, rows: object[] }}
+ * @returns {{ summary: object, rows: object[], source: object|null, run: object|null, reconciliation: object|null }}
  */
 export function importBusinessesFromCsv(app, text, options = {}) {
-  const { dryRun = false, sourceId = 'import:csv', onRow = null } = options
+  const {
+    dryRun = false,
+    sourceId = 'import:csv',
+    sourceKey = null,
+    batchRef = null,
+    filename = null,
+    contentSha256 = null,
+    actor = null,
+    evidence = null,
+    notes = null,
+    onRow = null,
+  } = options
+
+  // A key that names no source, or one that has been retired, is refused before a
+  // single row is read. Attributing a file to a source the catalogue does not know
+  // is precisely the uncountable state this phase exists to remove, and a retired
+  // source is one somebody decided should stop supplying records.
+  const source = sourceKey ? app.catalogue.requireSourceByKey(sourceKey) : null
+  if (source && !source.isActive) {
+    throw new ConflictError(
+      `Catalogue source "${source.key}" is retired, so it cannot be fed new records.`,
+      { source: source.key },
+    )
+  }
 
   requireReferenceData(app)
 
@@ -67,6 +107,25 @@ export function importBusinessesFromCsv(app, text, options = {}) {
   }
   const rows = []
 
+  // The run opens before the first row and closes after the last, and a dry run
+  // never opens one: a run is a claim that ingestion happened, and a dry run is
+  // the rehearsal that proves nothing did.
+  const contentHash =
+    source === null
+      ? null
+      : contentSha256 ?? createHash('sha256').update(text, 'utf8').digest('hex')
+  const run =
+    source && !dryRun
+      ? app.catalogue.beginRun({
+          sourceId: source.id,
+          batchRef,
+          filename,
+          contentSha256: contentHash,
+          actor,
+          notes,
+        })
+      : null
+
   // Distinct places and categories the file referred to that the reference data
   // does not have, with every line that wanted them. A 400 row survey of an area
   // nobody has mapped yet fails on a handful of wards, not 400 different ones,
@@ -82,58 +141,130 @@ export function importBusinessesFromCsv(app, text, options = {}) {
   )
   const seenContacts = new Map()
 
-  for (const [index, record] of records.entries()) {
-    const line = lineOf[index]
-    const outcome = { line, name: record.name ?? '', outcome: null, detail: null, id: null }
+  try {
+    for (const [index, record] of records.entries()) {
+      const line = lineOf[index]
+      const outcome = { line, name: record.name ?? '', outcome: null, detail: null, id: null }
 
-    try {
-      const { input, contacts, services } = buildImportRow(app, record)
-      if (sourceId && !record.source) input.sourceId = sourceId
+      try {
+        const { input, contacts, services, externalRef } = buildImportRow(app, record)
+        const effectiveSourceId = source ? source.key : sourceId
+        if (effectiveSourceId && !record.source) input.sourceId = effectiveSourceId
+        // Set here as well as by provenance, so the listing carries its source in
+        // the same row even if the provenance write were ever skipped.
+        if (source) input.catalogueSourceId = source.id
 
-      const duplicate = findDuplicate(app, { input, contacts, seenContacts, seenNames })
-      if (duplicate) {
-        outcome.outcome = 'skipped'
-        outcome.detail = duplicate.reason
-        outcome.id = duplicate.business.id
-        summary.skipped += 1
-      } else if (dryRun) {
-        // In a dry run the row is counted as it would be created, but nothing is
-        // written, and the name is still reserved so that a file with two
-        // identical rows reports one created and one skipped.
-        outcome.outcome = 'created'
-        outcome.detail = 'would create'
-        summary.created += 1
-        reserve(seenNames, seenContacts, input, contacts)
-      } else {
-        const created = writeBusiness(app, input, contacts, services)
-        outcome.outcome = 'created'
-        outcome.id = created.id
-        outcome.detail = created.slug
-        summary.created += 1
-        reserve(seenNames, seenContacts, input, contacts)
-      }
-    } catch (error) {
-      if (error instanceof DomainError || error instanceof ValidationError) {
-        outcome.outcome = 'failed'
-        outcome.detail = error.message
-        summary.failed += 1
-        if (error.details?.reference) {
-          noteUnresolved(unresolved, error.details.reference, line)
+        const duplicate = findDuplicate(app, { input, contacts, seenContacts, seenNames })
+        if (duplicate) {
+          outcome.outcome = 'skipped'
+          outcome.detail = duplicate.reason
+          outcome.id = duplicate.business.id
+          summary.skipped += 1
+          // A skipped row the file identified by reference is still this source
+          // describing that business, so the reference is recorded as a secondary
+          // origin — attachToBusiness is false, so the record keeps whichever
+          // source first claimed it. This is what lets a replayed file count as
+          // having *seen* those references, which is the whole basis of the
+          // staleness report: a re-run that skips everything is a run in which
+          // nothing went stale.
+          if (source && externalRef && run) {
+            app.catalogue.recordProvenance(duplicate.business.id, {
+              sourceId: source.id,
+              externalRef,
+              batchRef,
+              evidence,
+              notes,
+              runId: run.id,
+              importedBy: actor?.id ?? null,
+              attachToBusiness: false,
+            })
+          }
+        } else if (dryRun) {
+          // In a dry run the row is counted as it would be created, but nothing is
+          // written, and the name is still reserved so that a file with two
+          // identical rows reports one created and one skipped.
+          outcome.outcome = 'created'
+          outcome.detail = 'would create'
+          summary.created += 1
+          reserve(seenNames, seenContacts, input, contacts)
+        } else {
+          const created = writeBusiness(
+            app,
+            input,
+            contacts,
+            services,
+            source
+              ? {
+                  sourceId: source.id,
+                  externalRef,
+                  batchRef,
+                  evidence,
+                  notes,
+                  runId: run?.id ?? null,
+                  importedBy: actor?.id ?? null,
+                }
+              : null,
+          )
+          outcome.outcome = 'created'
+          outcome.id = created.id
+          outcome.detail = created.slug
+          summary.created += 1
+          reserve(seenNames, seenContacts, input, contacts)
         }
-      } else {
-        // An unexpected failure is still contained to its row, but it is not
-        // disguised as a data problem: the operator needs to know it is a bug.
-        outcome.outcome = 'failed'
-        outcome.detail = `Unexpected: ${error.message}`
-        summary.failed += 1
+      } catch (error) {
+        if (error instanceof DomainError || error instanceof ValidationError) {
+          outcome.outcome = 'failed'
+          outcome.detail = error.message
+          summary.failed += 1
+          if (error.details?.reference) {
+            noteUnresolved(unresolved, error.details.reference, line)
+          }
+        } else {
+          // An unexpected failure is still contained to its row, but it is not
+          // disguised as a data problem: the operator needs to know it is a bug.
+          outcome.outcome = 'failed'
+          outcome.detail = `Unexpected: ${error.message}`
+          summary.failed += 1
+        }
       }
-    }
 
-    rows.push(outcome)
-    onRow?.(outcome)
+      rows.push(outcome)
+      onRow?.(outcome)
+    }
+  } catch (error) {
+    // Only an error the per-row handler cannot contain reaches here. The run is
+    // closed as failed with what it managed before it stopped, because "the
+    // import died after sixty rows" is a fact the next operator needs.
+    if (run) closeRun(app, run.id, summary, 'failed', error.message)
+    throw error
   }
 
-  return { summary, rows, unresolved: listUnresolved(unresolved) }
+  let reconciliation = null
+  if (run) {
+    closeRun(app, run.id, summary, 'completed')
+    reconciliation = app.catalogue.reconcileRun(run.id)
+  }
+
+  return {
+    summary,
+    rows,
+    unresolved: listUnresolved(unresolved),
+    source: source ?? null,
+    run: run ? app.catalogue.findRunById(run.id) : null,
+    reconciliation,
+  }
+}
+
+function closeRun(app, runId, summary, status, notes = null) {
+  app.catalogue.finishRun(runId, {
+    status,
+    total: summary.total,
+    created: summary.created,
+    updated: summary.updated,
+    skipped: summary.skipped,
+    failed: summary.failed,
+    notes,
+  })
 }
 
 /**
@@ -188,8 +319,13 @@ function requireReferenceData(app) {
  * rejected half way through would leave behind a listing with no contact
  * details, which reads in the directory exactly like a real business that has
  * no phone number.
+ *
+ * Provenance is written inside the same transaction when the import is attributed
+ * to a source, so the listing and the claim about where it came from either both
+ * exist or neither does. A record with no provenance is the uncountable state the
+ * catalogue is meant to make impossible.
  */
-function writeBusiness(app, input, contacts, services) {
+function writeBusiness(app, input, contacts, services, provenance = null) {
   const write = app.db.transaction(() => {
     const created = app.businesses.create(input)
     for (const contact of contacts) {
@@ -197,6 +333,9 @@ function writeBusiness(app, input, contacts, services) {
     }
     for (const name of services) {
       app.businesses.addService(created.id, { name })
+    }
+    if (provenance) {
+      app.catalogue.recordProvenance(created.id, provenance)
     }
     return created
   })

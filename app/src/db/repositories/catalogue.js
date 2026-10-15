@@ -112,10 +112,10 @@ export function createCatalogueRepository(db, deps = {}) {
   const insertProvenance = db.prepare(
     `INSERT INTO record_provenance (
        id, business_id, source_id, external_ref, batch_ref, evidence, notes,
-       imported_at, imported_by
+       imported_at, imported_by, run_id
      ) VALUES (
        @id, @businessId, @sourceId, @externalRef, @batchRef, @evidence, @notes,
-       @importedAt, @importedBy
+       @importedAt, @importedBy, @runId
      )`,
   )
   // The conflict target repeats the partial index's WHERE clause, because that is
@@ -124,10 +124,10 @@ export function createCatalogueRepository(db, deps = {}) {
   const upsertProvenance = db.prepare(
     `INSERT INTO record_provenance (
        id, business_id, source_id, external_ref, batch_ref, evidence, notes,
-       imported_at, imported_by
+       imported_at, imported_by, run_id
      ) VALUES (
        @id, @businessId, @sourceId, @externalRef, @batchRef, @evidence, @notes,
-       @importedAt, @importedBy
+       @importedAt, @importedBy, @runId
      )
      ON CONFLICT (source_id, external_ref) WHERE external_ref IS NOT NULL
      DO UPDATE SET
@@ -136,7 +136,8 @@ export function createCatalogueRepository(db, deps = {}) {
        evidence = excluded.evidence,
        notes = excluded.notes,
        imported_at = excluded.imported_at,
-       imported_by = excluded.imported_by`,
+       imported_by = excluded.imported_by,
+       run_id = excluded.run_id`,
   )
   const selectProvenanceByBusiness = db.prepare(
     `SELECT p.*, s.key AS source_key, s.name AS source_name, s.type AS source_type,
@@ -155,6 +156,80 @@ export function createCatalogueRepository(db, deps = {}) {
   const selectProvenanceIdentity = db.prepare(
     `SELECT * FROM record_provenance WHERE source_id = ? AND external_ref = ?`,
   )
+
+  /* Harvest runs ------------------------------------------------------------ */
+
+  const insertRun = db.prepare(
+    `INSERT INTO catalogue_import_run (
+       id, source_id, batch_ref, filename, content_sha256, actor_id,
+       status, notes, started_at
+     ) VALUES (
+       @id, @sourceId, @batchRef, @filename, @contentSha256, @actorId,
+       @status, @notes, @startedAt
+     )`,
+  )
+  const finishRun = db.prepare(
+    `UPDATE catalogue_import_run
+        SET status = @status,
+            total = @total,
+            created_count = @createdCount,
+            updated_count = @updatedCount,
+            skipped_count = @skippedCount,
+            failed_count = @failedCount,
+            notes = COALESCE(@notes, notes),
+            finished_at = @finishedAt
+      WHERE id = @id`,
+  )
+  const selectRunById = db.prepare(`SELECT * FROM catalogue_import_run WHERE id = ?`)
+  const selectLatestRunForSource = db.prepare(
+    `SELECT * FROM catalogue_import_run
+      WHERE source_id = ?
+      ORDER BY started_at DESC, rowid DESC
+      LIMIT 1`,
+  )
+  const selectRuns = db.prepare(
+    `SELECT r.*, s.key AS source_key, s.name AS source_name,
+            u.display_name AS actor_display_name
+       FROM catalogue_import_run r
+       JOIN catalogue_source s ON s.id = r.source_id
+       LEFT JOIN app_user u ON u.id = r.actor_id
+      WHERE (@sourceId IS NULL OR r.source_id = @sourceId)
+        AND (@status IS NULL OR r.status = @status)
+      ORDER BY r.started_at DESC, r.id DESC
+      LIMIT @limit OFFSET @offset`,
+  )
+  const countRuns = db.prepare(
+    `SELECT COUNT(*) AS total FROM catalogue_import_run
+      WHERE (@sourceId IS NULL OR source_id = @sourceId)
+        AND (@status IS NULL OR status = @status)`,
+  )
+  // The identity a run actually saw. Reconciliation is a set difference against
+  // this, so it is read here rather than reconstructed from the run's counts: the
+  // counts say how many rows arrived, not which ones.
+  const selectRunSeenRefs = db.prepare(
+    `SELECT external_ref FROM record_provenance
+      WHERE run_id = @runId AND external_ref IS NOT NULL`,
+  )
+  // A record this source has described before, that this run did not. `p.run_id IS
+  // NULL` is included on purpose: the records the source fed in before runs existed
+  // are exactly the ones most likely to have gone stale, and excluding them would
+  // make reconciliation blind to the backlog it was written for.
+  const selectStaleForRun = db.prepare(
+    `SELECT p.external_ref, p.batch_ref, p.imported_at, p.run_id,
+            b.id AS business_id, b.name AS business_name, b.slug AS business_slug,
+            b.verification_state
+       FROM record_provenance p
+       JOIN business b ON b.id = p.business_id
+      WHERE p.source_id = @sourceId
+        AND p.external_ref IS NOT NULL
+        AND (p.run_id IS NULL OR p.run_id <> @runId)
+        AND p.external_ref NOT IN (
+          SELECT external_ref FROM record_provenance
+           WHERE run_id = @runId AND external_ref IS NOT NULL
+        )
+      ORDER BY p.imported_at ASC, p.external_ref ASC`,
+  )
+
   const updateBusinessSource = db.prepare(
     `UPDATE business
         SET catalogue_source_id = @sourceId, updated_at = @now
@@ -223,6 +298,24 @@ const selectMissingProvenance = db.prepare(
   function requireSource(id) {
     const row = selectSourceById.get(id)
     if (!row) throw new NotFoundError('Catalogue source', id)
+    return row
+  }
+
+  const RUN_STATES = ['running', 'completed', 'failed']
+
+  function assertRunState(state) {
+    if (!RUN_STATES.includes(state)) {
+      throw new ValidationError(`Unknown run status "${state}".`, {
+        field: 'status',
+        allowed: RUN_STATES,
+      })
+    }
+    return state
+  }
+
+  function requireRun(id) {
+    const row = selectRunById.get(id)
+    if (!row) throw new NotFoundError('Catalogue import run', id)
     return row
   }
 
@@ -453,6 +546,7 @@ const selectMissingProvenance = db.prepare(
         notes = null,
         importedBy = null,
         importedAt = null,
+        runId = null,
         attachToBusiness = true,
       },
     ) {
@@ -468,6 +562,7 @@ const selectMissingProvenance = db.prepare(
         notes: text(notes, 1000),
         importedAt: importedAt ?? nowIso(),
         importedBy,
+        runId,
       }
       const existing = params.externalRef
         ? selectProvenanceIdentity.get(sourceId, params.externalRef)
@@ -496,6 +591,144 @@ const selectMissingProvenance = db.prepare(
           offset: page.offset,
         }),
       )
+    },
+
+    /* Harvest runs ----------------------------------------------------------- */
+
+    /**
+     * Opens a run before a file is ingested.
+     *
+     * The row is written first and finished later, deliberately, rather than
+     * assembled in memory and written once at the end. A run that is open when the
+     * process dies is the honest record of what happened — "this import was
+     * started and never finished" — whereas a run written only on success makes a
+     * crashed import indistinguishable from one nobody ever ran.
+     */
+    beginRun({
+      sourceId,
+      batchRef = null,
+      filename = null,
+      contentSha256 = null,
+      actor = null,
+      notes = null,
+      startedAt = null,
+    }) {
+      requireSource(sourceId)
+      const id = newId()
+      insertRun.run({
+        id,
+        sourceId,
+        batchRef: text(batchRef, 120),
+        filename: text(filename, 300),
+        contentSha256: text(contentSha256, 64),
+        actorId: actor?.id ?? null,
+        status: 'running',
+        notes: text(notes, 1000),
+        startedAt: startedAt ?? nowIso(),
+      })
+      return repository.findRunById(id)
+    },
+
+    /**
+     * Closes a run with what it did.
+     *
+     * `status` is only ever `completed` or `failed` here: a run cannot be closed
+     * back into `running`, and the counts are the run's own tally, not a recount of
+     * the records, because the records that a failed run did not create are the
+     * ones worth being able to see.
+     */
+    finishRun(
+      runId,
+      {
+        status = 'completed',
+        total = 0,
+        created = 0,
+        updated = 0,
+        skipped = 0,
+        failed = 0,
+        notes = null,
+        finishedAt = null,
+      } = {},
+    ) {
+      requireRun(runId)
+      if (status !== 'completed' && status !== 'failed') {
+        throw new ValidationError(`A run can only finish completed or failed, not "${status}".`, {
+          field: 'status',
+        })
+      }
+      finishRun.run({
+        id: runId,
+        status,
+        total: int(total),
+        createdCount: int(created),
+        updatedCount: int(updated),
+        skippedCount: int(skipped),
+        failedCount: int(failed),
+        notes: notes === null ? null : text(notes, 1000),
+        finishedAt: finishedAt ?? nowIso(),
+      })
+      return repository.findRunById(runId)
+    },
+
+    findRunById(id) {
+      const row = selectRunById.get(id)
+      return row ? camelizeRow(row) : null
+    },
+
+    requireRunById(id) {
+      return camelizeRow(requireRun(id))
+    },
+
+    latestRunForSource(sourceId) {
+      const row = selectLatestRunForSource.get(sourceId)
+      return row ? camelizeRow(row) : null
+    },
+
+    listRuns({ sourceId = null, status = null, limit, offset } = {}) {
+      const page = normalisePagination({ limit, offset })
+      const params = {
+        sourceId,
+        status:
+          status === null || status === undefined
+            ? null
+            : assertRunState(status),
+        limit: page.limit,
+        offset: page.offset,
+      }
+      const total = countRuns.get(params).total
+      const items = camelizeRows(selectRuns.all(params)).map((row) => ({
+        ...row,
+        sourceKey: row.sourceKey ?? null,
+        sourceName: row.sourceName ?? null,
+        actorName: row.actorDisplayName ?? null,
+      }))
+      return { total, items }
+    },
+
+    /**
+     * What the source has described before that this run did not.
+     *
+     * Report only, and deliberately so. A record missing from a freshly harvested
+     * file is not evidence that the business has closed, only that the file did
+     * not mention it: a source that paginates, or that was fetched on a bad day,
+     * would otherwise be able to unpublish a real listing by omission. So this
+     * returns candidates for a person to look at and changes nothing — no state,
+     * no provenance, no deletion — which is what lets an operator trust the report
+     * enough to act on it.
+     */
+    reconcileRun(runId) {
+      const run = requireRun(runId)
+      const stale = camelizeRows(
+        selectStaleForRun.all({ sourceId: run.source_id, runId }),
+      )
+      const seen = selectRunSeenRefs.all({ runId })
+      return {
+        run: camelizeRow(run),
+        source: repository.findSourceById(run.source_id),
+        runRefCount: seen.length,
+        stale,
+        staleCount: stale.length,
+      }
     },
 
     /* Review history --------------------------------------------------------- */
@@ -645,6 +878,7 @@ const selectMissingProvenance = db.prepare(
       notes = null,
       actor = null,
       importedAt = null,
+      runId = null,
       queue = false,
       claimedState = null,
     }) {
@@ -687,6 +921,7 @@ const selectMissingProvenance = db.prepare(
           notes: text(notes, 1000),
           importedAt: at,
           importedBy: actor?.id ?? null,
+          runId,
         })
         insertIntakeEvent.run({
           id: newId(),
@@ -758,4 +993,9 @@ function text(value, max) {
   const trimmed = String(value).trim()
   if (!trimmed) return null
   return trimmed.length > max ? trimmed.slice(0, max) : trimmed
+}
+
+function int(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0
 }
