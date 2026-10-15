@@ -1272,6 +1272,10 @@ print(followed["status"], followed.get("contactEmail"))
 The platform is one Node process and one SQLite file, so "deploying" is mostly deciding where that
 file lives and what is in front of it. Three ways, in increasing order of what they ask of you.
 
+For a host that other people will reach, `DEPLOY.md` is the end-to-end runbook (systemd service,
+nginx with TLS, the production `EnvironmentFile`, the first operator account), and
+`deploy/bootstrap-server.sh` performs the same steps on a fresh Ubuntu/Debian server in one run.
+
 ### A container
 
 ```bash
