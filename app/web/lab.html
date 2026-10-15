@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Laboratory &middot; Kampala Intelligence Platform</title>
+    <meta
+      name="description"
+      content="The operator's own view of the intelligence engine: the findings the public never sees, the opportunity board and the demand behind both, with the k-anonymity floor lifted."
+    />
+    <!-- appearance read before paint, so a dark-mode visitor gets no flash -->
+    <script>
+      try {
+        var t = localStorage.getItem('kip-theme')
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/theme.css" />
+    <style>
+      /*
+       * Laboratory page only. Everything it draws with -- the ruled record, the
+       * figure row, the muted facts, the four tones -- is in theme.css, so this
+       * page cannot drift away from the public gaps page it mirrors.
+       *
+       * There is no build step and no dependency. The server hands this folder
+       * out as static files, so anything the page needs it has to bring.
+       */
+
+      /* The sign-in card, because it is the one moment an operator arrives with
+         nothing to do. Same shape as the verification queue's. */
+      .gate {
+        max-width: 22rem;
+        margin: var(--s7) auto;
+        padding: var(--s5);
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+      }
+
+      .gate p {
+        color: var(--muted);
+        font-size: 0.9375rem;
+        margin: var(--s2) 0 var(--s4);
+      }
+
+      .gate form {
+        display: grid;
+        gap: var(--s3);
+      }
+
+      /*
+       * The overview's own figure row gets a second one to sit beside.
+       *
+       * `explain` is the sentence under a figure row that says what the rows
+       * were counted from. It is not decoration: the whole point of the
+       * laboratory is that the numbers on it mean something the public numbers
+       * do not, and a count of withheld rows with no explanation above it reads
+       * as a bug report rather than a measurement.
+       */
+      .explain {
+        margin-top: var(--s3);
+        max-width: 46rem;
+        font-size: 0.875rem;
+        color: var(--muted);
+        text-wrap: pretty;
+      }
+
+      /* A figure that is the point of the page rather than a frame around it. */
+      .counts.withheld {
+        margin-top: var(--s4);
+      }
+
+      /* The severity and withheld marks on a finding, read in the page's ink
+         rather than the tone, for the reason the public page gives: at 13px a
+         tone ink on its own wash does not clear 4.5:1. The wash and the bar are
+         the signal; the word is a word. */
+      .sev {
+        color: var(--ink);
+        font-weight: 650;
+      }
+
+      /* A finding the floor is holding back. It keeps the plain card surface --
+         the tone is reserved for how bad a published gap is -- and wears this
+         mark instead, so a withheld row can never be mistaken for a finding
+         nobody is expected to act on. */
+      .withheld {
+        color: var(--info);
+        font-weight: 600;
+      }
+
+      /* The opportunity board's controls, inline on the row it changes. */
+      .board-controls {
+        display: flex;
+        gap: var(--s2);
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: var(--s3);
+      }
+
+      .board-controls select {
+        width: auto;
+        min-width: 10rem;
+        margin-top: 0;
+      }
+
+      .board-controls input {
+        flex: 1 1 16rem;
+        margin-top: 0;
+      }
+
+      .board-controls button {
+        flex: none;
+      }
+
+      .saved {
+        flex: 1 1 100%;
+        font-size: 0.8125rem;
+        color: var(--muted);
+        min-height: 1.2em;
+      }
+
+      .saved[data-tone='success'] { color: var(--good); }
+      .saved[data-tone='danger'] { color: var(--gap); }
+
+      /* The run history, a compact ledger rather than a second list of cards. */
+      .runs {
+        border-top: 1px solid var(--line);
+      }
+
+      .run {
+        display: flex;
+        gap: var(--s4);
+        align-items: baseline;
+        flex-wrap: wrap;
+        padding: var(--s3) 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.875rem;
+      }
+
+      .run .mono {
+        color: var(--ink-2);
+      }
+
+      .run em {
+        font-style: normal;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="wordmark" href="/">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          Kampala Intelligence
+        </a>
+        <nav class="topnav">
+          <a href="/">Engine</a>
+          <a href="/directory.html">Directory</a>
+          <a href="/insights.html">Gaps</a>
+          <a href="/requests.html">Requests</a>
+          <a href="/ask.html">Ask</a>
+          <a href="/second-life.html">Second Life</a>
+          <a href="/claim.html">Claim</a>
+          <a href="/my-business.html">My business</a>
+          <a href="/operator.html">Verification queue</a><a href="/reviews.html">Reviews</a><a href="/photos.html">Photos</a><a href="/lab.html" aria-current="page">Lab</a>
+          <a href="/provider.html">Provider desk</a>
+          <button class="theme-toggle" type="button" hidden>
+            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          </button>
+        </nav>
+        <div class="who" id="who" hidden>
+          <span id="who-name"></span>
+          <button type="button" class="quiet" id="sign-out">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="gate" id="gate" hidden>
+        <h2>Sign in</h2>
+        <p>The laboratory shows the findings the public page withholds. Accounts are created by an admin through the admin API.</p>
+        <form id="sign-in-form" novalidate>
+          <label>
+            Email
+            <input type="email" id="email" name="email" autocomplete="username" required />
+          </label>
+          <label>
+            Password
+            <input type="password" id="password" name="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit" id="sign-in">Sign in</button>
+          <p class="problem" id="gate-problem" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="lab" hidden>
+        <div class="masthead">
+          <div>
+            <h1>The laboratory</h1>
+            <p class="sub">
+              The engine's own view of what it measured, with the k-anonymity floor lifted. This is
+              the one place in the platform allowed to see past the floor, so it can answer the
+              question the public page cannot: how much signal the promise is holding back.
+            </p>
+          </div>
+        </div>
+
+        <p class="problem" id="problem" role="alert"></p>
+
+        <section class="section">
+          <div class="summary">
+            <h2>This run</h2>
+            <span class="spacer"></span>
+            <button type="button" class="quiet" id="refresh">Refresh</button>
+          </div>
+          <div class="counts" id="overview-counts">
+            <div class="count"><b>&mdash;</b><span>Gaps published</span></div>
+            <div class="count"><b>&mdash;</b><span>Gaps withheld</span></div>
+            <div class="count"><b>&mdash;</b><span>Opportunities</span></div>
+            <div class="count"><b>&mdash;</b><span>Searches recorded</span></div>
+            <div class="count"><b>&mdash;</b><span>Came back empty</span></div>
+          </div>
+          <p class="explain" id="run-explain">Loading the engine's last run&hellip;</p>
+          <dl class="facts" id="run-facts" hidden></dl>
+        </section>
+
+        <section class="section">
+          <div class="summary">
+            <h2>Recent runs</h2>
+          </div>
+          <ul class="runs" id="runs"></ul>
+        </section>
+
+        <section class="section">
+          <div class="summary">
+            <h2>The opportunity board</h2>
+            <p id="opportunity-count" role="status" aria-live="polite"></p>
+            <span class="spacer"></span>
+            <label class="filter" style="display: flex; align-items: center; gap: var(--s2)">
+              Show
+              <select id="opportunity-state">
+                <option value="">every state</option>
+                <option value="candidate">candidates</option>
+                <option value="validating">validating</option>
+                <option value="actionable">actionable</option>
+                <option value="acted_on">acted on</option>
+                <option value="dismissed">dismissed</option>
+              </select>
+            </label>
+          </div>
+          <p class="problem" id="opportunity-problem"></p>
+          <ul class="results" id="opportunities"></ul>
+          <p class="empty" id="opportunity-empty" hidden></p>
+        </section>
+
+        <section class="section">
+          <div class="summary">
+            <h2>The gaps, floor lifted</h2>
+            <p id="gaps-count" role="status" aria-live="polite"></p>
+            <span class="spacer"></span>
+            <label style="display: flex; align-items: center; gap: var(--s2)">
+              How bad
+              <select id="gap-severity">
+                <option value="">Any</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="moderate">Moderate</option>
+                <option value="low">Low</option>
+                <option value="none">None</option>
+              </select>
+            </label>
+            <label style="display: flex; align-items: center; gap: var(--s2)">
+              Order
+              <select id="gap-sort">
+                <option value="score">Biggest first</option>
+                <option value="severity">Worst first</option>
+                <option value="searches">Most searched first</option>
+                <option value="newest">Newest first</option>
+              </select>
+            </label>
+            <label style="display: flex; align-items: center; gap: var(--s2)">
+              <input type="checkbox" id="gap-suppressed" />
+              Show withheld
+            </label>
+          </div>
+          <p class="problem" id="gaps-problem"></p>
+          <ul class="results" id="gaps"></ul>
+          <p class="empty" id="gaps-empty" hidden></p>
+          <div class="pager" id="gaps-pager" hidden>
+            <button type="button" class="quiet" id="gaps-previous">Previous</button>
+            <span id="gaps-range"></span>
+            <button type="button" class="quiet" id="gaps-next">Next</button>
+            <span class="spacer"></span>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="summary">
+            <h2>What people are asking for</h2>
+            <p id="signals-count" role="status" aria-live="polite"></p>
+            <span class="spacer"></span>
+            <label style="display: flex; align-items: center; gap: var(--s2)">
+              Area
+              <select id="signals-location"></select>
+            </label>
+            <label style="display: flex; align-items: center; gap: var(--s2)">
+              Window
+              <select id="signals-window">
+                <option value="30">The last 30 days</option>
+                <option value="90">The last 90 days</option>
+              </select>
+            </label>
+          </div>
+          <p class="problem" id="signals-problem"></p>
+          <ul class="results" id="signals"></ul>
+          <p class="empty" id="signals-empty" hidden></p>
+        </section>
+
+        <p class="note">
+          Nothing on this page is computed here. Scoring is the engine's, storage is the repository's,
+          and this page is the seam between them and the operator's browser: it asks, draws and, for
+          the one write it offers, records who changed an opportunity and why. A state change is
+          written into the audit log, and dismissing an opportunity requires a reason, because a
+          finding dismissed without an explanation is one the engine can never learn to stop
+          producing.
+        </p>
+      </section>
+    </main>
+
+    <script src="/theme.js"></script>
+    <script src="/sheet.js"></script>
+    <script>
+      /*
+       * The session cookie is HttpOnly, so nothing here holds a token: the sign-in
+       * POST sets the cookie and every later call is a plain same-origin fetch.
+       * That is the whole reason this page can be a static file.
+       *
+       * The laboratory is the one surface allowed past the k-anonymity floor, so
+       * every route it talks to is gated on a capability (`lab:read`, and
+       * `opportunity:write` for the board). The page reads the capabilities the
+       * server reported from /auth/me rather than restating the role table here: a
+       * second copy would be a second definition that drifts from core/auth.js, and
+       * an operator who trusted it would be offered a control the server refuses.
+       *
+       * Every value that came from the engine -- a phrase, a rationale, a location
+       * name -- is written with textContent and never with innerHTML. A phrase is
+       * text people typed into a search box, which is exactly the kind of string
+       * that must not be able to become markup in the one screen an operator trusts.
+       */
+      const API = '/api/v1'
+      const PAGE_SIZE = 25
+
+      const els = {
+        gate: document.getElementById('gate'),
+        lab: document.getElementById('lab'),
+        who: document.getElementById('who'),
+        problem: document.getElementById('problem'),
+        overviewCounts: document.getElementById('overview-counts'),
+        runExplain: document.getElementById('run-explain'),
+        runFacts: document.getElementById('run-facts'),
+        runs: document.getElementById('runs'),
+        opportunities: document.getElementById('opportunities'),
+        opportunityCount: document.getElementById('opportunity-count'),
+        opportunityProblem: document.getElementById('opportunity-problem'),
+        opportunityEmpty: document.getElementById('opportunity-empty'),
+        opportunityState: document.getElementById('opportunity-state'),
+        gaps: document.getElementById('gaps'),
+        gapsCount: document.getElementById('gaps-count'),
+        gapsProblem: document.getElementById('gaps-problem'),
+        gapsEmpty: document.getElementById('gaps-empty'),
+        gapsPager: document.getElementById('gaps-pager'),
+        gapsPrevious: document.getElementById('gaps-previous'),
+        gapsNext: document.getElementById('gaps-next'),
+        gapsRange: document.getElementById('gaps-range'),
+        gapSeverity: document.getElementById('gap-severity'),
+        gapSort: document.getElementById('gap-sort'),
+        gapSuppressed: document.getElementById('gap-suppressed'),
+        signals: document.getElementById('signals'),
+        signalsCount: document.getElementById('signals-count'),
+        signalsProblem: document.getElementById('signals-problem'),
+        signalsEmpty: document.getElementById('signals-empty'),
+        signalsWindow: document.getElementById('signals-window'),
+        signalsLocation: document.getElementById('signals-location'),
+      }
+
+      const state = {
+        user: null,
+        capabilities: new Set(),
+        windowDays: 30,
+        /** id -> "District, Sub-county, Ward" for the facts on a finding. */
+        locationNames: new Map(),
+        /** The area the demand signals are measured in. A signal has no meaning
+            without one: the rollup is keyed on a place, and "everywhere" is not a
+            place it was ever keyed on. */
+        signalsLocationId: '',
+        gaps: { items: [], total: 0, offset: 0 },
+        signals: [],
+      }
+
+      /** Whether this session may take an action, judged against the server's answer. */
+      const may = (capability) => state.capabilities.has(capability)
+
+      /** One request helper, so every call agrees on credentials and errors. */
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          credentials: 'same-origin',
+          headers: {
+            accept: 'application/json',
+            ...(options.body ? { 'content-type': 'application/json' } : {}),
+          },
+          ...options,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(payload?.error?.message ?? 'The request could not be completed.')
+          error.status = response.status
+          throw error
+        }
+        return payload
+      }
+
+      /** A date `n` days back, as `YYYY-MM-DD`, the day string the rollups are keyed on. */
+      const dayOffset = (days) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
+
+      /**
+       * Numbers, formatted, or a dash.
+       *
+       * A dash for anything that is not a number. The engine sends null for a count
+       * it could not compute, and a cell that prints `0` for a count it does not
+       * have reads as "none" rather than "we cannot say".
+       */
+      const number = (value) =>
+        typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '—'
+
+      const say = (element, message, tone) => {
+        element.textContent = message ?? ''
+        if (tone) element.dataset.tone = tone
+        else element.removeAttribute('data-tone')
+      }
+
+      /** Severity to the tone the card wears. `low` and `none` keep the plain card. */
+      const SEVERITY_TONES = Object.freeze({
+        critical: 'danger',
+        high: 'danger',
+        moderate: 'warning',
+        low: null,
+        none: null,
+      })
+
+      const TREND_WORDS = Object.freeze({
+        rising: 'rising',
+        falling: 'falling',
+        edging_up: 'edging up',
+        edging_down: 'edging down',
+        flat: 'steady',
+        emerging: 'a new search pattern',
+      })
+
+      function el(tag, className, text) {
+        const node = document.createElement(tag)
+        if (className) node.className = className
+        node.textContent = text ?? ''
+        return node
+      }
+
+      function rule() {
+        const element = document.createElement('span')
+        element.className = 'rule'
+        element.setAttribute('aria-hidden', 'true')
+        return element
+      }
+
+      /* --- signing in and out ------------------------------------------- */
+
+      document.getElementById('sign-in-form').addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const button = document.getElementById('sign-in')
+        const problem = document.getElementById('gate-problem')
+        say(problem, '')
+        button.disabled = true
+        try {
+          await api(`${API}/auth/login`, {
+            method: 'POST',
+            body: {
+              email: document.getElementById('email').value.trim(),
+              password: document.getElementById('password').value,
+            },
+          })
+          // The password has done its job. Nothing keeps a copy of it.
+          document.getElementById('password').value = ''
+          await enter()
+        } catch (error) {
+          say(problem, error.message)
+        } finally {
+          button.disabled = false
+        }
+      })
+
+      document.getElementById('sign-out').addEventListener('click', async () => {
+        try {
+          await api(`${API}/auth/logout`, { method: 'POST' })
+        } catch {
+          // A session that is already gone is the state we wanted anyway.
+        }
+        state.user = null
+        showGate()
+      })
+
+      function showGate() {
+        els.gate.hidden = false
+        els.lab.hidden = true
+        els.who.hidden = true
+        document.getElementById('password').focus()
+      }
+
+      async function enter() {
+        let me
+        try {
+          me = await api(`${API}/auth/me`)
+        } catch (error) {
+          if (error.status === 401) {
+            showGate()
+            return
+          }
+          say(document.getElementById('gate-problem'), error.message)
+          showGate()
+          return
+        }
+        state.user = me.data.user
+        state.capabilities = new Set(me.data.capabilities ?? [])
+        els.gate.hidden = true
+        els.lab.hidden = false
+        els.who.hidden = false
+        say(
+          document.getElementById('who-name'),
+          `${state.user.displayName} (${state.user.role})${may('lab:read') ? '' : ' — no laboratory access'}`,
+        )
+
+        if (!may('lab:read')) {
+          say(
+            els.problem,
+            'This account cannot read the laboratory. An admin has to grant the lab:read capability.',
+          )
+          return
+        }
+
+        // Reference names first: the signals section has to know which place it is
+        // reading before it can read one, and its default comes from that list.
+        await loadReferenceNames()
+        await Promise.all([loadOverview(), loadSignals()])
+        await loadGaps()
+        await loadOpportunities()
+      }
+
+      /**
+       * Reference names, and the area the signals section reads.
+       *
+       * A finding carries a location id and this is the only place to turn one
+       * into a line a reader can use. The gap row already carries its own
+       * `locationName`, but the tree is fetched too so a missing name can be
+       * filled in, and so the signals section has a real list of places to choose
+       * from - a demand signal only exists inside a place.
+       */
+      const KIND_LABELS = Object.freeze({ country: 'countries', city: 'cities', subcounty: 'subcounties' })
+
+      async function loadReferenceNames() {
+        try {
+          const locations = await api(`${API}/locations?limit=500`)
+          // Grouped by kind and ordered by depth, the same shape the public gaps
+          // page uses, so a flat 32-row list does not scatter the levels through
+          // each other by name.
+          const byKind = new Map()
+          for (const location of locations.data ?? []) {
+            state.locationNames.set(location.id, location.pathNames ?? location.name)
+            if (!byKind.has(location.kind)) byKind.set(location.kind, [])
+            byKind.get(location.kind).push(location)
+          }
+          for (const [kind, rows] of [...byKind].sort((a, b) => a[1][0].depth - b[1][0].depth)) {
+            const group = document.createElement('optgroup')
+            group.label = KIND_LABELS[kind] ?? `${kind}s`
+            for (const location of rows) {
+              const option = document.createElement('option')
+              option.value = location.id
+              option.textContent = location.pathNames ?? location.name
+              group.append(option)
+            }
+            els.signalsLocation.append(group)
+          }
+          // The first place, so the section opens on real demand rather than on the
+          // countrywide slice, which is the one rollup that is usually empty.
+          state.signalsLocationId = els.signalsLocation.value || ''
+        } catch {
+          // A missing list is a cosmetic loss for the names and an empty selector
+          // for the signals: the readiness of the rest of the page does not depend
+          // on it, so the page says nothing and carries on.
+        }
+      }
+
+      /* --- overview ----------------------------------------------------- */
+
+      async function loadOverview() {
+        say(els.problem, '')
+        try {
+          const body = await api(`${API}/admin/lab/overview?from=${dayOffset(state.windowDays)}`)
+          renderOverview(body.data)
+        } catch (error) {
+          if (error.status === 401) {
+            showGate()
+            return
+          }
+          say(els.problem, error.message)
+        }
+      }
+
+      function renderOverview(data) {
+        const cells = [...els.overviewCounts.children]
+        cells[0].querySelector('b').textContent = number(data.gaps.visible)
+        cells[1].querySelector('b').textContent = number(data.gaps.suppressed)
+        cells[2].querySelector('b').textContent = number(
+          Object.values(data.opportunities ?? {}).reduce((sum, n) => sum + n, 0),
+        )
+        cells[3].querySelector('b').textContent = number(data.demand?.searches)
+        cells[4].querySelector('b').textContent = number(data.demand?.unserved)
+
+        const run = data.run
+        if (!run) {
+          say(els.runExplain, 'The engine has not completed a run yet. Run it from the command line, or wait for the schedule.')
+          els.runFacts.hidden = true
+          els.runFacts.replaceChildren()
+        } else {
+          const byState = Object.entries(data.opportunities ?? {})
+            .map(([name, total]) => `${total} ${name.replace(/_/g, ' ')}`)
+            .join(' · ')
+          say(
+            els.runExplain,
+            `Latest completed run ${run.id}, finished ${run.finishedAt ?? '—'}. ` +
+              `Opportunity board: ${byState || 'empty'}.`,
+          )
+          els.runFacts.hidden = false
+          els.runFacts.replaceChildren(
+            fact('Kind', run.kind),
+            fact('Status', run.status),
+            fact('Window', `${run.windowDays} days`),
+            fact('Searches seen', number(run.searchesSeen)),
+            fact('Gaps written', number(run.gapsWritten)),
+            fact('Gaps suppressed', number(run.gapsSuppressed)),
+            fact('Opportunities written', number(run.opportunitiesWritten)),
+            fact('Privacy floor', `${run.kThreshold} people`),
+          )
+        }
+
+        els.runs.replaceChildren()
+        for (const item of data.runs ?? []) {
+          const li = document.createElement('li')
+          li.className = 'run'
+          li.append(el('span', 'mono', item.id))
+          li.append(el('em', null, item.kind))
+          li.append(el('em', null, item.status))
+          li.append(el('em', null, item.finishedAt ? item.finishedAt.slice(0, 19).replace('T', ' ') : '—'))
+          li.append(el('em', null, `${number(item.gapsWritten)} gaps`))
+          li.append(el('em', null, `${number(item.opportunitiesWritten)} opportunities`))
+          els.runs.append(li)
+        }
+        if ((data.runs ?? []).length === 0) {
+          els.runs.append(el('li', 'none', 'No runs recorded.'))
+        }
+      }
+
+      function fact(term, value) {
+        const fragment = document.createDocumentFragment()
+        const dt = document.createElement('dt')
+        dt.textContent = term
+        const dd = document.createElement('dd')
+        dd.textContent = value
+        fragment.append(dt, dd)
+        return fragment
+      }
+
+      /* --- gaps --------------------------------------------------------- */
+
+      async function loadGaps() {
+        say(els.gapsProblem, '')
+        const params = new URLSearchParams({
+          limit: String(PAGE_SIZE),
+          offset: String(state.gaps.offset),
+          sort: els.gapSort.value,
+        })
+        if (els.gapSeverity.value) params.set('severity', els.gapSeverity.value)
+        if (els.gapSuppressed.checked) params.set('includeSuppressed', 'true')
+        try {
+          const body = await api(`${API}/admin/lab/gaps?${params}`)
+          state.gaps.items = body.data ?? []
+          state.gaps.total = body.meta?.total ?? 0
+          renderGaps(body.meta ?? {})
+        } catch (error) {
+          if (error.status === 401) {
+            showGate()
+            return
+          }
+          say(els.gapsProblem, error.message)
+          els.gaps.replaceChildren()
+          els.gapsEmpty.hidden = true
+          els.gapsPager.hidden = true
+          say(els.gapsCount, '')
+        }
+      }
+
+      function renderGaps(meta) {
+        els.gaps.replaceChildren()
+        for (const gap of state.gaps.items) els.gaps.append(gapCard(gap))
+
+        const total = meta.total ?? 0
+        const shown = state.gaps.items.length
+        say(els.gapsCount, total === 0 ? 'No findings in this view' : `${total} finding${total === 1 ? '' : 's'}`)
+        els.gapsEmpty.hidden = shown > 0
+        if (shown === 0) {
+          els.gapsEmpty.replaceChildren(
+            el('strong', null, 'Nothing matches this combination.'),
+            el('p', null, 'Widen the severity, or turn on the withheld rows, to see what the floor is holding back.'),
+          )
+        }
+        const hasMore = state.gaps.offset + shown < total
+        els.gapsPager.hidden = total === 0 || (state.gaps.offset === 0 && !hasMore)
+        els.gapsPrevious.disabled = state.gaps.offset === 0
+        els.gapsNext.disabled = !hasMore
+        say(
+          els.gapsRange,
+          total === 0 ? '' : `${state.gaps.offset + 1}–${state.gaps.offset + shown} of ${total}`,
+        )
+      }
+
+      function gapCard(gap) {
+        const card = document.createElement('li')
+        card.className = 'card'
+        // A withheld finding keeps the plain surface: the tone says how bad a
+        // published gap is, and a row the floor is holding back is not that.
+        const tone = gap.suppressed ? null : SEVERITY_TONES[gap.severity] ?? null
+        if (tone) card.dataset.tone = tone
+
+        card.append(el('p', 'name', gap.phrase))
+
+        const place = el(
+          'p',
+          'where',
+          gap.locationName || state.locationNames.get(gap.locationId) || 'Not tied to one place',
+        )
+        card.append(place)
+
+        const meta = document.createElement('p')
+        meta.className = 'meta'
+        if (gap.suppressed) {
+          meta.append(el('span', 'withheld', 'withheld by the floor'))
+        } else {
+          meta.append(el('span', 'sev', gap.severity || 'not set'))
+        }
+        meta.append(rule())
+        meta.append(el('span', null, `${number(gap.searches)} searches`))
+        meta.append(el('span', null, `${number(gap.distinctActors)} counted`))
+        meta.append(el('span', null, gap.supplyCount === 0 ? 'nobody listed' : `${number(gap.supplyCount)} listed`))
+        meta.append(rule())
+        meta.append(el('span', null, `score ${typeof gap.gapScore === 'number' ? gap.gapScore.toFixed(4) : '—'}`))
+        const trend = TREND_WORDS[gap.trendDirection]
+        if (trend) {
+          meta.append(rule())
+          meta.append(el('span', null, trend))
+        }
+        card.append(meta)
+        return card
+      }
+
+      /* --- opportunities ------------------------------------------------- */
+
+      async function loadOpportunities() {
+        say(els.opportunityProblem, '')
+        const params = new URLSearchParams({
+          limit: String(PAGE_SIZE),
+          offset: '0',
+          sort: 'score',
+          includeSuppressed: 'true',
+          includeDismissed: 'true',
+        })
+        if (els.opportunityState.value) params.set('state', els.opportunityState.value)
+        try {
+          const body = await api(`${API}/admin/lab/opportunities?${params}`)
+          renderOpportunities(body.data ?? [], body.meta ?? {})
+        } catch (error) {
+          if (error.status === 401) {
+            showGate()
+            return
+          }
+          say(els.opportunityProblem, error.message)
+          els.opportunities.replaceChildren()
+          els.opportunityEmpty.hidden = true
+          say(els.opportunityCount, '')
+        }
+      }
+
+      function renderOpportunities(items, meta) {
+        els.opportunities.replaceChildren()
+        say(
+          els.opportunityCount,
+          meta.total ? `${meta.total} on the board` : 'The board is empty',
+        )
+        els.opportunityEmpty.hidden = items.length > 0
+        if (items.length === 0) {
+          els.opportunityEmpty.replaceChildren(
+            el('strong', null, 'Nothing on the board.'),
+            el('p', null, 'Opportunities are written by the gap engine when it finds demand that nothing answers. An empty board means no run has produced one yet.'),
+          )
+        }
+        for (const opportunity of items) els.opportunities.append(opportunityCard(opportunity))
+      }
+
+      function opportunityCard(opportunity) {
+        const card = document.createElement('li')
+        card.className = 'card'
+        const tone = SEVERITY_TONES[opportunity.severity] ?? null
+        if (tone) card.dataset.tone = tone
+
+        card.append(el('p', 'name', opportunity.keyword))
+        card.append(
+          el('p', 'where', opportunity.locationName || state.locationNames.get(opportunity.locationId) || 'Not tied to one place'),
+        )
+        if (opportunity.rationale) card.append(el('p', 'blurb', opportunity.rationale))
+        if (opportunity.suggestedAction) {
+          card.append(el('p', 'blurb', `Suggested: ${opportunity.suggestedAction}`))
+        }
+
+        const meta = document.createElement('p')
+        meta.className = 'meta'
+        meta.append(el('span', 'sev', opportunity.state))
+        meta.append(rule())
+        meta.append(el('span', null, `score ${typeof opportunity.score === 'number' ? opportunity.score.toFixed(4) : '—'}`))
+        meta.append(el('span', null, `~${number(opportunity.estimatedMonthlySearches)} searches a month`))
+        meta.append(el('span', null, `${number(opportunity.distinctActors)} counted`))
+        meta.append(el('span', null, opportunity.supplyCount === 0 ? 'nobody listed' : `${number(opportunity.supplyCount)} listed`))
+        if (opportunity.stateReason) {
+          meta.append(rule())
+          meta.append(el('span', null, `“${opportunity.stateReason}”`))
+        }
+        card.append(meta)
+
+        card.append(boardControls(opportunity))
+        return card
+      }
+
+      /**
+       * The one write this page offers.
+       *
+       * A select of target states, an optional reason, and a button. The reason is
+       * required to dismiss, and the server enforces that rule rather than this file
+       * restating it: the button allows an empty reason and lets the server refuse,
+       * so the two can never disagree about what a legal dismissal is. The server's
+       * refusal is shown in the row rather than swallowed.
+       */
+      function boardControls(opportunity) {
+        const controls = document.createElement('div')
+        controls.className = 'board-controls'
+
+        const states = ['candidate', 'validating', 'actionable', 'acted_on', 'dismissed']
+        const select = document.createElement('select')
+        for (const value of states) {
+          const option = document.createElement('option')
+          option.value = value
+          option.textContent = value.replace(/_/g, ' ')
+          option.selected = value === opportunity.state
+          select.append(option)
+        }
+
+        const reason = document.createElement('input')
+        reason.type = 'text'
+        reason.maxLength = 500
+        reason.placeholder = 'Reason (required to dismiss)'
+        reason.value = opportunity.stateReason ?? ''
+
+        const save = document.createElement('button')
+        save.type = 'button'
+        save.textContent = 'Record state'
+
+        const saved = document.createElement('p')
+        saved.className = 'saved'
+        saved.setAttribute('role', 'status')
+        saved.setAttribute('aria-live', 'polite')
+
+        if (!may('opportunity:write')) {
+          select.disabled = true
+          reason.disabled = true
+          save.disabled = true
+        }
+
+        save.addEventListener('click', async () => {
+          save.disabled = true
+          say(saved, 'Recording…')
+          try {
+            await api(`${API}/admin/lab/opportunities/${opportunity.id}`, {
+              method: 'PATCH',
+              body: { state: select.value, reason: reason.value.trim() || undefined },
+            })
+            say(saved, `Recorded as ${select.value.replace(/_/g, ' ')}.`, 'success')
+            // The board is re-read so the state counts and the ordering reflect the
+            // move; a card patched in place would leave the header lying about it.
+            await loadOpportunities()
+          } catch (error) {
+            if (error.status === 401) {
+              showGate()
+              return
+            }
+            say(saved, error.message, 'danger')
+          } finally {
+            save.disabled = !may('opportunity:write')
+          }
+        })
+
+        controls.append(select, reason, save, saved)
+        return controls
+      }
+
+      /* --- demand signals ------------------------------------------------ */
+
+      async function loadSignals() {
+        say(els.signalsProblem, '')
+        const params = new URLSearchParams({
+          from: dayOffset(state.windowDays),
+          limit: '50',
+          includeSuppressed: 'true',
+        })
+        if (state.signalsLocationId) params.set('locationId', state.signalsLocationId)
+        try {
+          const body = await api(`${API}/admin/lab/signals?${params}`)
+          state.signals = body.data ?? []
+          renderSignals()
+        } catch (error) {
+          if (error.status === 401) {
+            showGate()
+            return
+          }
+          say(els.signalsProblem, error.message)
+          els.signals.replaceChildren()
+          els.signalsEmpty.hidden = true
+          say(els.signalsCount, '')
+        }
+      }
+
+      function renderSignals() {
+        els.signals.replaceChildren()
+        say(els.signalsCount, state.signals.length ? `${state.signals.length} signals` : 'No signals in this window')
+        els.signalsEmpty.hidden = state.signals.length > 0
+        if (state.signals.length === 0) {
+          els.signalsEmpty.replaceChildren(
+            el('strong', null, 'No demand recorded in this window.'),
+            el('p', null, 'Every actionable search is recorded as a signal. An empty list means nobody has searched, not that the rollup is broken.'),
+          )
+        }
+        for (const signal of state.signals) {
+          const card = document.createElement('li')
+          card.className = 'card'
+          card.append(el('p', 'name', signal.phrase))
+          card.append(
+            el('p', 'where', state.locationNames.get(signal.locationId) || 'Not tied to one place'),
+          )
+          const meta = document.createElement('p')
+          meta.className = 'meta'
+          if (signal.suppressed) {
+            meta.append(el('span', 'withheld', 'below the floor'))
+            meta.append(rule())
+            meta.append(el('span', null, `bucket ${signal.searchesBucket}`))
+          } else {
+            meta.append(el('span', null, `${number(signal.searches)} searches`))
+            meta.append(el('span', null, `${number(signal.distinctActors)} counted`))
+            meta.append(el('span', null, `${number(signal.zeroResults)} found nothing`))
+          }
+          if (signal.coverageLevel) {
+            meta.append(rule())
+            meta.append(el('span', null, signal.coverageLevel))
+          }
+          card.append(meta)
+          els.signals.append(card)
+        }
+      }
+
+      /* --- events -------------------------------------------------------- */
+
+      document.getElementById('refresh').addEventListener('click', async () => {
+        await Promise.all([loadOverview(), loadSignals()])
+        await loadGaps()
+        await loadOpportunities()
+      })
+
+      els.opportunityState.addEventListener('change', loadOpportunities)
+
+      for (const control of [els.gapSeverity, els.gapSort, els.gapSuppressed]) {
+        control.addEventListener('change', () => {
+          state.gaps.offset = 0
+          loadGaps()
+        })
+      }
+
+      els.gapsPrevious.addEventListener('click', () => {
+        state.gaps.offset = Math.max(0, state.gaps.offset - PAGE_SIZE)
+        loadGaps()
+      })
+
+      els.gapsNext.addEventListener('click', () => {
+        state.gaps.offset += PAGE_SIZE
+        loadGaps()
+      })
+
+      els.signalsWindow.addEventListener('change', async () => {
+        state.windowDays = Number.parseInt(els.signalsWindow.value, 10) === 90 ? 90 : 30
+        await Promise.all([loadOverview(), loadSignals()])
+      })
+
+      els.signalsLocation.addEventListener('change', () => {
+        state.signalsLocationId = els.signalsLocation.value
+        loadSignals()
+      })
+
+      /* --- start --------------------------------------------------------- */
+
+      els.gapSuppressed.checked = true
+      enter()
+    </script>
+  </body>
+</html>

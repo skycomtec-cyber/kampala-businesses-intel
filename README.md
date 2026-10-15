@@ -263,6 +263,54 @@ accumulating raw events. A window that includes a partial day scores demand that
 as if it had, which quietly biases every finding downward. For the same reason, a day whose rollup is
 missing contributes no demand rather than being treated as a day of silence.
 
+### The laboratory
+
+`http://127.0.0.1:4310/lab.html` is the same engine seen from the operator's side of the privacy
+floor. Every other surface — `/insights.html`, `/search`, `/ask` — is built around `suppressIfBelowK`:
+a finding computed over too few distinct people has its counts withheld so a stranger cannot read one
+person's question out of a total. The laboratory is the one place that is allowed past that floor, and
+it exists because a suppressed finding is still a finding — somebody has to be able to see how much
+signal the promise is holding back. The public route and the lab route are the same repository call
+with `includeSuppressed` flipped, so they cannot disagree about what was found, only about what may be
+shown.
+
+The page is gated on `lab:read` and the board on `opportunity:read`, so an analyst can read it and an
+editor can read it but only an admin can move a row. It is one static file like the rest, and it opens
+on five things: the **latest run** and the runs before it (succeeded or failed, because a window that
+was never measured is different from one that was measured and found nothing); the **gap counts** the
+public never sees, with the difference between the visible total and the full total printed as the
+number the floor is hiding; the **gaps** themselves as snapshots, with the area and severity filters
+the api offers; the **demand signals** with their real counts, read inside one place, because a signal
+is keyed on a location and "everywhere" is not one of them; and the **opportunity board**.
+
+The board is the operator's working set rather than the public list: suppressed and dismissed rows are
+included by default and removed only on request (`?includeDismissed=false`, `?includeSuppressed=false`).
+A row moves through `candidate → validating → actionable → acted_on`, and any of those can be
+`dismissed`. A dismissal **must** carry a reason — the rule lives in the repository, not the route, so
+every caller obeys it — and every move writes an audit row
+(`intelligence.opportunity.state`, with the before and after and the actor). The board keeps a
+dismissed row on screen with its reason, because the decision and why it was taken are exactly what an
+operator needs to see next time.
+
+```bash
+# the dashboard's one-shot load, as an admin
+curl -s "http://127.0.0.1:4310/api/v1/admin/lab/overview" \
+  -H "Authorization: Bearer $TOKEN"
+
+# the findings the public floor withholds
+curl -s "http://127.0.0.1:4310/api/v1/admin/lab/gaps?includeSuppressed=true" \
+  -H "Authorization: Bearer $TOKEN"
+
+# move an opportunity, with the reason a dismissal requires
+curl -s -X PATCH "http://127.0.0.1:4310/api/v1/admin/lab/opportunities/$OPPORTUNITY_ID" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"state":"dismissed","reason":"Overlaps the Kira Road listing; not a separate gap."}'
+```
+
+The routes are in the operator table under the API section. The laboratory computes nothing of its own:
+scoring is `core/intelligence.js`, storage is `db/repositories/intelligence.js`, and the route file is
+only the seam — validate, gate on a capability, hand the work down, record the audit.
+
 ## Importing businesses
 
 Indexing Kampala is a spreadsheet problem before it is a code problem. The importer takes a CSV and
@@ -538,7 +586,7 @@ closures it causes itself and spends that count instead of settling on it.
 
 ### The pages, and what they share
 
-Nine static files, no build step, no framework, served from the same origin as the api and linked
+Fourteen static files, no build step, no framework, served from the same origin as the api and linked
 from the same topbar, so any of them can be bookmarked or reloaded on its own:
 
 | Page | What it is for |
@@ -552,6 +600,11 @@ from the same topbar, so any of them can be bookmarked or reloaded on its own:
 | `/provider.html` | The provider desk: a published business answering open requests |
 | `/ask.html` | Ask Kampala: a plain-language question, the reading of it, and the answer |
 | `/second-life.html` | The Second Life Electronics vertical: its six activities and the intake lifecycle |
+| `/claim.html` | Claim a listing as its owner, and follow a claim by its reference |
+| `/my-business.html` | The signed-in desk for a business owner |
+| `/reviews.html` | Review moderation |
+| `/photos.html` | Photo moderation |
+| `/lab.html` | The laboratory: the engine's own view, on the operator's side of the privacy floor |
 
 `/insights.html` is the other half of `/directory.html`, and reads the same
 `/api/v1/insights/opportunities` the api documents. Its floor toggle is the page form of
@@ -952,6 +1005,13 @@ it, or change its status, review state or capability level.
 | `GET` | `/api/v1/admin/claims` | `business:read` (`?status=`, `?businessId=`, `?search=`, `?sort=`) |
 | `GET` | `/api/v1/admin/claims/:id` | `business:read` |
 | `POST` | `/api/v1/admin/claims/:id/decide` | `business:verify`, plus `user:write` for `grant`/`revoke` (a grant creates an account). Body `decision` (`grant`, `reject`, `revoke`); `reason` required for reject and revoke. A grant returns the new `owner` and a one-time `passwordResetToken`. |
+| `GET` | `/api/v1/admin/lab/overview` | `lab:read` (the latest run, gap and opportunity counts, and the demand summary for a window) |
+| `GET` | `/api/v1/admin/lab/runs` | `lab:read` (the recent maintenance runs, succeeded and failed; `?limit=`) |
+| `GET` | `/api/v1/admin/lab/gaps` | `lab:read` (gap snapshots with the floor lifted; `?sort=` needs one of `score`, `searches`, `newest`, `severity`) |
+| `GET` | `/api/v1/admin/lab/signals` | `lab:read` (`?from=` required, `?locationId=`) |
+| `GET` | `/api/v1/admin/lab/supply` | `lab:read` (daily supply counts; `?from=` and `?to=` required) |
+| `GET` | `/api/v1/admin/lab/opportunities` | `opportunity:read` (the board; dismissed and suppressed rows are included by default; `?state=`, `?severity=`, `?sort=`, `?includeDismissed=false`, `?includeSuppressed=false`) |
+| `PATCH` | `/api/v1/admin/lab/opportunities/:id` | `opportunity:write` (move an opportunity to another `state`; `reason` required to `dismiss`; audited as `intelligence.opportunity.state`) |
 
 Roles, from `GET /api/v1/auth/roles`:
 
@@ -1323,7 +1383,7 @@ class of breakage entirely.
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
 │   │                         set-password, import, backup, restore, and the one-off repairs
 │   │                         — backfill-provenance, add-sources
-│   ├── test/                 238 tests, no network, temporary folders only
+│   ├── test/                 246 tests, no network, temporary folders only
 │   └── web/                  the website pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list
@@ -1336,6 +1396,7 @@ class of breakage entirely.
 │       ├── claim.html            claim a listing, and follow a claim by reference
 │       ├── my-business.html      the signed-in desk for a business owner
 │       ├── operator.html         the review queue
+│       ├── lab.html              the laboratory: the findings the floor withholds
 │       ├── reviews.html          review moderation
 │       ├── photos.html           photo moderation
 │       ├── theme.css             every shared token and component, light and dark
@@ -1369,7 +1430,7 @@ cd app
 npm test
 ```
 
-238 tests, no network access, each against its own temporary database. The API tests mount the real
+246 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule
@@ -1385,7 +1446,10 @@ lifecycle against the api — and Ask Kampala is pinned the same way: the parser
 self-service is pinned at both levels too: the one-way claim lifecycle and the contact normalisation
 against `core/claims.js`, and the whole flow — submit, follow with and without the token, withdraw,
 one-open-claim-per-listing, reject needs a reason, grant creates the provider account and sets the
-capability level, and the desk refuses a listing the caller does not own — against the api.
+capability level, and the desk refuses a listing the caller does not own — against the api. The
+laboratory is pinned on the thing that distinguishes it: a finding the public surface withholds is
+returned by the lab, a dismissal is refused without a reason and lands in the audit, a query the
+routes cannot answer is a `400`, and every page links into the lab.
 
 The backup tests are written around the failure they exist to prevent, which is that a copy of a WAL
 database looks complete and is missing every write since the last checkpoint. So the assertions are

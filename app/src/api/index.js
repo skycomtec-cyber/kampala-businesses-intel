@@ -26,6 +26,7 @@ import adminReferenceRoutes from './routes/admin/reference.js'
 import adminCatalogueRoutes from './routes/admin/catalogue.js'
 import adminReviewRoutes from './routes/admin/reviews.js'
 import adminPhotoRoutes from './routes/admin/photos.js'
+import adminLabRoutes from './routes/admin/lab.js'
 import { createMediaStore } from '../media/index.js'
 
 /**
@@ -132,6 +133,7 @@ export async function buildApi({ app, config, logger = true, web = true }) {
       await api.register(adminCatalogueRoutes, { app })
       await api.register(adminReviewRoutes, { app })
       await api.register(adminPhotoRoutes, { app, media })
+      await api.register(adminLabRoutes, { config, app })
     },
     { prefix: config.api.prefix },
   )
