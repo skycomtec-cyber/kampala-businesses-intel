@@ -403,6 +403,10 @@
             without one: the rollup is keyed on a place, and "everywhere" is not a
             place it was ever keyed on. */
         signalsLocationId: '',
+        /** Set once the operator picks an area, so the automatic default stops. */
+        signalsAreaPinned: false,
+        /** The place behind the current top opportunity, the anchor for that default. */
+        opportunityTopLocationId: null,
         gaps: { items: [], total: 0, offset: 0 },
         signals: [],
       }
@@ -555,12 +559,35 @@
           return
         }
 
-        // Reference names first: the signals section has to know which place it is
-        // reading before it can read one, and its default comes from that list.
+        // Reference names first: the signals section has to know which place it can
+        // read before it reads one. The board and the gaps are read before the
+        // signals, because the signals open on the place behind the top finding
+        // rather than on the countrywide slice, which is usually empty.
         await loadReferenceNames()
-        await Promise.all([loadOverview(), loadSignals()])
-        await loadGaps()
-        await loadOpportunities()
+        await Promise.all([loadOverview(), loadGaps(), loadOpportunities()])
+        adoptSignalsArea()
+        await loadSignals()
+      }
+
+      /**
+       * Points the signals at the place behind the top finding.
+       *
+       * A signal is keyed on one exact place, so a useful default has to be a real
+       * one: the countrywide slice is empty and the shallowest place is the country.
+       * The board is ranked, so its first row names the place the engine is most
+       * concerned about, and a place that produced a finding has demand by
+       * definition. The operator's own choice always wins over this.
+       */
+      function adoptSignalsArea() {
+        if (state.signalsAreaPinned) return
+        const anchored = state.opportunityTopLocationId ?? state.gaps.items[0]?.locationId ?? null
+        if (!anchored) return
+        const option = [...els.signalsLocation.querySelectorAll('option')].find(
+          (candidate) => candidate.value === anchored,
+        )
+        if (!option) return
+        els.signalsLocation.value = option.value
+        state.signalsLocationId = option.value
       }
 
       /**
@@ -592,13 +619,21 @@
             for (const location of rows) {
               const option = document.createElement('option')
               option.value = location.id
+              option.dataset.kind = location.kind
               option.textContent = location.pathNames ?? location.name
               group.append(option)
             }
             els.signalsLocation.append(group)
           }
-          // The first place, so the section opens on real demand rather than on the
-          // countrywide slice, which is the one rollup that is usually empty.
+          // A provisional default, used only when the engine has produced nothing to
+          // anchor on. A signal is keyed on one exact place, and the list is ordered
+          // shallowest-first, so the first option is the country - the one rollup
+          // that is almost always empty. The first place below it is far more likely
+          // to hold something. `enter()` overrides this with the place behind the top
+          // finding once the board has loaded.
+          const options = [...els.signalsLocation.querySelectorAll('option')]
+          const firstPlace = options.find((option) => option.dataset.kind !== 'country') ?? options[0]
+          if (firstPlace) els.signalsLocation.value = firstPlace.value
           state.signalsLocationId = els.signalsLocation.value || ''
         } catch {
           // A missing list is a cosmetic loss for the names and an empty selector
@@ -793,6 +828,7 @@
         if (els.opportunityState.value) params.set('state', els.opportunityState.value)
         try {
           const body = await api(`${API}/admin/lab/opportunities?${params}`)
+          state.opportunityTopLocationId = (body.data ?? [])[0]?.locationId ?? null
           renderOpportunities(body.data ?? [], body.meta ?? {})
         } catch (error) {
           if (error.status === 401) {
@@ -1022,6 +1058,7 @@
       })
 
       els.signalsLocation.addEventListener('change', () => {
+        state.signalsAreaPinned = true
         state.signalsLocationId = els.signalsLocation.value
         loadSignals()
       })

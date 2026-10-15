@@ -148,6 +148,7 @@ const cycles = [
   ['requests page', { script: 'e2e_requests.py', seed: false }],
   ['ask page', { script: 'e2e_ask.py', seed: true }],
   ['provider desk', { script: 'e2e_provider.py', seed: true }],
+  ['lab page', { script: 'e2e_lab.py', seed: true }],
 ]
 
 const results = []
