@@ -68,11 +68,19 @@ COPY package.json ./
 COPY src ./src
 COPY scripts ./scripts
 COPY web ./web
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # The one directory that survives `docker rm`. Everything else above is
 # reproducible from this file and the git repository, so an image rebuild is not a
 # reason to lose a database.
-RUN mkdir -p /data && chown -R node:node /data /srv/kampala
+#
+# The chown here only affects the path in the image. On a host that bind-mounts a
+# volume over /data (Compose does not, but a PaaS does), the mount arrives
+# root-owned and this line is shadowed - which is why the entrypoint re-applies
+# it at start rather than trusting this one.
+RUN mkdir -p /data \
+  && chown -R node:node /data /srv/kampala \
+  && chmod 0755 /usr/local/bin/docker-entrypoint.sh
 VOLUME ["/data"]
 
 ENV NODE_ENV=production \
@@ -80,10 +88,12 @@ ENV NODE_ENV=production \
     KIP_HOST=0.0.0.0 \
     KIP_PORT=4310
 
-# Running as the unprivileged `node` user that the base image already provides.
-# The data directory is chowned above so this does not need root to write.
-USER node
-
+# Deliberately NOT `USER node`. The container starts as root so the entrypoint
+# can chown the data directory when a PaaS has mounted it root-owned (see
+# docker-entrypoint.sh), and then drops to the unprivileged `node` user before
+# the app runs. A plain `docker run` without a mounted volume, and `docker
+# compose`, which sets `user: node` itself, both skip the drop and behave exactly
+# as an image with `USER node` would. The app never runs as root either way.
 EXPOSE 4310
 
 # Reports on the app actually answering, not on the process existing. /api/v1/meta
@@ -93,5 +103,5 @@ EXPOSE 4310
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${KIP_PORT}/api/v1/meta" || exit 1
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "src/server.js"]

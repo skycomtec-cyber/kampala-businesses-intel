@@ -1,0 +1,5 @@
+# Shell scripts here run on Linux hosts (systemd units, the bootstrap runbook,
+# and the container entrypoint). Git's autocrlf would check them out with CRLF on
+# Windows, and a CRLF shebang fails as "bad interpreter: /bin/sh^M", so pin them
+# to LF at checkout time as well as in the repository.
+*.sh text eol=lf
