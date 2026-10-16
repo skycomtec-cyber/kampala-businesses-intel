@@ -21,7 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { loadConfig } from './config.js'
 import { openApp } from './db/index.js'
-import { seedReferenceData, seedCatalogue } from './seed/index.js'
+import { seedReferenceData, seedCatalogue, seedAdmin } from './seed/index.js'
 import { buildApi } from './api/index.js'
 import { liveLock } from './db/backup.js'
 import { createScheduler } from './ops/scheduler.js'
@@ -32,6 +32,10 @@ const app = openApp({ config })
 seedReferenceData(app, { config })
 // After the vocabulary, so the record has a category and a district to point at.
 seedCatalogue(app, { config })
+// A platform with no shell cannot run `create-admin`, so the first account, when
+// the environment names one, arrives here. Gated on there being no accounts yet,
+// so it never replaces a real operator.
+const seededAdmin = seedAdmin(app, { config })
 
 const server = await buildApi({ app, config })
 let shuttingDown = false
@@ -182,6 +186,22 @@ try {
   process.stdout.write(`\nKampala Intelligence Platform listening at ${address}\n`)
   process.stdout.write(`API base: ${address}${config.api.prefix}\n`)
   process.stdout.write(`Database: ${config.database.file}\n\n`)
+
+  // The first operator, when the environment named one and there was none yet.
+  // Logged rather than printed on its own line, so it never competes with the
+  // launcher's URL capture above, and never carries the password.
+  if (seededAdmin.created) {
+    server.log.info({ email: seededAdmin.email }, 'created the first operator account')
+  } else if (seededAdmin.reason === 'invalid') {
+    server.log.error(
+      { message: seededAdmin.message },
+      'could not create the operator account named in the environment',
+    )
+  } else if (seededAdmin.reason === 'not-configured') {
+    server.log.warn(
+      'no operator account exists and none was named in the environment; create one to sign in',
+    )
+  }
 
   // After listening, so the timers never delay the port the platform health-checks.
   // A no-op unless KIP_OPS_SCHEDULE is set.

@@ -225,3 +225,51 @@ export function seedCatalogue(app, { config = { seed: { catalogueDemo: true } } 
     reason: result.reason ?? null,
   }
 }
+
+/**
+ * Creates the first operator account when the install has none and the
+ * environment names one.
+ *
+ * The reason this exists at all is a platform with no shell: a free
+ * platform-as-a-service tier cannot run `npm run create-admin`, so the only way a
+ * first account can appear is from the environment the deploy already carries.
+ * It is gated on there being no accounts yet, so a password left in the
+ * environment after the first boot never resets or replaces a real operator.
+ *
+ * @param {object} app the open database handle and repositories
+ * @param {{ config?: object }} [options] `config.admin.email`/`password` name the account
+ * @returns {{ created: boolean, skipped: boolean, email: string|null, reason: string|null, message: string|null }}
+ */
+export function seedAdmin(app, { config = {} } = {}) {
+  const { email, password, name } = config.admin ?? {}
+
+  if (app.users.list().length > 0) {
+    return { created: false, skipped: true, email: null, reason: 'exists', message: null }
+  }
+  if (!email || !password) {
+    return { created: false, skipped: true, email: null, reason: 'not-configured', message: null }
+  }
+
+  // A weak password or malformed email in the environment must not crash the
+  // server at boot: the platform would never go green and the operator would see
+  // only a build failure. Report it instead and let the caller log it, so the
+  // service still serves the public site and the account can be made another way.
+  try {
+    const user = app.users.create({
+      email,
+      password,
+      displayName: name || email.split('@')[0],
+      role: 'admin',
+      status: 'active',
+    })
+    return { created: true, skipped: false, email: user.email, reason: null, message: null }
+  } catch (error) {
+    return {
+      created: false,
+      skipped: false,
+      email: null,
+      reason: 'invalid',
+      message: error.message,
+    }
+  }
+}

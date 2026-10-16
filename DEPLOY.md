@@ -218,10 +218,24 @@ unit at a mounted volume.
 
 The steps above assume a host you own: a sudo user, a package manager, systemd,
 nginx. A platform-as-a-service gives you the same single Node process and the
-same SQLite file without any of that, at the cost of a monthly fee ($7/month
-for the plan this needs, which is the cheapest tier that offers a persistent
-disk and a shell) and a narrower set of knobs. Use it when there is no VPS, or
-when you would rather not patch one.
+same SQLite file without any of that. Use it when there is no VPS, or when you
+would rather not patch one.
+
+There are two shapes, and the difference is money:
+
+- **Free** (`plan: free`, what `render.yaml` ships). No card, no monthly fee, and
+  a custom domain. The catch is that free web services cannot attach a
+  persistent disk, so SQLite lives on the container's own filesystem and every
+  redeploy, restart or idle spin-down starts from an empty database. That is the
+  right shape for a demonstration or a test.
+- **Paid** (`plan: starter`, about $7/month). Adds a persistent disk, a shell and
+  no idle spin-down, so the database survives redeploys and the runbook's
+  `create-admin` step works. That is the shape for anything that must keep its
+  data.
+
+Everything below - the image, the entrypoint, the environment, the domain, the
+in-process schedulers - is the same in both; only the plan line and the presence
+of the disk differ, and the two places that change are called out.
 
 The platform does the jobs that `certbot`, `nginx` and the reverse proxy did up
 there: it terminates TLS, gives the service a hostname, and forwards public
@@ -232,15 +246,15 @@ timer, which is the one thing below that has no direct equivalent.
 
 | File | Role |
 | --- | --- |
-| `render.yaml` | The blueprint. Describes the service, its disk and its environment so the whole thing is reproduced from the repository rather than clicked together. |
+| `render.yaml` | The blueprint. Describes the service, its plan and its environment so the whole thing is reproduced from the repository rather than clicked together. |
 | `app/Dockerfile` | The image. Already sets `NODE_ENV=production`, `KIP_HOST=0.0.0.0`, `KIP_PORT=4310` and `KIP_DATA_DIR=/data`. |
-| `app/docker-entrypoint.sh` | Chowns the disk and drops to `node`, the one non-obvious part, below. |
+| `app/docker-entrypoint.sh` | Chowns the data directory and drops to `node`, the one non-obvious part, below. |
 
 ### Why there is an entrypoint
 
 On a host, `/var/lib/kampala-intel` is created by an operator and owned by the
-service user. A PaaS instead bind-mounts the persistent disk over `/data`, and
-that mount arrives **root-owned**, whatever the image did at build time. The
+service user. A paid PaaS instead bind-mounts the persistent disk over `/data`,
+and that mount arrives **root-owned**, whatever the image did at build time. The
 image used to run as the unprivileged `node` user, so `better-sqlite3` could not
 create `kampala.db` and the process died at boot with `SQLITE_CANTOPEN` — a
 failure that looks like a code bug and is entirely a permissions one.
@@ -248,8 +262,9 @@ failure that looks like a code bug and is entirely a permissions one.
 The container therefore starts as root, and `docker-entrypoint.sh` `chown`s
 `$KIP_DATA_DIR` (best effort, since it may already be correct) and then drops to
 `node` before the app runs, using `setpriv`. The app itself never runs as root.
-`docker compose` is unaffected: it sets `user: node` itself, so the drop is
-skipped and the ownership comes from the named volume.
+On the free plan there is no mounted disk, so the directory is created inside the
+container and the `chown` is a no-op - the script stays the same either way, and
+`docker compose` is unaffected because it sets `user: node` itself.
 
 ### Deploy
 
@@ -258,19 +273,20 @@ skipped and the ownership comes from the named volume.
    repository. Render reads `render.yaml` and creates:
    - a **Docker** web service named `kampala-intel`, built from
      `app/Dockerfile` with `app/` as the build context,
-   - a **1 GB disk** mounted at `/data`,
-   - the environment below.
+   - the environment below, including a generated session secret and a generated
+     first-operator password.
 3. Wait for the first deploy to go green. The health check is
    `/api/v1/meta`, which is only answered once migrations and the reference
    seed have finished, so a green deploy means a working database.
 
 To do it without the blueprint, create a **Web Service** by hand with Language
 `Docker`, Dockerfile Path `app/Dockerfile`, **Docker Build Context Directory**
-`app`, plan **Starter**, and add the disk and the variables yourself.
+`app`, and add the variables yourself. Pick plan **Free** for a test, or
+**Starter** and add a 1 GB disk at `/data` to keep the database across redeploys.
 
 ### The environment
 
-`render.yaml` sets five values; the image already sets the rest.
+`render.yaml` sets eight values; the image already sets the rest.
 
 | Variable | Value | Why |
 | --- | --- | --- |
@@ -280,6 +296,8 @@ To do it without the blueprint, create a **Web Service** by hand with Language
 | `KIP_OPS_SCHEDULE` | `true` | There is no systemd timer here, so the server runs its own nightly maintenance and backup. See "Scheduled work" below. |
 | `KIP_HARVEST_SCHEDULE` | `true` | No timer for harvest; the server re-harvests plans that declare a cadence. Only set after reviewing plans and sources. |
 | `KIP_SESSION_SECRET` | generated | Render generates and keeps it, so a redeploy does not sign every operator out. |
+| `KIP_ADMIN_EMAIL` | you@example.com | The first operator account, created at boot because the free plan has no shell to run `create-admin`. Edit before deploying. |
+| `KIP_ADMIN_PASSWORD` | generated | The password for that account. Render generates it; read it back from the Environment tab to sign in, then change it. |
 
 `KIP_HOST=0.0.0.0` comes from the image. On the host the config sets
 `127.0.0.1` because nginx shares the loopback; here the router reaches the
@@ -304,16 +322,34 @@ is no `certbot` step.
 
 ### The first operator account
 
-Starter plans include a shell, which opens in the image's working directory
-(`/srv/kampala`, the app root). Same command as step 6:
+The free plan has **no shell**, so `create-admin` cannot be run there. That is
+why `render.yaml` carries `KIP_ADMIN_EMAIL` and a generated `KIP_ADMIN_PASSWORD`:
+the server reads them at boot and creates the account when there is not one yet
+(`seedAdmin` in `src/seed/index.js`). It is gated on there being no accounts
+yet, so those variables never reset or replace a real operator afterwards.
+
+To sign in on the free plan:
+
+1. Open the service's **Environment** tab, copy the value of `KIP_ADMIN_PASSWORD`
+   (Render generated it and kept it), and edit `KIP_ADMIN_EMAIL` to the address
+   you want if the placeholder is still there. Setting an env var redeploys.
+2. Sign in at `https://kbi.kampalabiz.space/operator.html` and change the
+   password (the account is created with a password you did not choose).
+
+The generated password is a random value, so it satisfies the strength rule in
+practice. If a boot log ever says the password was rejected, set
+`KIP_ADMIN_PASSWORD` yourself to something with upper and lower case, a digit or
+a symbol, and let it redeploy; the account is created on that boot instead.
+
+A **Starter** plan includes a shell, which opens in the image's working
+directory (`/srv/kampala`, the app root), so there the same command as step 6
+also works if you would rather not set the variables:
 
 ```bash
 KIP_ADMIN_EMAIL=you@example.com \
 KIP_ADMIN_PASSWORD='a-long-unguessable-one' \
 node scripts/create-admin.js
 ```
-
-Sign in at `https://kbi.kampalabiz.space/operator.html`.
 
 ### Verify
 
@@ -323,7 +359,7 @@ curl -fsS https://kbi.kampalabiz.space/api/v1/meta   # the config in force
 
 `"environment":"production"` proves `NODE_ENV` took effect, and the retention
 numbers prove the environment is being read at all. The Render dashboard shows
-the same request in the service's logs, plus the disk's state.
+the same request in the service's logs.
 
 ### Scheduled work, run from inside the server
 
@@ -358,10 +394,13 @@ Three things about it are worth knowing:
 
 Retention is therefore enforced on a platform with no timer, and `/api/v1/meta`
 reports windows that a job actually honours. The one thing that is still the
-operator's job is the **off-host copy**: Render keeps automatic daily snapshots of
-the disk, which is the copy the VPS note says to make, while the in-process backup
-writes to `/data/backups` on the same disk and carries the same caveat as the end
-of the runbook above.
+operator's job is the **off-host copy**. On a paid plan Render keeps automatic
+daily snapshots of the disk, which is the copy the VPS note says to make, while
+the in-process backup writes to `/data/backups` on the same disk and carries the
+same caveat as the end of the runbook above. **On the free plan there is no disk
+and therefore no snapshot**: the data, the state file and the backup all live in
+the container and all vanish on redeploy or spin-down. Treat that plan as a
+demonstration and take a copy of anything you care about before it restarts.
 
 `KIP_HARVEST_SCHEDULE=true` also runs the harvest scheduler in-process; it scans
 plans for due work, archives pages under `<KIP_DATA_DIR>/harvest-archive`, and
@@ -378,9 +417,11 @@ is per plan from the catalogue).
 ### Updating
 
 The blueprint deploys automatically on a push to the default branch, so an update
-is `git push`; there is no `git pull` and `systemctl restart`. Because the
-database is on a disk, a deploy briefly restarts the single instance rather than
-rolling, which is fine for an install of this size.
+is `git push`; there is no `git pull` and `systemctl restart`. A deploy briefly
+restarts the single instance rather than rolling, which is fine for an install of
+this size. On the free plan a deploy also **resets the database**, since the
+container's filesystem is the only store; on a paid plan with the disk attached
+the data survives the restart.
 
 A stop that is force-killed — the platform's grace period expiring, an
 out-of-memory kill — leaves the data directory's `.lock` behind. That does not

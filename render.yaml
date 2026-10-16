@@ -1,9 +1,17 @@
-# Render Blueprint - one web service with the SQLite database on a persistent
-# disk, reachable at kbi.kampalabiz.space.
+# Render Blueprint - one web service running the app, reachable at
+# kbi.kampalabiz.space.
 #
 # Deploy with: Render Dashboard -> New -> Blueprint -> pick this repository.
-# Render reads this file, creates the service, attaches the disk and shows the
-# CNAME target to add at the DNS provider (see DEPLOY.md, "PaaS deployment").
+# Render reads this file, creates the service and shows the onrender.com target
+# to CNAME at the DNS provider (see DEPLOY.md, "PaaS deployment").
+#
+# This is the free shape: `plan: free` is what lets a Blueprint deploy without a
+# card, and free web services cannot attach a persistent disk, so there is no
+# disk here and SQLite lives on the container's own filesystem. Every redeploy,
+# restart or idle spin-down starts from an empty database. That is fine for a
+# demonstration and wrong for anything that must keep its data; to keep it, move
+# to `plan: starter` and add back the disk block (name / mountPath / sizeGB) -
+# see DEPLOY.md, "PaaS deployment".
 #
 # The Dockerfile lives in app/, so both the path and the build context point
 # there. The image already sets NODE_ENV, KIP_HOST, KIP_PORT and KIP_DATA_DIR;
@@ -13,7 +21,7 @@ services:
   - type: web
     name: kampala-intel
     runtime: docker
-    plan: starter
+    plan: free
     region: frankfurt
     dockerfilePath: ./app/Dockerfile
     dockerContext: ./app
@@ -43,7 +51,12 @@ services:
       # Generated once by Render and kept, so sessions survive a redeploy.
       - key: KIP_SESSION_SECRET
         generateValue: true
-    disk:
-      name: kampala-data
-      mountPath: /data
-      sizeGB: 1
+      # The first operator account, created at boot because free has no shell to
+      # run `create-admin`. Edit the email before deploying; Render generates the
+      # password and keeps it, so read it back from the Environment tab to sign in
+      # and then change it. The server only creates an account when there is none
+      # yet, so these never replace a real operator afterwards.
+      - key: KIP_ADMIN_EMAIL
+        value: "you@example.com"
+      - key: KIP_ADMIN_PASSWORD
+        generateValue: true

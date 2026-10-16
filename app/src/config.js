@@ -283,6 +283,26 @@ export function loadConfig(overrides = {}) {
       // because zero would make every day look expired.
       intervalHours: readPositiveInt('KIP_OPS_INTERVAL_HOURS', 24),
     },
+    // The first operator account, created at boot when there is not one yet.
+    //
+    // Off by default, and the values ship commented out in `.env.example`: an
+    // install that runs `npm run bootstrap` / `create-admin` sets them for one
+    // command and unsets them, and a password that lingers in a file the server
+    // reads on every start is a way to leak one. They exist here for the one case
+    // that has no shell to run either command - a platform-as-a-service free tier,
+    // where the first account can only arrive from the environment the deploy
+    // already carries.
+    //
+    // Read into config rather than pulled from `process.env` at the call site so
+    // the value has one home; nothing logs the config object, and `/api/v1/meta`
+    // picks its fields by name rather than spreading it.
+    admin: {
+      email: readString('KIP_ADMIN_EMAIL', ''),
+      // Kept empty rather than defaulted, so an install that wants no seeded
+      // operator gets one by setting nothing.
+      password: readString('KIP_ADMIN_PASSWORD', ''),
+      name: readString('KIP_ADMIN_NAME', ''),
+    },
     seed: {
       // Reference data (administrative locations, taxonomy) is real-world
       // reference data, not synthetic content. Business content is never
