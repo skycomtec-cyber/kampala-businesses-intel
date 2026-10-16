@@ -1,0 +1,39 @@
+# Kampala Businesses Intel - scheduled harvest cadence
+#
+# 04:17, after the maintenance timer at 03:17 and the backup timer at 03:47. The
+# ordering matters: a harvest writes new catalogue records and opens runs, and
+# those should be in the night's backup rather than arriving just after it.
+#
+#   sudo cp deploy/kampala-intel-harvest.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kampala-intel-harvest.timer
+#
+# The timer's period is the resolution at which due-ness is checked, not the
+# cadence itself. Each plan is re-read only when its own `cadenceDays` has
+# elapsed, so a plan with `"cadenceDays": 30` runs roughly monthly even though this
+# fires nightly. Set a plan's cadence no finer than this period: a cadence of 1 hour
+# is not expressible here, and a plan asking for less than a day will simply run as
+# often as the timer.
+
+[Unit]
+Description=Run the Kampala Businesses Intel scheduled harvest nightly
+Documentation=file:/srv/kampala-intel/app/README.md
+
+[Timer]
+# Daily. This is the finest cadence the scheduler can honour, since it measures in
+# whole days; a plan that wants to be re-read more often than that is not something
+# this timer can do.
+OnCalendar=*-*-* 04:17:00
+
+# A machine that was off at 04:17 should run this on the next boot. A plan whose
+# cadence elapsed while the host slept is still due, and catches up here.
+Persistent=true
+AccuracySec=1m
+
+# Spread the load, as the other timers do, and stay well clear of the working day.
+RandomizedDelaySec=300
+
+Unit=kampala-intel-harvest.service
+
+[Install]
+WantedBy=timers.target

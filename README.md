@@ -538,6 +538,79 @@ npm run harvest -- plans/kampalabiz-space/eder-establishment.json --mirror-out /
 404s abort loudly; pages extracting nothing or missing required fields (name, category, location) abort without writing a batch. Replaying the same batch is idempotent (creates nothing, records a new run).
 
 
+### Keeping a source fresh
+
+A harvest run is a moment. A directory that stays accurate is a harvest that happens again, so a plan
+may declare a cadence and leave the remembering to the scheduler:
+
+```json
+{
+  "sourceKey": "kampalabiz-space",
+  "batchRef": "web-mirror/eder-establishment",
+  "cadenceDays": 30,
+  "pages": [{ "url": "https://eder-est.com/", "mirror": "eder-est.com/index.html" }],
+  "fields": { "name": [{ "selector": "title" }], "category": [{ "value": "..." }], "location": [{ "value": "Kampala" }] }
+}
+```
+
+`cadenceDays` is optional, and its absence is the whole safety story: a plan that does not declare one
+is a **manual** plan and the scheduler leaves it alone. No shipped plan declares a cadence, so a fresh
+install schedules nothing. Adding the field is the opt-in, and it is a change to a plan file, which is a
+change under review like any other.
+
+```bash
+npm run harvest:schedule                        # harvest every plan that is due
+npm run harvest:schedule -- --dry-run           # list what is due, harvest nothing, no network
+npm run harvest:schedule -- --all               # harvest every scheduled plan, due or not
+npm run harvest:schedule -- --from-dir /mirror  # replay offline, from a saved mirror
+```
+
+Three rules decide whether a plan is due, and each is the opposite of the easy answer:
+
+- **The clock is per plan, keyed on `(source, batchRef)`.** Two plans reading one source on different
+  cadences do not reset each other, because a plan's last run is looked up by the batch it names.
+- **Only a completed run counts.** A run that failed did not refresh the source, so it does not reset
+  the cadence. A source that fails every night is retried every night rather than considered fresh
+  forever.
+- **Never harvested is always due.** Declaring a cadence is also declaring that the first run should
+  happen.
+
+Each scheduled run is a **live** harvest (polite user-agent, per-host delay, timeout, retries) that
+archives the pages it read — the same `--mirror-out` tree a manual run can produce — under
+`<dataDir>/harvest-archive/<source>/<batch>-<timestamp>/`, so the run can be replayed offline with
+`--from-dir` after the live page has changed. The archive is in the data directory because it is
+generated state, and it belongs on the volume you back up.
+
+After each run the scheduler reports **what changed since that plan last ran**: the references added,
+the references removed, and the count that stayed the same. This is deliberately not the same question
+as [reconciliation](#harvest-runs-and-reconciliation) — reconciliation asks which of a source's
+references *any* earlier run saw and this one did not; the diff asks what changed between the two most
+recent runs of *one* plan, so a source that adds a listing and drops another shows both movements in a
+single line. Neither report changes anything: a reference that disappears from a run is evidence the
+page changed, not that the business closed.
+
+```
+  harvested plans/kampalabiz-space/eder-establishment.json
+            1 row(s): 0 created, 1 skipped, 0 failed.
+            diff vs previous run: +1 added, -1 removed, 3 unchanged.
+              + https://eder-est.com/branches
+              - https://eder-est.com/locations
+```
+
+To run it on a timer, `deploy/kampala-intel-harvest.{service,timer}` is an **opt-in** unit — a
+scheduled harvest makes requests to third-party sites, which is a decision about their terms and your
+bandwidth, so it is not installed with the service:
+
+```bash
+sudo cp deploy/kampala-intel-harvest.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now kampala-intel-harvest.timer
+```
+
+The timer's period is the resolution at which due-ness is checked, not the cadence: a plan with
+`"cadenceDays": 30` runs roughly monthly even though the timer fires nightly. Set a cadence no finer
+than the timer's period.
+
+
 ### Harvest runs and reconciliation
 
 A file is a batch, and a batch needs one record. Attributing an import to a registered source with
@@ -1416,6 +1489,11 @@ day rather than yesterday's. Both timers carry `Persistent=true`, so a machine t
 runs the job at the next boot — without that, one unattended reboot silently ends the schedule and
 nothing reports it.
 
+A fourth pair, `kampala-intel-harvest.{service,timer}` (04:17 nightly), re-reads the harvest plans that
+declare a cadence. It is deliberately **not** in the list above and not enabled by default: scheduled
+harvesting makes requests to third-party websites, and that is a decision to make on purpose, not a
+default to inherit. See [Keeping a source fresh](#keeping-a-source-fresh) for enabling it.
+
 The service runs as a dedicated unprivileged user with `ProtectSystem=strict` and a single
 `ReadWritePaths` entry for the data directory. The code directory is read-only to it, so a
 compromised request handler cannot rewrite the server it is running in. Backups land inside the data
@@ -1472,12 +1550,13 @@ class of breakage entirely.
 │   │   ├── db/               driver, migrations, repositories, backup.js
 │   │   ├── seed/             idempotent reference import
 │   │   ├── import/           csv reader, row resolution, the importer itself
+│   │   ├── harvest/          plans, extraction, batches, and the harvest scheduler
 │   │   ├── api/              plugins, routes, response envelope
 │   │   ├── media/            the photo store: bytes on disk, never in the database
 │   │   └── server.js         the process
-│   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, create-admin,
-│   │                         set-password, import, backup, restore, and the one-off repairs
-│   │                         — backfill-provenance, add-sources
+│   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, harvest,
+│   │                         harvest:schedule, create-admin, set-password, import, backup,
+│   │                         restore, and the one-off repairs — backfill-provenance, add-sources
 │   ├── test/                 254 tests, no network, temporary folders only
 │   └── web/                  the website pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in

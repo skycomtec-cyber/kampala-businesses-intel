@@ -246,6 +246,25 @@ export function loadConfig(overrides = {}) {
       // Trend comparison window, in days, for the rising/falling annotation.
       trendWindowDays: readInt('KIP_GAP_TREND_WINDOW_DAYS', 7),
     },
+    harvest: {
+      // The directory of harvest plans. A plan names a registered source, the
+      // pages to read and how to read each field, and it may declare a cadence;
+      // `harvest:schedule` acts only on the plans that declare one. Defaulted to
+      // the `plans` folder in the app so a checkout needs no configuration.
+      plansDir: path.resolve(
+        overrides.harvest?.plansDir ??
+          readString('KIP_HARVEST_PLANS_DIR', path.join(APP_ROOT, 'plans')),
+      ),
+      // Where a scheduled live harvest archives the pages it read, so the run can
+      // be replayed offline with `--from-dir` even after the live page changes.
+      // Inside the data directory for the same reason media is: it is generated
+      // state, and it belongs on the volume that is backed up, disposable beside
+      // the database that points at it.
+      archiveDir: path.resolve(
+        overrides.harvest?.archiveDir ??
+          readString('KIP_HARVEST_ARCHIVE_DIR', path.join(dataDir, 'harvest-archive')),
+      ),
+    },
     seed: {
       // Reference data (administrative locations, taxonomy) is real-world
       // reference data, not synthetic content. Business content is never

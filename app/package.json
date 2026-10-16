@@ -23,7 +23,8 @@
     "analyse": "node scripts/analyse.js",
     "test": "node --test",
     "test:e2e": "node scripts/run-e2e.mjs",
-    "harvest": "node scripts/harvest.js"
+    "harvest": "node scripts/harvest.js",
+    "harvest:schedule": "node scripts/harvest-schedule.js"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

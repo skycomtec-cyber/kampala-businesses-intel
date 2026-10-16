@@ -1,0 +1,75 @@
+# Kampala Businesses Intel - scheduled harvest
+#
+# Re-reads the plans that declare a cadence, archives what each live run read, and
+# records a run through the same accountable import path as a manual harvest. The
+# work is described in scripts/harvest-schedule.js and src/harvest/schedule.js.
+#
+# OPT-IN, and deliberately not installed with the service. A scheduled harvest
+# makes requests to third-party websites, which is a decision about their terms and
+# your bandwidth, not a default. Install it only once the plans you want re-read
+# say so with a `cadenceDays` on the plan:
+#
+#   sudo cp deploy/kampala-intel-harvest.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kampala-intel-harvest.timer
+#
+# Check what it did:
+#   systemctl list-timers kampala-intel-harvest.timer
+#   journalctl -u kampala-intel-harvest -n 80
+#
+# Dry-run it first, as the service user, to see what it would do:
+#   sudo -u kampala env KIP_DATA_DIR=/var/lib/kampala-intel \
+#     /usr/bin/node scripts/harvest-schedule.js --dry-run
+
+[Unit]
+Description=Kampala Businesses Intel scheduled harvest
+Documentation=file:/srv/kampala-intel/app/README.md
+After=kampala-intel.service
+
+[Service]
+Type=oneshot
+User=kampala
+Group=kampala
+WorkingDirectory=/srv/kampala-intel/app
+
+Environment=NODE_ENV=production
+Environment=KIP_DATA_DIR=/var/lib/kampala-intel
+
+# `--out-dir` is inside the data directory on purpose. The default is
+# ./harvest-batches beside the app, which is read-only here because ProtectSystem
+# is strict below, so a run that wrote there would fail. Archived pages go to
+# <dataDir>/harvest-archive by default; the batch files belong beside them.
+ExecStart=/usr/bin/node scripts/harvest-schedule.js --out-dir /var/lib/kampala-intel/harvest-batches
+
+# A live run fetches one page at a time with a polite per-host delay, so the wall
+# time is pages times delay. Thirty minutes is room for a few hundred pages; a
+# timer that fires again before this finishes would be serialised by SQLite rather
+# than overlapping, so being generous costs nothing.
+TimeoutStartSec=1800
+
+# Same hardening as the service, because it is the same code and the same data.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+# Network is required: this job fetches pages. Everything else about the host
+# stays out of reach.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+# The database, the archive tree and the batch files all live under the data
+# directory. ProtectSystem=strict makes everything else read-only.
+ReadWritePaths=/var/lib/kampala-intel
+
+TimeoutStopSec=600

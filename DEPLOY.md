@@ -127,6 +127,11 @@ sudo systemctl status kampala-intel --no-pager
 | `kampala-intel-maintenance.timer` | 03:17 nightly | Roll up demand, measure gaps, enforce retention. |
 | `kampala-intel-backup.timer` | 03:47 nightly | Copy the database and verify the copy. |
 
+`deploy/kampala-intel-harvest.{service,timer}` is a fourth, **opt-in** pair that re-reads the harvest
+plans declaring a cadence, at 04:17. It is not installed above because it makes requests to third-party
+sites: enable it only once the plans you want re-read say so with a `cadenceDays`, and read
+[Keeping a source fresh](README.md#keeping-a-source-fresh) first.
+
 ## 5. nginx for the domain
 
 ```bash

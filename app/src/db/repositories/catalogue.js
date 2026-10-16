@@ -229,6 +229,25 @@ export function createCatalogueRepository(db, deps = {}) {
         )
       ORDER BY p.imported_at ASC, p.external_ref ASC`,
   )
+  // The last run a scheduled plan actually completed.
+  //
+  // Scoped to one `batch_ref` because that is what makes a plan a plan: two plans
+  // reading the same source may run on different cadences, and a plan is only due
+  // when *its own* last run is old. `IS` rather than `=` so a plan with no batch
+  // reference matches the runs that carry no batch reference either, instead of
+  // matching nothing.
+  //
+  // Only `completed` runs count. A failed run did not refresh the source, so it
+  // must not reset the cadence: otherwise a source that fails every time would be
+  // considered freshly harvested forever and never retried.
+  const selectLatestCompletedRunForPlan = db.prepare(
+    `SELECT * FROM catalogue_import_run
+      WHERE source_id = @sourceId
+        AND batch_ref IS @batchRef
+        AND status = 'completed'
+      ORDER BY started_at DESC, rowid DESC
+      LIMIT 1`,
+  )
 
   const updateBusinessSource = db.prepare(
     `UPDATE business
@@ -682,6 +701,32 @@ const selectMissingProvenance = db.prepare(
     latestRunForSource(sourceId) {
       const row = selectLatestRunForSource.get(sourceId)
       return row ? camelizeRow(row) : null
+    },
+
+    /**
+     * The last completed run for one plan, or null if it has never run.
+     *
+     * A plan is identified to the catalogue by `(source, batchRef)`, so this is
+     * what the scheduler asks before deciding whether a plan is due. It returns
+     * only completed runs for the same reason a failed one must not reset a
+     * cadence: "we tried and it broke" is not "we refreshed it".
+     */
+    latestCompletedRunForPlan(sourceId, { batchRef = null } = {}) {
+      const row = selectLatestCompletedRunForPlan.get({ sourceId, batchRef })
+      return row ? camelizeRow(row) : null
+    },
+
+    /**
+     * The references a run itself saw, as a plain list.
+     *
+     * Read *before* a fresh run overwrites them: provenance is upserted on
+     * `(source, external_ref)` and the upsert moves `run_id` onto the newest run
+     * that saw the reference. So the moment a new run observes a reference, that
+     * reference no longer points at the run that saw it last, and a diff must be
+     * built from a snapshot taken first. That is exactly what the scheduler does.
+     */
+    runReferences(runId) {
+      return selectRunSeenRefs.all({ runId }).map((row) => row.external_ref)
     },
 
     listRuns({ sourceId = null, status = null, limit, offset } = {}) {

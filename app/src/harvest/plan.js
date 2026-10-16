@@ -59,6 +59,8 @@ export function definePlan(raw, { filename = null } = {}) {
     fail('a plan must name the catalogue source it harvests (`sourceKey`).')
   }
 
+  const cadenceDays = normaliseCadence(raw.cadenceDays, fail)
+
   const pages = normalisePages(raw, fail)
 
   const fields = raw.fields
@@ -93,6 +95,11 @@ export function definePlan(raw, { filename = null } = {}) {
     sourceKey: raw.sourceKey.trim(),
     baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : null,
     batchRef: typeof raw.batchRef === 'string' ? raw.batchRef : null,
+    // How often this plan should be re-harvested, in days. Absent means the plan
+    // is manual: it runs when an operator runs it, and the scheduler leaves it
+    // alone. Presence is the opt-in, so a plan that never says it wants a cadence
+    // is never fetched on a timer.
+    cadenceDays,
     notes: typeof raw.notes === 'string' ? raw.notes : null,
     pages: Object.freeze(pages),
     fields: Object.freeze(
@@ -101,6 +108,28 @@ export function definePlan(raw, { filename = null } = {}) {
     externalRef: Object.freeze([...identity]),
     filename,
   })
+}
+
+/**
+ * Reads a plan's re-harvest cadence, if it asks for one.
+ *
+ * Bounded to a year. The point of a cadence is to keep a listing fresh, and no
+ * source in this directory is meaningfully "due" at a longer interval than that;
+ * a value beyond it is far more likely to be a unit mistake (someone typing
+ * seconds, or a stray zero) than a real request, and the failure mode of guessing
+ * is a source that silently stops being re-read. So the ceiling is refused rather
+ * than clamped, and the operator is told.
+ *
+ * A non-integer is refused for the same reason. Half a day of cadence is a
+ * scheduling model this does not implement, and accepting it as one day would
+ * quietly change what was asked for.
+ */
+function normaliseCadence(value, fail) {
+  if (value === undefined || value === null) return null
+  if (!Number.isInteger(value) || value < 1 || value > 365) {
+    fail('`cadenceDays` must be a whole number of days from 1 to 365, or omitted for a manual plan.')
+  }
+  return value
 }
 
 function normalisePages(raw, fail) {
