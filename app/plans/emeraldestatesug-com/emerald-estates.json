@@ -1,0 +1,38 @@
+{
+  "sourceKey": "emeraldestatesug-com",
+  "baseUrl": "https://emeraldestatesug.com/",
+  "batchRef": "web-mirror/emerald-estates",
+  "notes": "Emerald Estates publishes a structured contact block on its contact page: an address, one email, and a phone line that carries two numbers ('+256 774 689 100 / +256 752 538 615'). A listing carries one phone, so the plan takes the first and the second is left for the reviewer. The page's own heading is 'Contact Us', so the business name is the operator's known name rather than a scraped heading.",
+  "pages": [
+    {
+      "url": "https://emeraldestatesug.com/contact-us.html",
+      "mirror": "contact-us.html"
+    }
+  ],
+  "fields": {
+    "name": [
+      { "value": "Emerald Estates" }
+    ],
+    "category": [
+      { "value": "services/real-estate/property-sales-and-leasing" }
+    ],
+    "location": [
+      { "value": "Kampala" }
+    ],
+    "address": [
+      { "selector": "i.fa-map-marker + p" }
+    ],
+    "phone": [
+      { "value": "+256 774 689 100" }
+    ],
+    "email": [
+      { "selector": "i.fa-envelope + p" }
+    ],
+    "website": [
+      { "value": "https://emeraldestatesug.com/" }
+    ],
+    "description": [
+      { "meta": "description" }
+    ]
+  }
+}

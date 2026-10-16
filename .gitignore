@@ -52,6 +52,10 @@ coverage/
 # re-imported, and are ignored by the same rule only because they sit inside it.
 # If KIP_DATA_DIR is pointed somewhere else, that directory needs its own rule.
 app/data/
+# Harvest batches: the CSV and manifest a run writes beside the plans. They are
+# the evidence a run happened, but they are rebuilt from the plan and the mirror
+# page by page, so the working copies do not belong in version control.
+app/harvest-batches/
 # The demonstration database, at the launcher root rather than under `app`. It is
 # a generated artefact like the real one - rebuilt by `npm run seed:demo` or by the
 # `demo.js` launcher step - and it is invented content, so it is the last thing that

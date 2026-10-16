@@ -1,0 +1,44 @@
+{
+  "sourceKey": "fixture-harvest",
+  "baseUrl": "https://fixture.example",
+  "batchRef": "test-2026-10",
+  "pages": [
+    {
+      "url": "https://fixture.example/studio",
+      "mirror": "studio.html"
+    },
+    {
+      "url": "https://fixture.example/barbers",
+      "mirror": "barbers.html"
+    }
+  ],
+  "fields": {
+    "name": [
+      { "jsonld": "name" },
+      { "og": "og:title" },
+      { "selector": "h1" }
+    ],
+    "category": [
+      { "value": "services/beauty-and-personal-care/barbering" }
+    ],
+    "location": [
+      { "value": "Kampala/Nakawa Division" }
+    ],
+    "phone": [
+      { "selector": "a[href^='tel:']", "attr": "href", "stripPrefix": "tel:" },
+      { "selector": "a[href^='tel:']" }
+    ],
+    "email": [
+      { "selector": "a[href^='mailto:']", "attr": "href", "stripPrefix": "mailto:" }
+    ],
+    "address": [
+      { "selector": ".address" }
+    ],
+    "services": [
+      { "selector": ".services span", "all": true }
+    ],
+    "external_ref": [
+      { "page": "path" }
+    ]
+  }
+}

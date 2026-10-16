@@ -1,0 +1,35 @@
+{
+  "sourceKey": "kampalabiz-space",
+  "baseUrl": "https://mamasfood.biz/",
+  "batchRef": "web-mirror/mamas-food",
+  "notes": "Mama's Food runs outlets across the city; the home page (index.html) carries the real contact details, while contact.html is still the host's grocery template with placeholder numbers. The site shares its top-line number with the other businesses on the same host, and the importer treats an identical phone as the same business, so the plan keys Mama's Food on its own outlet line rather than the shared one.",
+  "pages": [
+    {
+      "url": "https://mamasfood.biz/",
+      "mirror": "mamasfood.biz/index.html"
+    }
+  ],
+  "fields": {
+    "name": [
+      { "selector": "title", "stripPrefix": "Home 01 - " }
+    ],
+    "category": [
+      { "value": "services/hospitality-and-food/food-services" }
+    ],
+    "location": [
+      { "value": "Kampala" }
+    ],
+    "address": [
+      { "selector": ".widget-contact-info .contact-info-item span" }
+    ],
+    "phone": [
+      { "value": "+256 703 559 336" }
+    ],
+    "email": [
+      { "selector": "a[href^='mailto:']" }
+    ],
+    "website": [
+      { "value": "https://mamasfood.biz/" }
+    ]
+  }
+}

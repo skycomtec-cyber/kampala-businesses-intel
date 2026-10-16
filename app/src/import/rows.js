@@ -49,6 +49,7 @@ export const IMPORT_COLUMNS = Object.freeze({
     'capability_level',
     'source',
     'external_ref',
+    'evidence',
   ],
 })
 
@@ -336,7 +337,18 @@ export function buildImportRow(app, row) {
     })
   }
 
-  return { input, contacts, services, category, location, externalRef: clean(row.external_ref) }
+  return {
+    input,
+    contacts,
+    services,
+    category,
+    location,
+    externalRef: clean(row.external_ref),
+    // Per-row, because a harvest reads each record off a different page and the
+    // page is the thing a reviewer checks. Falls back to the run-level evidence
+    // in the importer, so a plain spreadsheet is unaffected.
+    evidence: clean(row.evidence),
+  }
 }
 
 /**

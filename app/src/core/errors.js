@@ -54,6 +54,19 @@ export class ConflictError extends DomainError {
 }
 
 /**
+ * Raised when a harvest cannot produce a trustworthy batch: a page that was
+ * promised did not load, or a page loaded and yielded nothing that could be a
+ * record. It is its own type so a harvest failure can never be mistaken for an
+ * empty but successful run — the two produce very different directories, and
+ * only one of them is a lie.
+ */
+export class HarvestError extends DomainError {
+  constructor(message, details = null) {
+    super(message, { code: 'harvest_failed', details })
+  }
+}
+
+/**
  * Raised when a privacy rule blocks an action, for example serving an aggregate
  * that would expose fewer than k distinct actors. This is deliberately its own
  * type so it can never be swallowed by generic error handling and quietly

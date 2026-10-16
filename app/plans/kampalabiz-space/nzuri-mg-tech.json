@@ -1,0 +1,35 @@
+{
+  "sourceKey": "kampalabiz-space",
+  "baseUrl": "https://nzuri-mgtech.com/",
+  "batchRef": "web-mirror/nzuri-mg-tech",
+  "notes": "Nzuritec Business Management Solutions is an IT/software business on the kampalabiz.space tree. The plan reads the contact page, which carries the phone and email; the site gives its address only as 'Kampala, Uganda'.",
+  "pages": [
+    {
+      "url": "https://nzuri-mgtech.com/contact-us.html",
+      "mirror": "nzuri-mgtech.com/contact-us.html"
+    }
+  ],
+  "fields": {
+    "name": [
+      { "selector": "title", "stripPrefix": "Contact Us - " }
+    ],
+    "category": [
+      { "value": "services/it-and-digital/information-technology-services" }
+    ],
+    "location": [
+      { "value": "Kampala" }
+    ],
+    "address": [
+      { "value": "Kampala, Uganda" }
+    ],
+    "phone": [
+      { "selector": "a[href^='tel:']" }
+    ],
+    "email": [
+      { "selector": "a[href^='mailto:']", "attr": "href", "stripPrefix": "mailto:" }
+    ],
+    "website": [
+      { "value": "https://nzuri-mgtech.com/" }
+    ]
+  }
+}

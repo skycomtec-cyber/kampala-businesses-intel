@@ -518,6 +518,25 @@ It is idempotent, and that is the property worth insisting on: `recordProvenance
 skipped instead of duplicated. Running it twice writes nothing the second time, so it is safe to point
 at a database somebody has been working in.
 
+### Harvesting from a source
+
+A harvest turns a small JSON plan into batches that flow through the same accountable import path (harvest runs + provenance). Pages are fetched either from a local mirror (--from-dir) or live (polite UA, per-host delay, timeout, retries, robots.txt respected). Tests inject transports so they never touch the network.
+
+- Plans are data: no per-site code, nothing invented. Each plan names a registered sourceKey, lists pages, and for each column gives a list of rules tried in order (value, jsonld, og, meta, microdata, selector, page).
+- Layout is one folder per source under plans/ and one file per page inside it, so a source that hosts several businesses gets one plan per business (`plans/kampalabiz-space/eder-establishment.json`). Each file carries its own batchRef, because the batch file is named from the source and the batchRef; two plans that share both would overwrite each other's CSV and manifest.
+- The engine writes a CSV in the importer's column contract and a manifest.json recording per-page provenance (URL, fetched time, SHA-256 of page body, bytes, content-type, records produced) and the CSV's SHA-256 and bytes.
+- Every record gets external_ref (defaulting to page URL) and per-row evidence (defaulting to page URL); the importer prefers per-row evidence.
+- Harvesting is an accountable run via importBusinessesFromCsv with sourceKey, atchRef, ilename, contentSha256 (CSV hash). Records stay pending_review and contacts private.
+
+`ash
+npm run harvest -- plans/kampalabiz-space/eder-establishment.json --from-dir /path/to/mirror --dry-run
+npm run harvest -- plans/kampalabiz-space/eder-establishment.json --from-dir /path/to/mirror
+`
+
+404s abort loudly; pages extracting nothing or missing required fields (
+ame, category, location) abort without writing a batch. Replaying the same batch is idempotent (creates nothing, records a new run).
+
+
 ### Harvest runs and reconciliation
 
 A file is a batch, and a batch needs one record. Attributing an import to a registered source with
@@ -1506,7 +1525,7 @@ cd app
 npm test
 ```
 
-246 tests, no network access, each against its own temporary database. The API tests mount the real
+261 tests, no network access, each against its own temporary database. The API tests mount the real
 Fastify app with `inject()`, so routes are exercised through the real router, schema validation,
 session plugin and error mapping without binding a port. They cover the behaviours that are
 decisions rather than plumbing: the catalogue ingestion pipeline, provenance recording, the rule

@@ -1,0 +1,14 @@
+{
+  "sourceKey": "fixture-harvest-empty",
+  "baseUrl": "https://fixture.example",
+  "batchRef": "test-2026-10",
+  "pages": [
+    { "url": "https://fixture.example/empty", "mirror": "empty.html" }
+  ],
+  "fields": {
+    "name": [{ "selector": "h1" }],
+    "category": [{ "value": "services/beauty-and-personal-care/barbering" }],
+    "location": [{ "value": "Kampala/Nakawa Division" }],
+    "phone": [{ "selector": "a[href^='tel:']" }]
+  }
+}

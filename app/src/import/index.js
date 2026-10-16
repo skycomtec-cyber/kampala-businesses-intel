@@ -61,7 +61,10 @@ const OUTCOMES = Object.freeze(['created', 'skipped', 'updated', 'failed'])
  * @param {string} [options.filename] the file this text came from, for the run list
  * @param {string} [options.contentSha256] overrides the hash computed from the text
  * @param {object} [options.actor] the user performing the import, for provenance
- * @param {string} [options.evidence] what makes the file checkable, e.g. a url
+ * @param {string} [options.evidence] what makes the file checkable, e.g. a url.
+ *   A row's own `evidence` column wins over this, so a harvested batch can point
+ *   each record at the page it was read from while a spreadsheet still gets one
+ *   answer for the whole file.
  * @param {string} [options.notes] a note for the run record
  * @param {(progress: object) => void} [options.onRow] called per row, for a CLI
  * @returns {{ summary: object, rows: object[], source: object|null, run: object|null, reconciliation: object|null }}
@@ -147,7 +150,11 @@ export function importBusinessesFromCsv(app, text, options = {}) {
       const outcome = { line, name: record.name ?? '', outcome: null, detail: null, id: null }
 
       try {
-        const { input, contacts, services, externalRef } = buildImportRow(app, record)
+        const { input, contacts, services, externalRef, evidence: rowEvidence } = buildImportRow(app, record)
+        // A row may carry its own evidence — a harvest reads each record off a
+        // different page — and it wins over the file-level evidence, which is the
+        // one fallback a hand-written spreadsheet still gets.
+        const effectiveEvidence = rowEvidence ?? evidence
         const effectiveSourceId = source ? source.key : sourceId
         if (effectiveSourceId && !record.source) input.sourceId = effectiveSourceId
         // Set here as well as by provenance, so the listing carries its source in
@@ -172,7 +179,7 @@ export function importBusinessesFromCsv(app, text, options = {}) {
               sourceId: source.id,
               externalRef,
               batchRef,
-              evidence,
+              evidence: effectiveEvidence,
               notes,
               runId: run.id,
               importedBy: actor?.id ?? null,
@@ -198,7 +205,7 @@ export function importBusinessesFromCsv(app, text, options = {}) {
                   sourceId: source.id,
                   externalRef,
                   batchRef,
-                  evidence,
+                  evidence: effectiveEvidence,
                   notes,
                   runId: run?.id ?? null,
                   importedBy: actor?.id ?? null,
