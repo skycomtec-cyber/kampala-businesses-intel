@@ -265,6 +265,20 @@ export function loadConfig(overrides = {}) {
           readString('KIP_HARVEST_ARCHIVE_DIR', path.join(dataDir, 'harvest-archive')),
       ),
     },
+    ops: {
+      // Whether the server runs the nightly maintenance and backup itself.
+      // Off by default: a host runs them from systemd timers
+      // (`deploy/kampala-intel-*.timer`), and an install that has not asked for a
+      // self-scheduling server should not get one. A platform-as-a-service has no
+      // timer, so it turns this on (`KIP_OPS_SCHEDULE=true`, set in render.yaml)
+      // and the process enforces its own retention windows.
+      enabled: readBool('KIP_OPS_SCHEDULE', false),
+      // How often the jobs run. Twenty-four hours keeps the daily rollup daily;
+      // a retention window is measured in days, so a finer cadence buys nothing
+      // and a coarser one would let a window overrun. Read as a positive integer
+      // because zero would make every day look expired.
+      intervalHours: readPositiveInt('KIP_OPS_INTERVAL_HOURS', 24),
+    },
     seed: {
       // Reference data (administrative locations, taxonomy) is real-world
       // reference data, not synthetic content. Business content is never

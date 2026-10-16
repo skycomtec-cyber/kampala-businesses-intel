@@ -37,13 +37,7 @@
 import process from 'node:process'
 import { loadConfig } from '../src/config.js'
 import { openApp } from '../src/db/index.js'
-import { runGapEngine } from '../src/engine/gaps.js'
-
-const DAY_MS = 86400000
-
-function toDayString(date) {
-  return date.toISOString().slice(0, 10)
-}
+import { runMaintenance } from '../src/ops/maintenance.js'
 
 function parseArgs(argv) {
   const args = {
@@ -93,49 +87,35 @@ const config = loadConfig()
 const app = openApp({ config })
 
 try {
+  // The work itself lives in `src/ops/maintenance.js`, because the server runs the
+  // same three jobs on a timer when there is no systemd to run this script. This
+  // file is now only the command: argument parsing, reporting and exit code.
+  const summary = runMaintenance(app, {
+    days: args.days,
+    from: args.from,
+    to: args.to,
+    rollup: args.rollup,
+    gaps: args.gaps,
+    purge: args.purge,
+    windowDays: args.windowDays,
+  })
+
   if (args.rollup) {
-    const to = args.to ? new Date(`${args.to}T00:00:00.000Z`) : new Date()
-    const from = args.from
-      ? new Date(`${args.from}T00:00:00.000Z`)
-      : new Date(to.getTime() - (args.days - 1) * DAY_MS)
-    from.setUTCHours(0, 0, 0, 0)
-    to.setUTCHours(0, 0, 0, 0)
-
-    let signals = 0
-    let events = 0
-    let days = 0
-    for (
-      let cursor = new Date(from);
-      cursor <= to;
-      cursor = new Date(cursor.getTime() + DAY_MS)
-    ) {
-      const result = app.demand.rollupDay(toDayString(cursor))
-      signals += result.signals
-      events += result.events
-      days += 1
-    }
     log(
-      `Rolled up ${days} day(s): ${events} search event(s) into ${signals} signal row(s).`,
+      `Rolled up ${summary.days} day(s): ${summary.events} search event(s) into ${summary.signals} signal row(s).`,
     )
   }
 
-  if (args.gaps) {
-    // Runs last among the measuring jobs, and only if the rollup happened, so the
-    // engine never measures a day that is still missing from the rollup. A failed
-    // run is recorded as failed in intelligence_run and rethrown, which fails this
-    // script: a gap engine that cannot run should be loud, not quietly skipped.
-    const run = runGapEngine(app, {
-      windowDays: args.windowDays ?? undefined,
-    })
+  if (summary.gaps) {
     log(
-      `Gaps: ${run.gapsWritten} signal(s) measured over ${run.windowDays} day(s), ` +
-        `${run.gapsSuppressed} suppressed by the k-anonymity floor, ` +
-        `${run.opportunitiesWritten} opportunit(y/ies) written.`,
+      `Gaps: ${summary.gaps.gapsWritten} signal(s) measured over ${summary.gaps.windowDays} day(s), ` +
+        `${summary.gaps.gapsSuppressed} suppressed by the k-anonymity floor, ` +
+        `${summary.gaps.opportunitiesWritten} opportunit(y/ies) written.`,
     )
   }
 
-  if (args.purge) {
-    const purged = app.demand.purgeExpired()
+  if (summary.purged) {
+    const purged = summary.purged
     const total = purged.rawQueries + purged.searchEvents + purged.interactions
     log(
       `Retention: removed ${purged.rawQueries} raw query/queries, ` +

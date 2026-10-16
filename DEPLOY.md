@@ -270,13 +270,14 @@ To do it without the blueprint, create a **Web Service** by hand with Language
 
 ### The environment
 
-`render.yaml` sets four values; the image already sets the rest.
+`render.yaml` sets five values; the image already sets the rest.
 
 | Variable | Value | Why |
 | --- | --- | --- |
 | `PORT` | `4310` | The port Render forwards to. It must equal the `KIP_PORT` the image binds; Render's own default is `10000` and a mismatch means a service that builds, runs and answers nothing. |
 | `KIP_TRUST_PROXY` | `true` | Render's router sets `X-Forwarded-For`/`X-Forwarded-Proto`. This is the same reason step 3 sets it: without a real proxy in front the per-IP sign-in limiter can be spoofed, and the session cookie is only marked `Secure` when `request.protocol` is `https`. |
 | `KIP_SEED_CATALOGUE_DEMO` | `false` | A public install must not carry the demonstration record. |
+| `KIP_OPS_SCHEDULE` | `true` | There is no systemd timer here, so the server runs its own nightly maintenance and backup. See "Scheduled work" below. |
 | `KIP_SESSION_SECRET` | generated | Render generates and keeps it, so a redeploy does not sign every operator out. |
 
 `KIP_HOST=0.0.0.0` comes from the image. On the host the config sets
@@ -323,36 +324,47 @@ curl -fsS https://kbi.kampalabiz.space/api/v1/meta   # the config in force
 numbers prove the environment is being read at all. The Render dashboard shows
 the same request in the service's logs, plus the disk's state.
 
-### Scheduled work, which a PaaS does not do for you
+### Scheduled work, run from inside the server
 
 The server runbook runs two timers: `kampala-intel-maintenance` at 03:17, which
 rolls up demand, measures gaps and enforces the retention windows, and
-`kampala-intel-backup` at 03:47. Neither has an equivalent here, and this is the
-one part of the install that is genuinely different rather than merely easier.
+`kampala-intel-backup` at 03:47. A platform has no timer and a Render **Cron Job**
+cannot supply one - cron jobs cannot mount the service's disk, so they would have
+no way to reach `kampala.db`. So here the server does the work itself.
 
-Without maintenance the opportunity and insight views read a rollup nothing ever
-fills, and the retention windows never delete anything, so the privacy promises
-in `/api/v1/meta` become numbers with no job behind them. A Render **Cron Job**
-cannot be used to run it, because cron jobs cannot mount the service's disk and
-would have no way to reach `kampala.db`.
+`render.yaml` sets `KIP_OPS_SCHEDULE=true`, and `src/server.js` then starts a
+scheduler (`src/ops/scheduler.js`) that runs the same two jobs
+`scripts/maintenance.js` and `scripts/backup.js` run on the host. It is off unless
+that variable is set, precisely so the host path - which already has the timers -
+does not do the work twice.
 
-Until this is wired into the server, run it by hand from the Render shell, on
-whatever cadence the install needs (nightly is the intent):
+Three things about it are worth knowing:
 
-```bash
-npm run maintenance
-npm run backup
-```
+- **Due-ness is a timestamp on disk**, not process uptime. The last run is written
+  to `<KIP_DATA_DIR>/.ops-state.json`, so a redeploy resumes the cadence instead
+  of restarting it. A process that measured the interval from boot would roll up
+  never on a service that redeploys twice a day.
+- **The cadence is one day** (`KIP_OPS_INTERVAL_HOURS`, default 24), which is the
+  resolution the retention windows are measured in. A due run happens within ten
+  minutes of becoming due; the check ticks more often than the interval so a
+  restart does not miss its window.
+- **A failed run still advances the clock** and records the error in the state
+  file and the logs. The jobs are local database work, and a failure here is a
+  persistent condition - a full disk - that retrying every ten minutes would only
+  repeat. This is deliberately the opposite of the harvest scheduler, where a
+  failed run does *not* reset a source's cadence because the thing being retried
+  is a third party's page and soon-retried is cheap.
 
-The honest next step is an in-process schedule inside `src/server.js` (an
-interval that calls the same maintenance routine), so the deploy enforces its own
-retention without a timer. That is a small change and is **not in the code yet**;
-ask and it can be added, which would also let the server runbook drop its timer.
+Retention is therefore enforced on a platform with no timer, and `/api/v1/meta`
+reports windows that a job actually honours. The one thing that is still the
+operator's job is the **off-host copy**: Render keeps automatic daily snapshots of
+the disk, which is the copy the VPS note says to make, while the in-process backup
+writes to `/data/backups` on the same disk and carries the same caveat as the end
+of the runbook above.
 
-Backups need the same treatment: Render keeps automatic daily snapshots of the
-disk, which is the off-host copy the VPS note says you should make, while
-`npm run backup` writes to `/data/backups` on the same disk and carries the same
-caveat as the end of the runbook above.
+To confirm it ran, the service log shows `scheduled maintenance finished` and
+`scheduled backup finished` once a day; `<KIP_DATA_DIR>/.ops-state.json` records
+the last run in a shell.
 
 ### Updating
 

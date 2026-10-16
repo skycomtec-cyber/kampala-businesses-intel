@@ -24,6 +24,7 @@ import { openApp } from './db/index.js'
 import { seedReferenceData, seedCatalogue } from './seed/index.js'
 import { buildApi } from './api/index.js'
 import { liveLock } from './db/backup.js'
+import { createScheduler } from './ops/scheduler.js'
 
 const config = loadConfig()
 const app = openApp({ config })
@@ -33,6 +34,17 @@ seedCatalogue(app, { config })
 
 const server = await buildApi({ app, config })
 let shuttingDown = false
+
+/**
+ * The nightly maintenance and backup, run from inside the process when there is
+ * no systemd timer to run them - which is the platform-as-a-service case. Off
+ * unless `KIP_OPS_SCHEDULE` is set, so a host that already has
+ * `deploy/kampala-intel-*.timer` does not do the work twice.
+ *
+ * Started after the server is listening (below) and stopped on the way out, so a
+ * deploy never leaves it running against a closed database.
+ */
+const scheduler = createScheduler(app, config, { logger: server.log })
 
 /**
  * A pid file beside the database, so a restore can tell that the server is up.
@@ -113,6 +125,12 @@ async function shutdown(signal) {
   shuttingDown = true
   server.log.info({ signal }, 'shutting down')
 
+  // First, so no new scheduled run starts against a database that is about to
+  // close. A run already in flight is not interrupted; the backup uses SQLite's
+  // online API and the maintenance jobs are short, so it finishes before the
+  // close below reaches the database.
+  scheduler.stop()
+
   // Armed for the whole of the close, so a close that stalls still ends in an
   // exit that has released the lock. See SHUTDOWN_DEADLINE_MS.
   const deadline = setTimeout(() => {
@@ -155,6 +173,10 @@ try {
   process.stdout.write(`\nKampala Intelligence Platform listening at ${address}\n`)
   process.stdout.write(`API base: ${address}${config.api.prefix}\n`)
   process.stdout.write(`Database: ${config.database.file}\n\n`)
+
+  // After listening, so the timers never delay the port the platform health-checks.
+  // A no-op unless KIP_OPS_SCHEDULE is set.
+  scheduler.start()
 } catch (error) {
   process.stderr.write(`Failed to start: ${error.message}\n`)
   if (error.code === 'EADDRINUSE') {

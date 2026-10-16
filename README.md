@@ -249,6 +249,12 @@ distinguishable from a window that was measured and found nothing.
 The insights routes only read the rollup, so without this the opportunity view stays empty. `start.js`
 runs it before the port opens, because a launcher with no scheduler still needs the rollup to happen.
 
+On a host, `deploy/kampala-intel-maintenance.timer` and `deploy/kampala-intel-backup.timer` run this
+and the backup nightly (see [the deployment runbook](../DEPLOY.md)). On a platform with no systemd,
+there is nothing to point a timer at, so the server runs the same two jobs itself when
+`KIP_OPS_SCHEDULE=true` — the switch `render.yaml` sets. Both call the one implementation in
+`src/ops/maintenance.js`, so the host and the platform enforce the same retention with the same code.
+
 ### Measuring gaps on demand
 
 Maintenance is for the schedule. When you want to look at a window without waiting for one:
@@ -1489,6 +1495,10 @@ day rather than yesterday's. Both timers carry `Persistent=true`, so a machine t
 runs the job at the next boot — without that, one unattended reboot silently ends the schedule and
 nothing reports it.
 
+These timers are for a host you own. A platform-as-a-service has no systemd, so on one the server runs
+the same two jobs itself under `KIP_OPS_SCHEDULE=true` (this is what `render.yaml` sets); see
+[Scheduled work](#scheduled-work). Leave that unset here, or the work runs twice.
+
 A fourth pair, `kampala-intel-harvest.{service,timer}` (04:17 nightly), re-reads the harvest plans that
 declare a cadence. It is deliberately **not** in the list above and not enabled by default: scheduled
 harvesting makes requests to third-party websites, and that is a decision to make on purpose, not a
@@ -1551,6 +1561,7 @@ class of breakage entirely.
 │   │   ├── seed/             idempotent reference import
 │   │   ├── import/           csv reader, row resolution, the importer itself
 │   │   ├── harvest/          plans, extraction, batches, and the harvest scheduler
+│   │   ├── ops/              the nightly maintenance routine, and the server's scheduler
 │   │   ├── api/              plugins, routes, response envelope
 │   │   ├── media/            the photo store: bytes on disk, never in the database
 │   │   └── server.js         the process

@@ -30,6 +30,12 @@ services:
       # A public install must not ship the demonstration traders.
       - key: KIP_SEED_CATALOGUE_DEMO
         value: "false"
+      # Render has no systemd timer, so the server runs the nightly demand rollup,
+      # gap measurement, retention purge and backup itself. On a host these are
+      # `deploy/kampala-intel-*.timer` and this stays unset, or the work happens
+      # twice.
+      - key: KIP_OPS_SCHEDULE
+        value: "true"
       # Generated once by Render and kept, so sessions survive a redeploy.
       - key: KIP_SESSION_SECRET
         generateValue: true
