@@ -217,3 +217,59 @@ test('a dry run reports what it would do and writes nothing', async (t) => {
   assert.equal(fs.existsSync(outDir), false)
   assert.equal(app.catalogue.provenanceForSource(src.id).length, 0)
 })
+
+test('a live run can archive the bytes it read, and those bytes replay offline', async (t) => {
+  const { app } = freshApp(t)
+  registerFixtureSource(app)
+
+  const bodies = {
+    'https://fixture.example/studio': fs.readFileSync(path.join(FIXTURES, 'studio.html'), 'utf8'),
+    'https://fixture.example/barbers': fs.readFileSync(path.join(FIXTURES, 'barbers.html'), 'utf8'),
+  }
+  const liveTransport = {
+    async read(page) {
+      return {
+        status: 200,
+        body: bodies[page.url],
+        finalUrl: page.url,
+        fetchedAt: new Date().toISOString(),
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }
+    },
+  }
+
+  const plan = {
+    sourceKey: 'fixture-harvest',
+    batchRef: 'live-1',
+    // No `mirror` fields: this is a live plan. The archive supplies them.
+    pages: [{ url: 'https://fixture.example/studio' }, { url: 'https://fixture.example/barbers' }],
+    fields: FIXTURE_FIELDS,
+  }
+
+  const mirrorDir = tempOutDir()
+  const live = await harvest(app, plan, {
+    transport: liveTransport,
+    outputDir: tempOutDir(),
+    mirrorOut: mirrorDir,
+  })
+  assert.equal(live.import.summary.created, 2)
+  assert.equal(live.archiveRoot, path.resolve(mirrorDir))
+
+  // Every page the manifest describes was written, and hashes to what it claims.
+  const manifest = JSON.parse(fs.readFileSync(live.files.manifest, 'utf8'))
+  for (const page of manifest.pages) {
+    assert.ok(page.archived, 'each page records where it was archived')
+    const file = path.join(mirrorDir, page.archived)
+    assert.ok(fs.existsSync(file), `${page.archived} should exist in the archive`)
+    assert.equal(createHash('sha256').update(fs.readFileSync(file)).digest('hex'), page.sha256)
+  }
+
+  // Replaying the same plan from the archive yields the same batch, no network.
+  const replay = await harvest(app, plan, { fromDir: mirrorDir, outputDir: tempOutDir() })
+  assert.equal(replay.import.summary.created, 0)
+  assert.equal(replay.import.summary.skipped, 2)
+  assert.equal(
+    fs.readFileSync(replay.files.csv, 'utf8'),
+    fs.readFileSync(live.files.csv, 'utf8'),
+  )
+})

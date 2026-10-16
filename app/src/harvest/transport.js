@@ -6,11 +6,12 @@ import { HarvestError } from '../core/errors.js'
 /**
  * A transport that reads saved pages from a local directory.
  *
- * Offline mode is not a test-only convenience: the two registered sources have
+ * Offline mode is not a test-only convenience: the registered sources have
  * local website mirrors, so a harvest against those mirrors is how an operator
  * actually re-populates the catalogue without pulling down the live site. The
- * mirror path is taken from the page's `mirror` field, or falls back to the
- * last segment of the page URL.
+ * mirror path is taken from the page's `mirror` field, or derived from the page
+ * URL in the same host/path layout `writeMirror` produces, so a tree archived
+ * by a live run replays as-is.
  */
 export function localDirTransport(root) {
   if (typeof root !== 'string' || root.trim() === '') {
@@ -19,16 +20,10 @@ export function localDirTransport(root) {
   const rootDir = path.resolve(root)
   return {
     async read(page) {
-      let relative = page.mirror
-      if (!relative || relative.trim() === '') {
-        try {
-          const url = new URL(page.url)
-          const parts = url.pathname.split('/').filter(Boolean)
-          relative = parts.length === 0 ? 'index.html' : parts[parts.length - 1]
-        } catch {
-          relative = path.basename(String(page.url))
-        }
-      }
+      const relative =
+        page.mirror && page.mirror.trim() !== ''
+          ? page.mirror
+          : mirrorPathFor(page.url)
       const filePath = path.resolve(rootDir, relative)
       if (!filePath.startsWith(rootDir)) {
         throw new HarvestError(
@@ -54,6 +49,49 @@ export function localDirTransport(root) {
       }
     },
   }
+}
+
+/**
+ * The mirror layout for a page URL: a directory per host, then the URL's path.
+ * Directory URLs and the site root become index.html. This is the layout
+ * `localDirTransport` reads, so a run archived with `--mirror-out` can be
+ * replayed with `--from-dir` without touching the plan. A port in the host
+ * (e.g. "localhost:8080") is folded into the directory name because a colon is
+ * not a legal path character on Windows.
+ */
+export function mirrorPathFor(pageUrl) {
+  let url
+  try {
+    url = new URL(pageUrl)
+  } catch {
+    return path.basename(String(pageUrl))
+  }
+  const host = url.host.replaceAll(':', '_')
+  const segments = url.pathname.split('/').filter(Boolean)
+  if (segments.length === 0) return path.posix.join(host, 'index.html')
+  if (url.pathname.endsWith('/')) return path.posix.join(host, ...segments, 'index.html')
+  return path.posix.join(host, ...segments)
+}
+
+/**
+ * Writes a page body into a mirror tree, creating directories as needed, and
+ * returns the path it wrote (relative to the root). The bytes are written
+ * exactly as read, so the archived file hashes to the same SHA-256 the manifest
+ * records for the live response.
+ */
+export function writeMirror(root, pageUrl, body) {
+  const rootDir = path.resolve(root)
+  const relative = mirrorPathFor(pageUrl)
+  const filePath = path.resolve(rootDir, relative)
+  if (!filePath.startsWith(rootDir + path.sep)) {
+    throw new HarvestError(
+      `The mirror path for ${pageUrl} resolves outside the root directory.`,
+      { url: pageUrl, mirror: relative },
+    )
+  }
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(filePath, body, 'utf8')
+  return relative
 }
 
 /**

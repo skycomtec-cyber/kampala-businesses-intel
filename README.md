@@ -525,16 +525,17 @@ A harvest turns a small JSON plan into batches that flow through the same accoun
 - Plans are data: no per-site code, nothing invented. Each plan names a registered sourceKey, lists pages, and for each column gives a list of rules tried in order (value, jsonld, og, meta, microdata, selector, page).
 - Layout is one folder per source under plans/ and one file per page inside it, so a source that hosts several businesses gets one plan per business (`plans/kampalabiz-space/eder-establishment.json`). Each file carries its own batchRef, because the batch file is named from the source and the batchRef; two plans that share both would overwrite each other's CSV and manifest.
 - The engine writes a CSV in the importer's column contract and a manifest.json recording per-page provenance (URL, fetched time, SHA-256 of page body, bytes, content-type, records produced) and the CSV's SHA-256 and bytes.
+- A live run can keep what it read: `--mirror-out <dir>` writes each fetched page into a mirror tree laid out as `<host>/<path>` (a directory URL becomes `index.html`), and the manifest records each page's `archived` path and the tree's `archiveRoot`. That tree is exactly what `--from-dir` reads, so the same batch can be replayed offline, byte-for-byte identical, after the live page has moved on.
 - Every record gets external_ref (defaulting to page URL) and per-row evidence (defaulting to page URL); the importer prefers per-row evidence.
-- Harvesting is an accountable run via importBusinessesFromCsv with sourceKey, atchRef, ilename, contentSha256 (CSV hash). Records stay pending_review and contacts private.
+- Harvesting is an accountable run via importBusinessesFromCsv with sourceKey, batchRef, filename, contentSha256 (CSV hash). Records stay pending_review and contacts private.
 
-`ash
+`bash
 npm run harvest -- plans/kampalabiz-space/eder-establishment.json --from-dir /path/to/mirror --dry-run
 npm run harvest -- plans/kampalabiz-space/eder-establishment.json --from-dir /path/to/mirror
+npm run harvest -- plans/kampalabiz-space/eder-establishment.json --mirror-out /path/to/archive
 `
 
-404s abort loudly; pages extracting nothing or missing required fields (
-ame, category, location) abort without writing a batch. Replaying the same batch is idempotent (creates nothing, records a new run).
+404s abort loudly; pages extracting nothing or missing required fields (name, category, location) abort without writing a batch. Replaying the same batch is idempotent (creates nothing, records a new run).
 
 
 ### Harvest runs and reconciliation

@@ -4,6 +4,7 @@
  *
  *   npm run harvest -- plans/kampalabiz-space.json
  *   npm run harvest -- plans/kampalabiz-space.json --from-dir /path/to/mirror
+ *   npm run harvest -- plans/kampalabiz-space.json --mirror-out /path/to/archive
  *   npm run harvest -- plans/kampalabiz-space.json --dry-run
  */
 
@@ -18,8 +19,11 @@ import { harvest } from '../src/harvest/index.js'
 const USAGE = `Usage: npm run harvest -- <plan.json> [options]
 
 Options:
+Options:
   --dry-run            Validate and report without writing anything.
   --from-dir <dir>     Read saved pages from a local mirror directory.
+  --mirror-out <dir>   Save the pages this live run read into a mirror tree
+                       (replayable later with --from-dir).
   --batch <ref>        A name for this batch (default YYYY-MM).
   --out-dir <dir>      Where to write the batch CSV + manifest.
   --quiet              Only print the summary.
@@ -31,6 +35,7 @@ function parseArgs(argv) {
     plan: null,
     dryRun: false,
     fromDir: null,
+    mirrorOut: null,
     batchRef: null,
     outDir: './harvest-batches',
     quiet: false,
@@ -42,6 +47,7 @@ function parseArgs(argv) {
     else if (arg === '--quiet') options.quiet = true
     else if (arg === '--help' || arg === '-h') options.help = true
     else if (arg === '--from-dir') options.fromDir = argv[++i] ?? null
+    else if (arg === '--mirror-out') options.mirrorOut = argv[++i] ?? null
     else if (arg === '--batch') options.batchRef = argv[++i] ?? null
     else if (arg === '--out-dir') options.outDir = argv[++i] ?? options.outDir
     else if (arg.startsWith('--')) {
@@ -82,6 +88,7 @@ async function main() {
     const result = await harvest(app, planRaw, {
       dryRun: options.dryRun,
       fromDir: options.fromDir,
+      mirrorOut: options.mirrorOut,
       batchRef: options.batchRef,
       outputDir: options.outDir,
     })
@@ -101,6 +108,7 @@ async function main() {
     log('')
     log(`Batch written: ${result.files.csv}`)
     log(`Manifest:      ${result.files.manifest}`)
+    if (result.archiveRoot) log(`Pages archived: ${result.archiveRoot}`)
     log('')
 
     const summary = result.import.summary

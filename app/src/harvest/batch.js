@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto'
  * which records it produced, so an operator can reproduce an accountable run.
  */
 
-export function writeBatch({ plan, rows, pages = [], outDir, baseName, batchRef = null }) {
+export function writeBatch({ plan, rows, pages = [], outDir, baseName, batchRef = null, archiveRoot = null }) {
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
   const csvPath = path.join(outDir, `${baseName}.csv`)
   const manifestPath = path.join(outDir, `${baseName}.manifest.json`)
@@ -24,6 +24,7 @@ export function writeBatch({ plan, rows, pages = [], outDir, baseName, batchRef 
     planFile: plan.filename ?? null,
     baseUrl: plan.baseUrl ?? null,
     batchRef: batchRef ?? plan.batchRef ?? null,
+    archiveRoot,
     generatedAt: now,
     csvPath,
     csvSha256: sha256(csvBytes),

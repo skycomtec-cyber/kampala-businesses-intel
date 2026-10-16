@@ -1,9 +1,10 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import { createHash } from 'node:crypto'
 
 import { ValidationError, HarvestError } from '../core/errors.js'
 import { definePlan } from './plan.js'
-import { localDirTransport, httpTransport } from './transport.js'
+import { localDirTransport, httpTransport, writeMirror } from './transport.js'
 import { extractRecord } from './extract.js'
 import { writeBatch } from './batch.js'
 import { importBusinessesFromCsv } from '../import/index.js'
@@ -20,6 +21,7 @@ async function harvestWith(app, planOrRaw, options = {}) {
   const {
     transport = httpTransport({ delayMs: 500, retries: 1 }),
     outputDir = './harvest-batches',
+    mirrorOut = null,
     dryRun = false,
     fromDir = null,
     batchRef = null,
@@ -30,11 +32,17 @@ async function harvestWith(app, planOrRaw, options = {}) {
   // stay offline even if the plan lists live URLs.
   const t = fromDir ? localDirTransport(fromDir) : transport
 
+  // Archiving only makes sense for a live read: a `--from-dir` run is already
+  // reading a mirror. Held off until the whole batch is known-good, so a run
+  // that refuses to emit a batch does not leave a half-written mirror behind.
+  const archiveRoot = !fromDir && mirrorOut ? path.resolve(mirrorOut) : null
+
   const plan = definePlan(planOrRaw)
   const effectiveBatchRef = batchRef ?? plan.batchRef ?? new Date().toISOString().slice(0, 7) // YYYY-MM
 
   const rows = []
   const pages = []
+  const archives = []
 
   // Required columns for a usable record
   const required = ['name', 'category', 'location']
@@ -72,6 +80,7 @@ async function harvestWith(app, planOrRaw, options = {}) {
     pages.push({
       url: pageRead.finalUrl ?? page.url,
       mirror: page.mirror ?? null,
+      archived: null,
       ref: page.ref ?? null,
       fetchedAt: pageRead.fetchedAt ?? null,
       sha256: createHash('sha256').update(bytes).digest('hex'),
@@ -79,6 +88,7 @@ async function harvestWith(app, planOrRaw, options = {}) {
       contentType: pageRead.headers?.['content-type'] ?? 'text/html',
       records: [externalRef],
     })
+    if (archiveRoot) archives.push({ url: pageRead.finalUrl ?? page.url, body: pageRead.body })
   }
 
   if (rows.length === 0) {
@@ -92,6 +102,7 @@ async function harvestWith(app, planOrRaw, options = {}) {
       manifest: null,
       import: null,
       files: null,
+      archiveRoot: null,
       dryRun: true,
     }
   }
@@ -100,8 +111,16 @@ async function harvestWith(app, planOrRaw, options = {}) {
     throw new ValidationError('The harvest engine needs a database handle. Pass `app` or run via the CLI.')
   }
 
+  // Save exactly what this run read, so the batch can be replayed offline even
+  // after the live page changes. Each archived file is recorded on its page.
+  if (archiveRoot) {
+    for (let i = 0; i < pages.length; i += 1) {
+      pages[i].archived = writeMirror(archiveRoot, archives[i].url, archives[i].body)
+    }
+  }
+
   const baseName = `${plan.sourceKey}-${effectiveBatchRef.replace(/[^a-z0-9_-]+/gi, '-')}`
-  const batch = writeBatch({ plan, rows, pages, outDir: outputDir, baseName, batchRef: effectiveBatchRef })
+  const batch = writeBatch({ plan, rows, pages, outDir: outputDir, baseName, batchRef: effectiveBatchRef, archiveRoot })
 
   const csvText = fs.readFileSync(batch.csvPath, 'utf8')
   const result = importBusinessesFromCsv(app, csvText, {
@@ -118,6 +137,7 @@ async function harvestWith(app, planOrRaw, options = {}) {
     manifest: batch.manifest,
     import: result,
     files: { csv: batch.csvPath, manifest: batch.manifestPath },
+    archiveRoot,
     dryRun: false,
   }
 }
