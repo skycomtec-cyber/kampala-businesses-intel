@@ -269,15 +269,24 @@ container and the `chown` is a no-op - the script stays the same either way, and
 ### Deploy
 
 1. Push this repository to GitHub (Render deploys from a git remote).
-2. In the Render dashboard: **New +** -> **Blueprint**, and select the
-   repository. Render reads `render.yaml` and creates:
-   - a **Docker** web service named `kampala-intel`, built from
-     `app/Dockerfile` with `app/` as the build context,
-   - the environment below, including a generated session secret and a generated
-     first-operator password.
-3. Wait for the first deploy to go green. The health check is
-   `/api/v1/meta`, which is only answered once migrations and the reference
-   seed have finished, so a green deploy means a working database.
+2. Sign in at `https://dashboard.render.com` (GitHub login is fine). If GitHub
+   is not connected yet: avatar -> **Account Settings** -> **GitHub** ->
+   **Connect**, authorize, and grant access to `skycomtec-cyber/kampala-businesses-intel`.
+3. **New +** -> **Blueprint** -> **Connect a repository** -> pick
+   `skycomtec-cyber/kampala-businesses-intel`. (If it is not listed, **Configure
+   account** -> add the repository.) Render reads `render.yaml` and previews the
+   service: **kampala-intel**, region **Frankfurt**, plan **Free**, built from
+   `app/Dockerfile` with `app/` as the build context.
+4. Before applying, edit the two variables that need a decision (the rest are
+   generated): set **`KIP_ADMIN_EMAIL`** to your real address in place of the
+   `you@example.com` placeholder, and leave **`KIP_ADMIN_PASSWORD`** and
+   **`KIP_SESSION_SECRET`** on **Generate**.
+5. **Apply** / **Deploy Blueprint**. The first Docker build takes a few minutes;
+   the status goes **Building -> Deploying -> Live**. If it fails, open the
+   service's **Logs** tab.
+6. **Live** means the health check `/api/v1/meta` answered, which is only answered
+   once migrations and the reference seed have finished — so a green deploy means
+   a working database.
 
 To do it without the blueprint, create a **Web Service** by hand with Language
 `Docker`, Dockerfile Path `app/Dockerfile`, **Docker Build Context Directory**
@@ -306,19 +315,29 @@ unreachable.
 
 ### The domain
 
-Add the hostname under the service's **Settings -> Custom Domains**. Render shows
-a target of the form `<service>.onrender.com`; at your DNS provider replace the
-existing record for the label with a `CNAME` to it, and delete any `AAAA` for the
-same label:
+In the Render dashboard, open the service -> **Settings -> Custom Domains -> Add
+Custom Domain**, and enter `kbi.kampalabiz.space`. Render replies with a target
+of the form `<service>.onrender.com`; copy the exact value it shows, because the
+service name is its own.
 
-```
-kbi   CNAME   kampala-intel.onrender.com
-```
+At the DNS provider (`kampalabiz.space` is hosted by `dns1-4.supremedns.com`;
+the DNS may also be edited wherever that zone lives) make these changes. The
+work is all on the `kbi` label — leave the apex, `www` and the mail hosts alone:
 
-The apex (`kampalabiz.space`) cannot be a `CNAME`, so the app lives on the `kbi`
-label. Leave the mail records (`MX`, `smtp`, `imap`) untouched. Once the record
-resolves, click **Verify** and Render issues the certificate on its own — there
-is no `certbot` step.
+| Host | Type | Value | TTL | Action |
+| --- | --- | --- | --- | --- |
+| `kbi` | `A` | `198.23.48.242` | (current) | **Delete** — the old, dead host |
+| `kbi` | `AAAA` | *(if one exists)* | — | **Delete** — a `CNAME` cannot share the name |
+| `kbi` | `CNAME` | `kampala-intel.onrender.com` | 3600 | **Add** — use the exact target Render shows |
+| `kbi` | `MX` | `mx1.supremebox.com`, `mx2.supremebox.com` | (current) | **Decide** — delete unless you receive mail at `…@kbi.kampalabiz.space` |
+
+A `CNAME` cannot coexist with any other record on the same name, so the `A` and
+any `AAAA` must go with it. The apex (`kampalabiz.space`) cannot be a `CNAME`,
+which is why the app lives on the `kbi` label; the apex continues to serve
+whatever it served before. Once the record resolves, click **Verify** (and verify
+the certificate) and Render issues TLS on its own — there is no `certbot` step.
+Propagation is usually minutes; if **Verify** stalls, confirm the TTL and that no
+`AAAA` is left on `kbi`.
 
 ### The first operator account
 
