@@ -67,6 +67,7 @@ COPY --from=deps /srv/kampala/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
 COPY scripts ./scripts
+COPY plans ./plans
 COPY web ./web
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 

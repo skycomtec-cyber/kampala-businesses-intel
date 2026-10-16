@@ -25,6 +25,7 @@ import { seedReferenceData, seedCatalogue } from './seed/index.js'
 import { buildApi } from './api/index.js'
 import { liveLock } from './db/backup.js'
 import { createScheduler } from './ops/scheduler.js'
+import { createHarvestScheduler } from './harvest/inprocess.js'
 
 const config = loadConfig()
 const app = openApp({ config })
@@ -45,6 +46,13 @@ let shuttingDown = false
  * deploy never leaves it running against a closed database.
  */
 const scheduler = createScheduler(app, config, { logger: server.log })
+
+/**
+ * The scheduled harvest, run from inside the process when there is no external
+ * timer driving it. Off unless `KIP_HARVEST_SCHEDULE` is set, and even when on
+ * only plans that declare a cadence and are due are harvested.
+ */
+const harvestScheduler = createHarvestScheduler(app, config, { logger: server.log })
 
 /**
  * A pid file beside the database, so a restore can tell that the server is up.
@@ -130,6 +138,7 @@ async function shutdown(signal) {
   // online API and the maintenance jobs are short, so it finishes before the
   // close below reaches the database.
   scheduler.stop()
+  harvestScheduler.stop()
 
   // Armed for the whole of the close, so a close that stalls still ends in an
   // exit that has released the lock. See SHUTDOWN_DEADLINE_MS.
@@ -177,6 +186,7 @@ try {
   // After listening, so the timers never delay the port the platform health-checks.
   // A no-op unless KIP_OPS_SCHEDULE is set.
   scheduler.start()
+  harvestScheduler.start()
 } catch (error) {
   process.stderr.write(`Failed to start: ${error.message}\n`)
   if (error.code === 'EADDRINUSE') {

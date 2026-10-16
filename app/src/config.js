@@ -264,6 +264,10 @@ export function loadConfig(overrides = {}) {
         overrides.harvest?.archiveDir ??
           readString('KIP_HARVEST_ARCHIVE_DIR', path.join(dataDir, 'harvest-archive')),
       ),
+      // Whether the server schedules its own harvests. Off by default; on a host
+      // a timer runs the CLI, on a PaaS without a timer the server runs them
+      // itself (Render sets this true).
+      schedule: readBool('KIP_HARVEST_SCHEDULE', false),
     },
     ops: {
       // Whether the server runs the nightly maintenance and backup itself.

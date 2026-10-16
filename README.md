@@ -1502,7 +1502,8 @@ the same two jobs itself under `KIP_OPS_SCHEDULE=true` (this is what `render.yam
 A fourth pair, `kampala-intel-harvest.{service,timer}` (04:17 nightly), re-reads the harvest plans that
 declare a cadence. It is deliberately **not** in the list above and not enabled by default: scheduled
 harvesting makes requests to third-party websites, and that is a decision to make on purpose, not a
-default to inherit. See [Keeping a source fresh](#keeping-a-source-fresh) for enabling it.
+default to inherit. On a platform with no timer (Render), the server can run it when
+`KIP_HARVEST_SCHEDULE=true`. See [Keeping a source fresh](#keeping-a-source-fresh) for the details.
 
 The service runs as a dedicated unprivileged user with `ProtectSystem=strict` and a single
 `ReadWritePaths` entry for the data directory. The code directory is read-only to it, so a
@@ -1568,7 +1569,8 @@ class of breakage entirely.
 │   ├── scripts/              migrate, seed, bootstrap, maintenance, analyse, harvest,
 │   │                         harvest:schedule, create-admin, set-password, import, backup,
 │   │                         restore, and the one-off repairs — backfill-provenance, add-sources
-│   ├── test/                 254 tests, no network, temporary folders only
+  │   ├── test/                 285 tests, no network, temporary folders only
+  │   ├── plans/                shipped harvest plans (cadenceDays on scheduled plans)
 │   └── web/                  the website pages, and the stylesheet they share
 │       ├── index.html            the front door: what this is and how a listing gets in
 │       ├── directory.html        search, filters and the results list

@@ -2,6 +2,7 @@
   "sourceKey": "kampalabiz-space",
   "baseUrl": "https://mamasfood.biz/",
   "batchRef": "web-mirror/mamas-food",
+  "cadenceDays": 30,
   "notes": "Mama's Food runs outlets across the city; the home page (index.html) carries the real contact details, while contact.html is still the host's grocery template with placeholder numbers. The site shares its top-line number with the other businesses on the same host, and the importer treats an identical phone as the same business, so the plan keys Mama's Food on its own outlet line rather than the shared one.",
   "pages": [
     {

@@ -2,6 +2,7 @@
   "sourceKey": "kampalabiz-space",
   "baseUrl": "https://eder-est.com/",
   "batchRef": "web-mirror/eder-establishment",
+  "cadenceDays": 30,
   "notes": "Eder Establishment Ltd. is one of the businesses hosted on the kampalabiz.space tree. Its site publishes only a phone and an email, and names its address as Kampala; the category is the site's own 'estate' business, so it maps to real-estate/property-sales-and-leasing.",
   "pages": [
     {

@@ -278,6 +278,7 @@ To do it without the blueprint, create a **Web Service** by hand with Language
 | `KIP_TRUST_PROXY` | `true` | Render's router sets `X-Forwarded-For`/`X-Forwarded-Proto`. This is the same reason step 3 sets it: without a real proxy in front the per-IP sign-in limiter can be spoofed, and the session cookie is only marked `Secure` when `request.protocol` is `https`. |
 | `KIP_SEED_CATALOGUE_DEMO` | `false` | A public install must not carry the demonstration record. |
 | `KIP_OPS_SCHEDULE` | `true` | There is no systemd timer here, so the server runs its own nightly maintenance and backup. See "Scheduled work" below. |
+| `KIP_HARVEST_SCHEDULE` | `true` | No timer for harvest; the server re-harvests plans that declare a cadence. Only set after reviewing plans and sources. |
 | `KIP_SESSION_SECRET` | generated | Render generates and keeps it, so a redeploy does not sign every operator out. |
 
 `KIP_HOST=0.0.0.0` comes from the image. On the host the config sets
@@ -362,9 +363,17 @@ the disk, which is the copy the VPS note says to make, while the in-process back
 writes to `/data/backups` on the same disk and carries the same caveat as the end
 of the runbook above.
 
+`KIP_HARVEST_SCHEDULE=true` also runs the harvest scheduler in-process; it scans
+plans for due work, archives pages under `<KIP_DATA_DIR>/harvest-archive`, and
+writes batch CSVs/manifest under `<KIP_DATA_DIR>/harvest-batches`. Only plans
+with `cadenceDays` and registered sources are harvested. Logs show
+`self-scheduled harvesting is on` and `scheduled harvest check failed` when
+appropriate.
+
 To confirm it ran, the service log shows `scheduled maintenance finished` and
 `scheduled backup finished` once a day; `<KIP_DATA_DIR>/.ops-state.json` records
-the last run in a shell.
+the last run in a shell. The harvest scheduler has no single state file (due-ness
+is per plan from the catalogue).
 
 ### Updating
 

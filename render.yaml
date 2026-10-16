@@ -36,6 +36,10 @@ services:
       # twice.
       - key: KIP_OPS_SCHEDULE
         value: "true"
+      # Render has no timer for harvest; the server re-harvests plans that declare a
+      # cadence on its own schedule.
+      - key: KIP_HARVEST_SCHEDULE
+        value: "true"
       # Generated once by Render and kept, so sessions survive a redeploy.
       - key: KIP_SESSION_SECRET
         generateValue: true

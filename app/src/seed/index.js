@@ -9,6 +9,7 @@ import {
   SKILLS_VERSION,
   verticalForCategoryPath,
 } from './reference-data.js'
+import { seedSources } from './sources.js'
 
 /**
  * Applying the reference dataset.
@@ -189,6 +190,7 @@ export function seedReferenceData(app, { config = { seed: { reference: true } } 
   const counters = { locations: 0, categories: 0, skills: 0, links: 0, skipped: false }
   seedLocations(app, counters)
   seedSkills(app, seedCategories(app, counters), counters)
+  seedSources(app)
   recordProvenance(app)
   return counters
 }
