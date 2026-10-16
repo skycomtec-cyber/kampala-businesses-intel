@@ -31,6 +31,9 @@
     "website": [
       { "value": "https://emeraldestatesug.com/" }
     ],
+    "external_ref": [
+      { "value": "https://emeraldestatesug.com/" }
+    ],
     "description": [
       { "meta": "description" }
     ]

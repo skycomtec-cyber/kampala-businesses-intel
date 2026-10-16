@@ -30,6 +30,9 @@
     ],
     "website": [
       { "value": "https://nzuri-mgtech.com/" }
+    ],
+    "external_ref": [
+      { "value": "https://nzuri-mgtech.com/" }
     ]
   }
 }
